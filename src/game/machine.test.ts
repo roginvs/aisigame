@@ -2,11 +2,16 @@ import { createActor } from 'xstate'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { gameConfig } from '../config.ts'
 import { announceInstructions } from './controller.ts'
+import { earlyBuzzerRoll } from './earlyBuzzer.ts'
 import { closeGuessCoin, falseStartCoin, gameMachine, phoneticRetryReason, statePath } from './machine.ts'
 import { nextInCell } from './pack.ts'
 import { playersFromNames } from './players.ts'
 import { demoPack } from './questions.ts'
 import type { QuestionPack } from './types.ts'
+
+function earlyMs(actor: ReturnType<typeof createActor<typeof gameMachine>>): number {
+  return actor.getSnapshot().context.earlyLeftMs ?? gameConfig.earlyBuzzerMs
+}
 
 function reachReading() {
   const actor = createActor(gameMachine)
@@ -37,12 +42,17 @@ function playerScore(actor: ReturnType<typeof reachBuzzing>, playerId: 1 | 2 | 3
 
 const originalFalseStartFlip = falseStartCoin.flip
 const originalCloseGuessFlip = closeGuessCoin.flip
+const originalEarlyUnit = earlyBuzzerRoll.unit
 
 describe('game machine', () => {
-  beforeEach(() => vi.useFakeTimers())
+  beforeEach(() => {
+    vi.useFakeTimers()
+    earlyBuzzerRoll.unit = () => 0.5
+  })
   afterEach(() => {
     falseStartCoin.flip = originalFalseStartFlip
     closeGuessCoin.flip = originalCloseGuessFlip
+    earlyBuzzerRoll.unit = originalEarlyUnit
     vi.useRealTimers()
   })
 
@@ -728,7 +738,7 @@ describe('game machine', () => {
     expect(actor.getSnapshot().context.falseStarts).toEqual({})
     vi.advanceTimersByTime(gameConfig.cellFlashMs)
     expect(statePath(actor.getSnapshot().value)).toBe('reading.sealed')
-    vi.advanceTimersByTime(gameConfig.earlyBuzzerMs)
+    vi.advanceTimersByTime(earlyMs(actor))
     expect(actor.getSnapshot().context.statusLine).toBe('Ведущая читает вопрос')
     expect(actor.getSnapshot().context.phaseStartedAt).toBeNull()
     expect(actor.getSnapshot().context.phaseDurationMs).toBeNull()
@@ -880,12 +890,12 @@ describe('game machine', () => {
     expect(actor.getSnapshot().context.statusLine).toBe('Выберите тему финала')
   })
 
-  it('пока не прошло earlyBuzzerMs, кнопка ещё фальстарт, потом принимает игрока', () => {
+  it('пока не прошло раннее окно, кнопка ещё фальстарт, потом принимает игрока', () => {
     const actor = reachReading()
     expect(statePath(actor.getSnapshot().value)).toBe('reading.sealed')
     actor.send({ type: 'BUZZER_PRESSED', playerId: 1 })
     expect(statePath(actor.getSnapshot().value)).toBe('reading.sealed')
-    vi.advanceTimersByTime(gameConfig.earlyBuzzerMs - 1)
+    vi.advanceTimersByTime(earlyMs(actor) - 1)
     actor.send({ type: 'BUZZER_PRESSED', playerId: 1 })
     expect(statePath(actor.getSnapshot().value)).toBe('reading.sealed')
     expect(actor.getSnapshot().context.phaseStartedAt).toBeNull()
@@ -901,7 +911,7 @@ describe('game machine', () => {
 
   it('длинное чтение закрывает ячейку, когда десять секунд после ранней кнопки вышли', () => {
     const actor = reachReading()
-    vi.advanceTimersByTime(gameConfig.earlyBuzzerMs)
+    vi.advanceTimersByTime(earlyMs(actor))
     expect(statePath(actor.getSnapshot().value)).toBe('reading.armed')
     vi.advanceTimersByTime(gameConfig.buzzerMs - 1)
     expect(statePath(actor.getSnapshot().value)).toBe('reading.armed')
@@ -918,7 +928,7 @@ describe('game machine', () => {
     }
     const actor = reachReading()
     actor.send({ type: 'BUZZER_PRESSED', playerId: 1 })
-    vi.advanceTimersByTime(gameConfig.earlyBuzzerMs)
+    vi.advanceTimersByTime(earlyMs(actor))
     const startedAt = actor.getSnapshot().context.phaseStartedAt
     expect(startedAt).toEqual(expect.any(Number))
     vi.advanceTimersByTime(3_000)
@@ -949,16 +959,16 @@ describe('game machine', () => {
     const actor = reachReading()
     vi.advanceTimersByTime(1_000)
     actor.send({ type: 'PAUSE', path: 'reading.sealed' })
-    vi.advanceTimersByTime(gameConfig.earlyBuzzerMs)
+    vi.advanceTimersByTime(earlyMs(actor))
     expect(statePath(actor.getSnapshot().value)).toBe('paused')
     actor.send({ type: 'RESUME' })
     expect(statePath(actor.getSnapshot().value)).toBe('reading.sealed')
     vi.advanceTimersByTime(1_000)
     actor.send({ type: 'PAUSE', path: statePath(actor.getSnapshot().value) })
-    vi.advanceTimersByTime(gameConfig.earlyBuzzerMs)
+    vi.advanceTimersByTime(earlyMs(actor))
     actor.send({ type: 'RESUME' })
     expect(statePath(actor.getSnapshot().value)).toBe('reading.sealed')
-    const left = gameConfig.earlyBuzzerMs - 2_000
+    const left = earlyMs(actor)
     vi.advanceTimersByTime(left - 1)
     actor.send({ type: 'BUZZER_PRESSED', playerId: 1 })
     expect(statePath(actor.getSnapshot().value)).toBe('reading.sealed')
@@ -979,7 +989,7 @@ describe('game machine', () => {
     const actor = reachReading()
     vi.advanceTimersByTime(1_000)
     actor.send({ type: 'STOP' })
-    vi.advanceTimersByTime(gameConfig.earlyBuzzerMs)
+    vi.advanceTimersByTime(gameConfig.earlyBuzzerMaxMs)
     expect(statePath(actor.getSnapshot().value)).toBe('stopped')
     actor.send({ type: 'BUZZER_PRESSED', playerId: 1 })
     expect(statePath(actor.getSnapshot().value)).toBe('stopped')
@@ -1021,7 +1031,7 @@ describe('game machine', () => {
     expect(actor.getSnapshot().context.falseStarts[3]).toEqual(expect.any(Number))
     expect(statePath(actor.getSnapshot().value)).toBe('reading.sealed')
 
-    vi.advanceTimersByTime(gameConfig.earlyBuzzerMs)
+    vi.advanceTimersByTime(earlyMs(actor))
     expect(statePath(actor.getSnapshot().value)).toBe('reading.armed')
     actor.send({ type: 'BUZZER_PRESSED', playerId: 1 })
     expect(statePath(actor.getSnapshot().value)).toBe('answering.waiting')
@@ -1034,7 +1044,7 @@ describe('game machine', () => {
   it('после фальстарта эта кнопка молчит две с половиной секунды, чужая живая', () => {
     expect(gameConfig.falseStartMs).toBe(2_500)
     const actor = reachReading()
-    vi.advanceTimersByTime(gameConfig.earlyBuzzerMs - 1_000)
+    vi.advanceTimersByTime(earlyMs(actor) - 1_000)
     actor.send({ type: 'BUZZER_PRESSED', playerId: 1 })
     const markedAt = actor.getSnapshot().context.falseStarts[1]
     vi.advanceTimersByTime(400)
@@ -1052,7 +1062,7 @@ describe('game machine', () => {
 
   it('когда вспышка погасла, тот же игрок может отвечать', () => {
     const actor = reachReading()
-    vi.advanceTimersByTime(gameConfig.earlyBuzzerMs - 400)
+    vi.advanceTimersByTime(earlyMs(actor) - 400)
     actor.send({ type: 'BUZZER_PRESSED', playerId: 1 })
     vi.advanceTimersByTime(400)
     expect(statePath(actor.getSnapshot().value)).toBe('reading.armed')
@@ -1236,14 +1246,18 @@ describe('game machine', () => {
     expect(playerScore(fresh, 1)).toBe(0)
   })
 
-  it('окно фальстарта — earlyBuzzerMs, сейчас пять секунд, потом живые часы кнопки', () => {
-    expect(gameConfig.earlyBuzzerMs).toBe(5_000)
+  it('окно фальстарта — earlyLeftMs по длине вопроса, потом живые часы кнопки', () => {
+    expect(gameConfig.earlyBuzzerMinMs).toBe(3_000)
+    expect(gameConfig.earlyBuzzerMaxMs).toBe(8_000)
     const actor = reachReading()
+    const sealed = earlyMs(actor)
+    expect(sealed).toBeGreaterThanOrEqual(gameConfig.earlyBuzzerMinMs)
+    expect(sealed).toBeLessThanOrEqual(gameConfig.earlyBuzzerMaxMs)
     actor.send({ type: 'BUZZER_PRESSED', playerId: 1 })
     expect(statePath(actor.getSnapshot().value)).toBe('reading.sealed')
     expect(actor.getSnapshot().context.falseStarts[1]).toEqual(expect.any(Number))
     expect(playerScore(actor, 1)).toBe(0)
-    vi.advanceTimersByTime(4_999)
+    vi.advanceTimersByTime(sealed - 1)
     actor.send({ type: 'BUZZER_PRESSED', playerId: 2 })
     expect(statePath(actor.getSnapshot().value)).toBe('reading.sealed')
     vi.advanceTimersByTime(1)

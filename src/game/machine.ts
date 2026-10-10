@@ -1,5 +1,7 @@
 import { and, assign, not, setup, stateIn } from 'xstate'
 import { gameConfig } from '../config.ts'
+import { questionSpeech } from './choices.ts'
+import { earlyBuzzerMsFor } from './earlyBuzzer.ts'
 import { findQuestion, nextPlayableRound, questionById, questionsInRound } from './pack.ts'
 import { defaultPlayers, openingChooser } from './players.ts'
 import { demoPack } from './questions.ts'
@@ -412,7 +414,10 @@ export const gameMachine = setup({
       phaseDurationMs: () => null,
     }),
     armEarlyClock: assign({
-      earlyLeftMs: () => gameConfig.earlyBuzzerMs,
+      earlyLeftMs: ({ context }) => {
+        const question = questionById(context.questions, context.activeQuestionId)
+        return earlyBuzzerMsFor(question ? questionSpeech(question) : '')
+      },
       earlyStartedAt: () => Date.now(),
     }),
     noteEarlyStart: assign({

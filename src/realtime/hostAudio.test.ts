@@ -8,6 +8,7 @@ vi.mock('../audio/beep.ts', () => ({
   unlockAudio: vi.fn(),
 }))
 import { attachController } from '../game/controller.ts'
+import { earlyBuzzerRoll } from '../game/earlyBuzzer.ts'
 import { gameMachine, statePath } from '../game/machine.ts'
 import { demoPack } from '../game/questions.ts'
 import { outputFlushWaitMs } from './playback.ts'
@@ -38,10 +39,12 @@ function harness(client: RealtimeClient): OpenChannel {
 
 describe('host audio completion', () => {
   let client: RealtimeClient | null = null
+  const originalEarlyUnit = earlyBuzzerRoll.unit
 
   afterEach(() => {
     client?.stopSession()
     client = null
+    earlyBuzzerRoll.unit = originalEarlyUnit
     vi.useRealTimers()
     vi.unstubAllGlobals()
     vi.restoreAllMocks()
@@ -50,6 +53,7 @@ describe('host audio completion', () => {
   function open() {
     vi.spyOn(console, 'log').mockImplementation(() => {})
     vi.useFakeTimers()
+    earlyBuzzerRoll.unit = () => 0.5
     vi.stubGlobal('Audio', FakeAudio)
     vi.stubGlobal('window', globalThis)
     const sent: string[] = []
@@ -398,7 +402,8 @@ describe('host audio completion', () => {
     const { feed, sent } = open()
     const { actor, detach, text } = await reachReading(feed, sent)
     armRead(feed, text)
-    vi.advanceTimersByTime(gameConfig.earlyBuzzerMs - 1)
+    const early = actor.getSnapshot().context.earlyLeftMs ?? gameConfig.earlyBuzzerMs
+    vi.advanceTimersByTime(early - 1)
     expect(statePath(actor.getSnapshot().value)).toBe('reading.sealed')
     actor.send({ type: 'BUZZER_PRESSED', playerId: 1 })
     expect(actor.getSnapshot().context.falseStarts[1]).toEqual(expect.any(Number))
@@ -429,7 +434,7 @@ describe('host audio completion', () => {
     expect(statePath(actor.getSnapshot().value)).toBe('announcing')
     expect(actor.getSnapshot().context.announceKind).toBe('nobody')
     expect(sent.slice(mark)).toContain('response.cancel')
-    const untilOldCap = gameConfig.hostAudioHardLimitMs - gameConfig.earlyBuzzerMs - gameConfig.buzzerMs
+    const untilOldCap = gameConfig.hostAudioHardLimitMs - early - gameConfig.buzzerMs
     vi.advanceTimersByTime(untilOldCap)
     expect(statePath(actor.getSnapshot().value)).toBe('announcing')
     expect(actor.getSnapshot().context.announceKind).toBe('nobody')
@@ -441,14 +446,15 @@ describe('host audio completion', () => {
     const { feed, sent } = open()
     const { actor, detach, text } = await reachReading(feed, sent)
     armRead(feed, text)
-    vi.advanceTimersByTime(gameConfig.earlyBuzzerMs)
+    const early = actor.getSnapshot().context.earlyLeftMs ?? gameConfig.earlyBuzzerMs
+    vi.advanceTimersByTime(early)
     expect(statePath(actor.getSnapshot().value)).toBe('reading.armed')
     const mark = sent.length
     vi.advanceTimersByTime(gameConfig.buzzerMs)
     expect(statePath(actor.getSnapshot().value)).toBe('announcing')
     expect(actor.getSnapshot().context.announceKind).toBe('nobody')
     expect(sent.slice(mark)).toContain('response.cancel')
-    vi.advanceTimersByTime(gameConfig.hostAudioHardLimitMs - gameConfig.earlyBuzzerMs - gameConfig.buzzerMs)
+    vi.advanceTimersByTime(gameConfig.hostAudioHardLimitMs - early - gameConfig.buzzerMs)
     expect(statePath(actor.getSnapshot().value)).toBe('announcing')
     expect(actor.getSnapshot().context.playedIds).toContain('history-100')
     detach()
@@ -459,7 +465,7 @@ describe('host audio completion', () => {
     const { feed, sent } = open()
     const { actor, detach, text } = await reachReading(feed, sent)
     armRead(feed, text)
-    vi.advanceTimersByTime(gameConfig.earlyBuzzerMs)
+    vi.advanceTimersByTime(actor.getSnapshot().context.earlyLeftMs ?? gameConfig.earlyBuzzerMs)
     const mark = sent.length
     actor.send({ type: 'BUZZER_PRESSED', playerId: 2 })
     expect(statePath(actor.getSnapshot().value)).toBe('answering.waiting')

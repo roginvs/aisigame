@@ -7,8 +7,18 @@ export const matchTimings = {
   clarifyMs: 10_000,
   judgeMs: 20_000,
   cellFlashMs: 1080,
-  /** С начала чтения обычного вопроса и до этого срока нажатие — фальстарт. Потом кнопки, статус и полоска десяти секунд уже живые, даже если она ещё читает. Нажатие обрывает звук. Не в финале. */
+  /**
+   * Раннее окно до живой кнопки: от `earlyBuzzerMinMs` до `earlyBuzzerMaxMs`.
+   * Длительность считает `earlyBuzzerMsFor` по длине фразы вопроса и небольшому разбросу.
+   * `earlyBuzzerMs` — запасной срок, если текста ещё нет.
+   */
+  earlyBuzzerMinMs: 3_000,
+  earlyBuzzerMaxMs: 8_000,
   earlyBuzzerMs: 5_000,
+  /** Примерный темп чтения ведущей: символов в секунду для оценки окна. */
+  earlyBuzzerCharsPerSec: 12,
+  /** Случайный разброс вокруг оценки (±), всё ещё внутри min…max. */
+  earlyBuzzerJitterMs: 700,
   /** Штраф фальстарта: кнопка вспыхивает и гаснет, и всё это время этот игрок нажать не может. */
   falseStartMs: 2_500,
   hostAudioFallbackMs: 8_000,
@@ -28,7 +38,11 @@ export const {
   clarifyMs,
   judgeMs,
   cellFlashMs,
+  earlyBuzzerMinMs,
+  earlyBuzzerMaxMs,
   earlyBuzzerMs,
+  earlyBuzzerCharsPerSec,
+  earlyBuzzerJitterMs,
   falseStartMs,
   hostAudioFallbackMs,
   hostAudioHardLimitMs,
