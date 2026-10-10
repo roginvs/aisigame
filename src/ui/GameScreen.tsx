@@ -1,4 +1,5 @@
-import { useEffect, useMemo, useState, useSyncExternalStore } from 'react'
+import { useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react'
+import { flushSync } from 'react-dom'
 import type { SnapshotFrom } from 'xstate'
 import { buttonsLive, falseStartCooling, falseStartOpen, gameMachine, statePath } from '../game/machine.ts'
 import { falseStartMs } from '../options.ts'
@@ -6,7 +7,7 @@ import { currentRound, nextInCell, questionById, roundPrices, roundThemes } from
 import { choiceIsAnswer } from '../game/choices.ts'
 import { answerIsPublic, stageMedia } from '../game/reveal.ts'
 import type { LinkStatus } from '../realtime/client.ts'
-import { voiceModels } from '../realtime/models.ts'
+import { voiceById, voiceModels } from '../realtime/models.ts'
 import { billedTokens, formatTokens, getUsageSnapshot, subscribeUsage, type UsageTotals } from '../realtime/usage.ts'
 import type { PlayerId } from '../game/types.ts'
 import { copyDebugDump } from '../debug/trace.ts'
@@ -17,6 +18,75 @@ import { HostPresence } from './HostPresence.tsx'
 import { QuestionClip, QuestionMedia } from './QuestionMedia.tsx'
 import { questionClipPlaying } from './questionClip.ts'
 import { remainingFraction, remainingSeconds } from './timerFraction.ts'
+
+function ModelName(props: { modelId: string; onModel: (id: string) => void }) {
+  const { modelId, onModel } = props
+  const [open, setOpen] = useState(false)
+  const selectRef = useRef<HTMLSelectElement>(null)
+  const label = voiceById(modelId).label
+
+  useEffect(() => {
+    if (!open) return
+    let timer = 0
+    function onPointerDown(event: PointerEvent) {
+      const target = event.target
+      if (target instanceof Node && selectRef.current?.contains(target)) return
+      window.clearTimeout(timer)
+      timer = window.setTimeout(() => setOpen(false), 0)
+    }
+    document.addEventListener('pointerdown', onPointerDown, true)
+    return () => {
+      window.clearTimeout(timer)
+      document.removeEventListener('pointerdown', onPointerDown, true)
+    }
+  }, [open])
+
+  function openList() {
+    flushSync(() => setOpen(true))
+    const node = selectRef.current
+    node?.focus()
+    try {
+      node?.showPicker()
+    } catch {
+      // Список уже на экране: браузер откроет его следующим нажатием.
+    }
+  }
+
+  if (open) {
+    return (
+      <select
+        ref={selectRef}
+        className="model-switch"
+        aria-label="Модель"
+        value={modelId}
+        onChange={(event) => {
+          const next = event.target.value
+          setOpen(false)
+          if (next !== modelId) onModel(next)
+        }}
+        onBlur={() => setOpen(false)}
+        onKeyDown={(event) => {
+          if (event.key !== 'Escape') return
+          event.preventDefault()
+          setOpen(false)
+        }}
+      >
+        {voiceModels.map((item) => (
+          <option key={item.id} value={item.id}>
+            {item.label}
+          </option>
+        ))}
+      </select>
+    )
+  }
+
+  return (
+    <button type="button" className="model-name" title="Сменить модель" onClick={openList}>
+      {label}
+      <span className="model-caret" aria-hidden="true" />
+    </button>
+  )
+}
 
 function usageHint(totals: UsageTotals): string {
   return `По завершённым ответам: текст ${totals.textIn} (кэш ${totals.cachedTextIn}), аудио ${totals.audioIn} (кэш ${totals.cachedAudioIn}), выход текст ${totals.textOut}, аудио ${totals.audioOut}. Транскрипция отдельно не входит.`
@@ -111,7 +181,7 @@ export function GameScreen(props: {
     function onKeyDown(event: KeyboardEvent) {
       if (event.repeat) return
       const target = event.target
-      if (target instanceof HTMLElement && target.closest('input, textarea, select, [contenteditable="true"]')) return
+      if (target instanceof HTMLElement && target.closest('input, textarea, select, .model-name, [contenteditable="true"]')) return
       const playerId = playerFromBuzzKey(event.code, {
         alt: event.altKey,
         ctrl: event.ctrlKey,
@@ -134,20 +204,8 @@ export function GameScreen(props: {
       <header className="topbar">
         <div>
           <p className="eyebrow model-line">
-            <span>{[context.packName, round?.name].filter(Boolean).join(' · ') || 'Раунд'}</span>
-            <select
-              className="model-switch"
-              aria-label="Модель"
-              title="Сохранится, страница откроется заново, партию можно продолжить"
-              value={modelId}
-              onChange={(event) => onModel(event.target.value)}
-            >
-              {voiceModels.map((item) => (
-                <option key={item.id} value={item.id}>
-                  {item.label}
-                </option>
-              ))}
-            </select>
+            <span>{[context.packName, round?.name].filter(Boolean).join(' · ') || 'Раунд'} ·</span>
+            <ModelName modelId={modelId} onModel={onModel} />
           </p>
           <h1>Своя игра</h1>
         </div>

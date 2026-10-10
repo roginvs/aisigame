@@ -37,8 +37,32 @@ h1, h2, p { margin: 0; }
 .model-line {
   display: flex;
   flex-wrap: wrap;
-  gap: 0.35rem 0.55rem;
+  gap: 0.35rem;
   align-items: center;
+}
+
+.model-name {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35em;
+  margin: 0;
+  padding: 0;
+  color: inherit;
+  background: none;
+  border: 0;
+  letter-spacing: inherit;
+  line-height: inherit;
+  text-transform: inherit;
+  cursor: pointer;
+}
+
+.model-caret {
+  width: 0;
+  height: 0;
+  border-right: 0.28em solid transparent;
+  border-left: 0.28em solid transparent;
+  border-top: 0.34em solid currentColor;
+  opacity: 0.8;
 }
 
 .model-switch {
