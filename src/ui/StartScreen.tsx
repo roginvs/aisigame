@@ -77,19 +77,6 @@ export function StartScreen(props: {
           Игроки за одним планшетом. Ведущая слушает и говорит сама. Ключ выбранной модели остаётся в этом
           браузере.
         </p>
-        {needsKey ? null : (
-          <p className="status-line">Заглушка ведущей: ключ не нужен, ответы подставляет игра.</p>
-        )}
-        <label className="field">
-          <span>Модель</span>
-          <select value={modelId} onChange={(event) => onModel(event.target.value)}>
-            {voiceModels.map((item) => (
-              <option key={item.id} value={item.id}>
-                {item.label}
-              </option>
-            ))}
-          </select>
-        </label>
         <label className="field">
           <span>Пакет вопросов</span>
           <select
@@ -141,6 +128,19 @@ export function StartScreen(props: {
           />
         </label>
         <p className="status-line">По одному имени в строке. Пустое поле — Игрок 1, Игрок 2 и Игрок 3.</p>
+        <label className="field">
+          <span>Модель</span>
+          <select value={modelId} onChange={(event) => onModel(event.target.value)}>
+            {voiceModels.map((item) => (
+              <option key={item.id} value={item.id}>
+                {item.label}
+              </option>
+            ))}
+          </select>
+        </label>
+        {needsKey ? null : (
+          <p className="status-line">Заглушка ведущей: ключ не нужен, ответы подставляет игра.</p>
+        )}
         {needsKey ? (
           <>
             <label className="field">

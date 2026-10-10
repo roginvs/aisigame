@@ -4,6 +4,8 @@ test.describe.configure({ mode: 'parallel' })
 
 test('ключи моделей помнятся по отдельности', async ({ page }) => {
   await page.goto('/')
+  const order = await page.locator('.card .field span').allTextContents()
+  expect(order.slice(0, 4)).toEqual(['Пакет вопросов', 'Имена игроков', 'Модель', 'Ключ OpenAI'])
   await page.getByLabel('Модель').selectOption('grok-voice-think-fast-2.0')
   await page.getByLabel('Ключ xAI').fill('xai-test-key')
   await page.getByLabel('Модель').selectOption('gpt-realtime-2.1')
