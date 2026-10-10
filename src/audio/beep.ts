@@ -2,24 +2,46 @@ import { buzzerBeepMs } from '../options.ts'
 
 let audioContext: AudioContext | null = null
 
+const pipCount = 3
+const pipSeconds = 0.085
+const pipGapSeconds = 0.07
+
 export function unlockAudio(): void {
-  audioContext ??= new AudioContext()
-  void audioContext.resume()
+  const ctx = ensureContext()
+  void ctx.resume()
 }
 
+/**
+ * Пи-пи-пи через Web Audio, не через элемент <audio>.
+ * Пауза клипа вопроса этот сигнал не останавливает: у него свой контекст, не медиа ячейки.
+ */
 export function playTimeoutBeep(): void {
-  if (!audioContext) return
-  const now = audioContext.currentTime
+  const ctx = ensureContext()
+  void ctx.resume()
   const duration = buzzerBeepMs / 1000
-  const oscillator = audioContext.createOscillator()
-  const gain = audioContext.createGain()
-  oscillator.frequency.value = 880
+  const origin = ctx.currentTime
+  for (let index = 0; index < pipCount; index += 1) {
+    const at = origin + index * (pipSeconds + pipGapSeconds)
+    const until = at + pipSeconds
+    if (until > origin + duration + 0.0001) break
+    pip(ctx, at, until)
+  }
+}
+
+function ensureContext(): AudioContext {
+  if (!audioContext || audioContext.state === 'closed') audioContext = new AudioContext()
+  return audioContext
+}
+
+function pip(ctx: AudioContext, at: number, until: number): void {
+  const oscillator = ctx.createOscillator()
+  const gain = ctx.createGain()
+  oscillator.type = 'square'
+  oscillator.frequency.value = 1400
   oscillator.connect(gain)
-  gain.connect(audioContext.destination)
-  gain.gain.setValueAtTime(0.0001, now)
-  gain.gain.exponentialRampToValueAtTime(0.15, now + 0.02)
-  gain.gain.exponentialRampToValueAtTime(0.12, now + duration - 0.12)
-  gain.gain.exponentialRampToValueAtTime(0.0001, now + duration)
-  oscillator.start(now)
-  oscillator.stop(now + duration)
+  gain.connect(ctx.destination)
+  gain.gain.setValueAtTime(0.08, at)
+  gain.gain.linearRampToValueAtTime(0.0001, until)
+  oscillator.start(at)
+  oscillator.stop(until)
 }

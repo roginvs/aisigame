@@ -414,7 +414,7 @@ describe('falseStartInstructions', () => {
         falseStarts: { 1: 1 },
       }),
     )
-    expect(one).toContain('«Вася, фальшстарт»')
+    expect(one).toContain('«Вася, фальстарт»')
     expect(one).not.toContain('Боевой Буратино')
     const two = falseStartInstructions(
       context({
@@ -425,7 +425,7 @@ describe('falseStartInstructions', () => {
         falseStarts: { 2: 2, 1: 1 },
       }),
     )
-    expect(two).toContain('«Ого, Маша и Вася, фальшстарт»')
+    expect(two).toContain('«Ого, Маша и Вася, фальстарт»')
     expect(two).not.toContain('Боевой Буратино')
   })
 })

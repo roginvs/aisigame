@@ -248,7 +248,7 @@ function statusFor(
   }
   if (phase === 'finished') return 'Игра закончена'
   if (phase === 'buzzing.open' || phase === 'reading.armed') return 'Жмите свою кнопку'
-  if (phase === 'falseStartCue') return 'Фальшстарт'
+  if (phase === 'falseStartCue') return 'Фальстарт'
   if (phase === 'answering.waiting') return `Отвечает игрок ${playerId ?? ''}`.trim()
   if (phase === 'announcing') return 'Объявление'
   if (phase === 'bridging') return roundName
