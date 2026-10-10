@@ -1,16 +1,14 @@
-import { useEffect, useState, useSyncExternalStore } from 'react'
+import { useEffect, useLayoutEffect, useRef, useState, useSyncExternalStore } from 'react'
 import type { SnapshotFrom } from 'xstate'
 import { buildCommit, pageOrigin } from '../buildInfo.ts'
 import { copyDebugDump, getTrace, subscribeTrace, type ChatRole, type TraceEntry } from '../debug/trace.ts'
 import { gameMachine, statePath } from '../game/machine.ts'
+import { chatPinKey, isAtTail, pinColumn } from './chatScroll.ts'
 
 export function ConversationChat() {
   const entries = useSyncExternalStore(subscribeTrace, getTrace, getTrace)
   const bubbles = entries.filter((entry) => entry.kind === 'chat')
-  const [bottom, setBottom] = useState<HTMLDivElement | null>(null)
-  useEffect(() => {
-    bottom?.scrollIntoView({ block: 'end' })
-  }, [bottom, bubbles.length])
+  const pinned = usePinColumn(chatPinKey(bubbles))
   return (
     <aside className="chat-column">
       <div className="chat-head">
@@ -19,12 +17,13 @@ export function ConversationChat() {
           <p className="chat-hint">Реплики ведущей, игроков и оценка.</p>
         </div>
       </div>
-      <div className="chat-scroll">
-        {bubbles.length === 0 ? <p className="chat-hint">Пока тишина.</p> : null}
-        {bubbles.map((entry) => (
-          <Bubble key={entry.id} entry={entry} />
-        ))}
-        <div ref={setBottom} />
+      <div className="chat-scroll" ref={pinned.scroller}>
+        <div className="chat-log" ref={pinned.log}>
+          {bubbles.length === 0 ? <p className="chat-hint">Пока тишина.</p> : null}
+          {bubbles.map((entry) => (
+            <Bubble key={entry.id} entry={entry} />
+          ))}
+        </div>
       </div>
     </aside>
   )
@@ -32,11 +31,9 @@ export function ConversationChat() {
 
 export function TechnicalLog(props: { snapshot: SnapshotFrom<typeof gameMachine>; onNextRound: () => void }) {
   const entries = useSyncExternalStore(subscribeTrace, getTrace, getTrace)
+  const shown = entries.filter(visible)
+  const pinned = usePinColumn(chatPinKey(shown))
   const [copyLabel, setCopyLabel] = useState('Скопировать дебаг')
-  const [bottom, setBottom] = useState<HTMLDivElement | null>(null)
-  useEffect(() => {
-    bottom?.scrollIntoView({ block: 'end' })
-  }, [bottom, entries.length])
 
   async function copy() {
     const ok = await copyDebugDump({
@@ -68,15 +65,73 @@ export function TechnicalLog(props: { snapshot: SnapshotFrom<typeof gameMachine>
           </button>
         </div>
       </div>
-      <div className="chat-scroll">
-        {entries.length === 0 ? <p className="chat-hint">Пока тишина.</p> : null}
-        {entries.map((entry) => (visible(entry) ? <TechRow key={entry.id} entry={entry} /> : null))}
-        <p className="trace-line">origin {pageOrigin() || '—'}</p>
-        <p className="trace-line">commit {buildCommit()}</p>
-        <div ref={setBottom} />
+      <div className="chat-scroll" ref={pinned.scroller}>
+        <div className="chat-log" ref={pinned.log}>
+          {shown.length === 0 ? <p className="chat-hint">Пока тишина.</p> : null}
+          {shown.map((entry) => (
+            <TechRow key={entry.id} entry={entry} />
+          ))}
+          <p className="trace-line">origin {pageOrigin() || '—'}</p>
+          <p className="trace-line">commit {buildCommit()}</p>
+        </div>
       </div>
     </aside>
   )
+}
+
+function usePinColumn(signature: string) {
+  const scroller = useRef<HTMLDivElement>(null)
+  const log = useRef<HTMLDivElement>(null)
+  const follow = useRef(true)
+  const own = useRef(false)
+
+  useLayoutEffect(() => {
+    const node = scroller.current
+    if (!node) return
+    const pin = () => {
+      own.current = true
+      pinColumn(node)
+      follow.current = true
+      own.current = false
+    }
+    // Новая строка всегда уходит вниз, даже если колонку уже прокрутили вверх.
+    pin()
+    let nested = 0
+    const frame = requestAnimationFrame(() => {
+      pin()
+      nested = requestAnimationFrame(pin)
+    })
+    return () => {
+      cancelAnimationFrame(frame)
+      cancelAnimationFrame(nested)
+    }
+  }, [signature])
+
+  useEffect(() => {
+    const node = scroller.current
+    const content = log.current
+    if (!node) return
+    const onScroll = () => {
+      if (own.current) return
+      follow.current = isAtTail(node)
+    }
+    const observer = new ResizeObserver(() => {
+      if (!follow.current || !scroller.current) return
+      own.current = true
+      pinColumn(scroller.current)
+      follow.current = true
+      own.current = false
+    })
+    observer.observe(node)
+    if (content) observer.observe(content)
+    node.addEventListener('scroll', onScroll, { passive: true })
+    return () => {
+      observer.disconnect()
+      node.removeEventListener('scroll', onScroll)
+    }
+  }, [])
+
+  return { scroller, log }
 }
 
 function Bubble(props: { entry: TraceEntry }) {
