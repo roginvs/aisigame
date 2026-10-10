@@ -13,6 +13,9 @@ export type VoiceModel = {
 
 export const voiceModelStorageKey = 'aisigame.voiceModel'
 
+/** Одноразовая пометка: модель сменили в партии, страница открылась заново. */
+export const modelSwitchNoticeKey = 'aisigame.modelSwitchNotice'
+
 export const providerStorageKeys = {
   openai: storageKey,
   xai: 'aisigame.xaiApiKey',
@@ -51,6 +54,23 @@ export function writeVoiceModelId(id: string, storage: Storage = localStorage): 
   const next = voiceById(id).id
   storage.setItem(voiceModelStorageKey, next)
   return next
+}
+
+/** `?mock=1` после перезагрузки снова включил бы мок, хотя id уже другой. */
+export function hrefAfterModelSwitch(href: string): string {
+  const url = new URL(href)
+  url.searchParams.delete('mock')
+  return url.href
+}
+
+export function markModelSwitch(storage: Storage = sessionStorage): void {
+  storage.setItem(modelSwitchNoticeKey, '1')
+}
+
+export function takeModelSwitchNotice(storage: Storage = sessionStorage): boolean {
+  const marked = storage.getItem(modelSwitchNoticeKey) === '1'
+  if (marked) storage.removeItem(modelSwitchNoticeKey)
+  return marked
 }
 
 export function readProviderKey(provider: KeyProvider, storage: Storage = localStorage): string {

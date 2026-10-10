@@ -36,6 +36,7 @@ export function StartScreen(props: {
   readingResume: boolean
   onContinue: () => void
   onResumeFile: (file: File) => void
+  modelSwitched: boolean
 }) {
   const {
     apiKey,
@@ -66,6 +67,7 @@ export function StartScreen(props: {
     readingResume,
     onContinue,
     onResumeFile,
+    modelSwitched,
   } = props
   const fileRef = useRef<HTMLInputElement>(null)
   const resumeFileRef = useRef<HTMLInputElement>(null)
@@ -172,6 +174,9 @@ export function StartScreen(props: {
         >
           Начать игру
         </button>
+        {modelSwitched && canContinue ? (
+          <p className="status-line">Модель сохранена. Партию можно продолжить.</p>
+        ) : null}
         {resumeFromDisk && resumePackName ? <p className="status-line">Пак «{resumePackName}»</p> : null}
         <button
           type="button"

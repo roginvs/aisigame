@@ -22,7 +22,16 @@ import { preferredPackId, readStartPrefs, writeStartPrefs } from './game/startPr
 import type { PlayerId, QuestionPack } from './game/types.ts'
 import type { LinkStatus } from './realtime/client.ts'
 import { MockRealtimeClient } from './realtime/mockClient.ts'
-import { readProviderKey, readVoiceModelId, voiceById, writeProviderKey, writeVoiceModelId } from './realtime/models.ts'
+import {
+  hrefAfterModelSwitch,
+  markModelSwitch,
+  readProviderKey,
+  readVoiceModelId,
+  takeModelSwitchNotice,
+  voiceById,
+  writeProviderKey,
+  writeVoiceModelId,
+} from './realtime/models.ts'
 import { createVoice } from './realtime/voice.ts'
 import { GameScreen } from './ui/GameScreen.tsx'
 import { StartScreen } from './ui/StartScreen.tsx'
@@ -71,6 +80,7 @@ export default function App() {
   const [playerNames, setPlayerNames] = useState(() => readStartPrefs().names || defaultPlayerNames)
   const [ownFileName, setOwnFileName] = useState('')
   const [ownFileHash, setOwnFileHash] = useState('')
+  const [modelSwitched] = useState(() => takeModelSwitchNotice())
   const [pendingContinue, setPendingContinue] = useState(false)
   const [diskResume, setDiskResume] = useState<SavedGame | null>(null)
   const [readingResume, setReadingResume] = useState(false)
@@ -213,6 +223,15 @@ export default function App() {
   function chooseModel(id: string) {
     setModelId(id)
     if (!queryMock || id !== 'mock') writeVoiceModelId(id)
+  }
+
+  function switchModel(id: string) {
+    const next = voiceById(id).id
+    if (next === modelId) return
+    writeVoiceModelId(next)
+    persistMatch({ packId, packFile, packHash, path, context: snapshot.context })
+    markModelSwitch()
+    window.location.replace(hrefAfterModelSwitch(window.location.href))
   }
 
   function choosePack(id: string) {
@@ -360,6 +379,7 @@ export default function App() {
         onStart={start}
         onContinue={continueGame}
         onResumeFile={(file) => void resumeFromFile(file)}
+        modelSwitched={modelSwitched}
       />
     )
   }
@@ -377,7 +397,8 @@ export default function App() {
       onStop={() => send({ type: 'STOP' })}
       onReset={exitToMenu}
       onNextRound={() => send({ type: 'NEXT_ROUND' })}
-      modelLabel={model.label}
+      modelId={modelId}
+      onModel={switchModel}
     />
   )
 }

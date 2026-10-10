@@ -6,6 +6,7 @@ import { currentRound, nextInCell, questionById, roundPrices, roundThemes } from
 import { choiceIsAnswer } from '../game/choices.ts'
 import { answerIsPublic, stageMedia } from '../game/reveal.ts'
 import type { LinkStatus } from '../realtime/client.ts'
+import { voiceModels } from '../realtime/models.ts'
 import { billedTokens, formatTokens, getUsageSnapshot, subscribeUsage, type UsageTotals } from '../realtime/usage.ts'
 import type { PlayerId } from '../game/types.ts'
 import { copyDebugDump } from '../debug/trace.ts'
@@ -30,9 +31,10 @@ export function GameScreen(props: {
   onStop: () => void
   onReset: () => void
   onNextRound: () => void
-  modelLabel: string
+  modelId: string
+  onModel: (id: string) => void
 }) {
-  const { snapshot, link, onBuzz, onPick, onPause, onReset, onNextRound, modelLabel } = props
+  const { snapshot, link, onBuzz, onPick, onPause, onReset, onNextRound, modelId, onModel } = props
   const [copyLabel, setCopyLabel] = useState('Скопировать дебаг')
   const path = statePath(snapshot.value)
   const context = snapshot.context
@@ -109,7 +111,7 @@ export function GameScreen(props: {
     function onKeyDown(event: KeyboardEvent) {
       if (event.repeat) return
       const target = event.target
-      if (target instanceof HTMLElement && target.closest('input, textarea, [contenteditable="true"]')) return
+      if (target instanceof HTMLElement && target.closest('input, textarea, select, [contenteditable="true"]')) return
       const playerId = playerFromBuzzKey(event.code, {
         alt: event.altKey,
         ctrl: event.ctrlKey,
@@ -131,7 +133,22 @@ export function GameScreen(props: {
       </p>
       <header className="topbar">
         <div>
-          <p className="eyebrow">{[context.packName, round?.name, modelLabel].filter(Boolean).join(' · ') || 'Раунд'}</p>
+          <p className="eyebrow model-line">
+            <span>{[context.packName, round?.name].filter(Boolean).join(' · ') || 'Раунд'}</span>
+            <select
+              className="model-switch"
+              aria-label="Модель"
+              title="Сохранится, страница откроется заново, партию можно продолжить"
+              value={modelId}
+              onChange={(event) => onModel(event.target.value)}
+            >
+              {voiceModels.map((item) => (
+                <option key={item.id} value={item.id}>
+                  {item.label}
+                </option>
+              ))}
+            </select>
+          </p>
           <h1>Своя игра</h1>
         </div>
         <div className="pills">

@@ -1,10 +1,13 @@
 import { describe, expect, it } from 'vitest'
 import { storageKey } from '../config.ts'
 import {
+  hrefAfterModelSwitch,
   keyFieldLabel,
+  markModelSwitch,
   providerStorageKeys,
   readProviderKey,
   readVoiceModelId,
+  takeModelSwitchNotice,
   voiceById,
   voiceModelStorageKey,
   writeProviderKey,
@@ -50,5 +53,17 @@ describe('voice models', () => {
     expect(keyFieldLabel('google')).toBe('Ключ Google')
     expect(voiceById('gemini-3.8-live-extended-thinking').thinking).toBe(true)
     expect(voiceById('mock').provider).toBe('mock')
+  })
+
+  it('смена модели в партии убирает mock из адреса и оставляет пометку на один заход', () => {
+    expect(hrefAfterModelSwitch('http://127.0.0.1:5173/?mock=1')).toBe('http://127.0.0.1:5173/')
+    expect(hrefAfterModelSwitch('http://127.0.0.1:5173/?x=1&mock=1')).toBe('http://127.0.0.1:5173/?x=1')
+    expect(hrefAfterModelSwitch('https://roginvs.github.io/aisigame/')).toBe('https://roginvs.github.io/aisigame/')
+
+    const storage = memory()
+    expect(takeModelSwitchNotice(storage)).toBe(false)
+    markModelSwitch(storage)
+    expect(takeModelSwitchNotice(storage)).toBe(true)
+    expect(takeModelSwitchNotice(storage)).toBe(false)
   })
 })

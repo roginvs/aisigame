@@ -13,7 +13,7 @@ body {
   min-height: 100dvh;
 }
 
-button, input { font: inherit; }
+button, input, select { font: inherit; }
 
 button {
   cursor: pointer;
@@ -32,6 +32,25 @@ h1, h2, p { margin: 0; }
   font-size: 0.78rem;
   letter-spacing: 0.08em;
   text-transform: uppercase;
+}
+
+.model-line {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem 0.55rem;
+  align-items: center;
+}
+
+.model-switch {
+  max-width: 16rem;
+  padding: 2px 4px;
+  color: #f4efe4;
+  letter-spacing: normal;
+  text-transform: none;
+  background: #121920;
+  border: 1px solid #5c7188;
+  border-radius: 8px;
+  font-size: 0.78rem;
 }
 
 .start {
