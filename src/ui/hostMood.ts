@@ -14,6 +14,7 @@ const speechPaths = new Set([
 ])
 
 export function hostMood(path: string, link: Pick<LinkStatus, 'host' | 'mic'>): HostMood {
+  if (path === 'reading.armed') return 'buzz'
   if (link.host === 'speaking') return 'speak'
   if (path.startsWith('buzzing')) return 'buzz'
   if (

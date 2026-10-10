@@ -1,4 +1,7 @@
-/** Звук и ролик вопроса. Пауза сохраняет позицию: следующий play продолжает с того же места. */
+/**
+ * Звук и ролик вопроса. Пока клип должен играть, он сам стартует и крутится.
+ * Пауза снимает цикл и сохраняет позицию: следующий play продолжает с того же места.
+ */
 export function questionClipPlaying(input: {
   path: string
   missedCount: number
@@ -13,4 +16,21 @@ export function questionClipPlaying(input: {
 
 function reading(path: string): boolean {
   return path === 'reading' || path.startsWith('reading.')
+}
+
+type ClipNode = {
+  loop: boolean
+  play: () => Promise<void> | void
+  pause: () => void
+}
+
+/** Включает цикл вместе с воспроизведением. На паузе цикл снимается, currentTime не меняется. */
+export function applyQuestionClip(node: ClipNode, live: boolean): void {
+  node.loop = live
+  if (!live) {
+    node.pause()
+    return
+  }
+  const started = node.play()
+  if (started) void started.catch(() => undefined)
 }

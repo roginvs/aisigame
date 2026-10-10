@@ -151,6 +151,13 @@ function clockMs(path: string, missedIds: readonly PlayerId[] = [], clarificatio
   return null
 }
 
+/** Сколько ещё идти окну кнопки. Свежие часы совпадают с длительностью, уже начатые не обнуляются. */
+function buzzerMsLeft(context: GameContext): number {
+  const duration = context.phaseDurationMs ?? gameConfig.buzzerMs
+  if (context.phaseStartedAt === null) return duration
+  return Math.max(0, duration - (Date.now() - context.phaseStartedAt))
+}
+
 function outcomeStatus(context: GameContext, event: GameEvent): JudgmentStatus | null {
   if (event.type !== 'ANSWER_JUDGED') return null
   if (event.judgment.status === 'near_miss' && context.clarifications >= gameConfig.maxClarifications) return 'incorrect'
@@ -252,7 +259,7 @@ export const gameMachine = setup({
   },
   delays: {
     buzzerMs: gameConfig.buzzerMs,
-    buzzerLeft: ({ context }) => context.phaseDurationMs ?? gameConfig.buzzerMs,
+    buzzerLeft: ({ context }) => buzzerMsLeft(context),
     answerMs: gameConfig.answerMs,
     answerLeft: ({ context }) => (context.clarifications > 0 ? gameConfig.clarifyMs : gameConfig.answerMs),
     judgeMs: gameConfig.judgeMs,
@@ -416,6 +423,12 @@ export const gameMachine = setup({
       earlyStartedAt: () => null,
     }),
     startBuzzerTimer: assign({
+      statusLine: () => 'Жмите свою кнопку',
+      phaseStartedAt: () => Date.now(),
+      phaseDurationMs: () => gameConfig.buzzerMs,
+      spokeWithoutButton: () => false,
+    }),
+    startArmedBuzzer: assign({
       statusLine: () => 'Жмите свою кнопку',
       phaseStartedAt: () => Date.now(),
       phaseDurationMs: () => gameConfig.buzzerMs,
@@ -928,10 +941,6 @@ export const gameMachine = setup({
       entry: 'setReadingStatus',
       on: {
         TALKED_OVER: { actions: 'noteTalkedOver' },
-        HOST_AUDIO_FINISHED: [
-          { guard: 'readFinal', target: 'turnCue', actions: 'clearEarlyBuzz' },
-          { guard: 'purposeRead', target: 'afterReading', actions: ['clearEarlyBuzz', 'decideFalseStartCallout'] },
-        ],
       },
       states: {
         sealed: {
@@ -941,14 +950,27 @@ export const gameMachine = setup({
           },
           on: {
             BUZZER_PRESSED: { guard: 'canFalseStart', actions: 'markFalseStart' },
+            HOST_AUDIO_FINISHED: [
+              { guard: 'readFinal', target: '#game.turnCue', actions: 'clearEarlyBuzz' },
+              { guard: 'purposeRead', target: '#game.afterReading', actions: ['clearEarlyBuzz', 'decideFalseStartCallout'] },
+            ],
           },
         },
         armed: {
+          entry: 'startArmedBuzzer',
+          after: {
+            buzzerMs: { target: '#game.announcing', actions: 'nobodyAnswered' },
+          },
           on: {
             BUZZER_PRESSED: {
               guard: 'validPlayer',
               target: '#game.answering',
               actions: ['clearEarlyBuzz', 'assignAnswerer'],
+            },
+            HOST_AUDIO_FINISHED: {
+              guard: 'purposeRead',
+              target: '#game.buzzing',
+              actions: 'clearEarlyBuzz',
             },
           },
         },

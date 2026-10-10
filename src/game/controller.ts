@@ -64,7 +64,7 @@ export function attachController(options: {
     if (delay === null) return
     buzzerWarning = window.setTimeout(() => {
       buzzerWarning = null
-      if (!statePath(actor.getSnapshot().value).startsWith('buzzing')) return
+      if (!buzzerChimeLive(statePath(actor.getSnapshot().value))) return
       playTimeoutBeep()
     }, delay)
   }
@@ -218,7 +218,7 @@ export function attachController(options: {
     }
     if (from === 'paused') {
       client.setOutputMuted(false)
-      if (path.startsWith('buzzing')) armBuzzerWarning(context.phaseDurationMs ?? gameConfig.buzzerMs)
+      if (buzzerChimeLive(path)) armBuzzerWarning(context.phaseDurationMs ?? gameConfig.buzzerMs)
       const skipped =
         (path === 'bridging' && context.roundIndex !== fromRound) ||
         (path === 'finished' && context.resumePath !== 'finished')
@@ -277,14 +277,17 @@ export function attachController(options: {
       client.setTranscriptionPrompt('Пока ведущая читает вопрос, в комнате могут говорить. Это не ответ и не выбор ячейки.')
       client.setMicEnabled(true)
     }
-    if (path === 'reading.armed') client.setMicEnabled(true)
+    if (path === 'reading.armed') {
+      client.setMicEnabled(true)
+      armBuzzerWarning(context.phaseDurationMs ?? gameConfig.buzzerMs)
+    }
     if (path === 'falseStartCue') speak('falseStart', falseStartInstructions(context))
     if ((from.startsWith('reading') || from === 'falseStartCue') && path.startsWith('answering')) client.interruptSpeech()
     if (path === 'buzzing.open') {
       openBuzzerEar()
-      if (from !== 'paused') armBuzzerWarning(context.phaseDurationMs ?? gameConfig.buzzerMs)
+      if (from !== 'paused' && from !== 'reading.armed') armBuzzerWarning(context.phaseDurationMs ?? gameConfig.buzzerMs)
     }
-    if (!path.startsWith('buzzing') && path !== 'paused') clearBuzzerWarning()
+    if (path !== 'paused' && !buzzerChimeLive(path)) clearBuzzerWarning()
     if (path === 'answering.waiting' || path === 'answering.hearing') {
       client.setTranscriptionPrompt(answerListeningPrompt(questionById(context.questions, context.activeQuestionId)?.answers ?? []))
     }
@@ -614,6 +617,10 @@ function machineView(context: GameContext) {
     error: context.error,
     resumePath: context.resumePath,
   }
+}
+
+function buzzerChimeLive(path: string): boolean {
+  return path.startsWith('buzzing') || path === 'reading.armed'
 }
 
 function micOpen(path: string): boolean {

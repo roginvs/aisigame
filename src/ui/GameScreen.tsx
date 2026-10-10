@@ -12,7 +12,7 @@ import { AirStatus } from './airStatus.tsx'
 import { buzzKeyLabel, isKeyboardPlayer, playerFromBuzzKey } from './buzzKeys.ts'
 import { ConversationChat, TechnicalLog } from './DebugChat.tsx'
 import { HostPresence } from './HostPresence.tsx'
-import { QuestionMedia } from './QuestionMedia.tsx'
+import { QuestionClip, QuestionMedia } from './QuestionMedia.tsx'
 import { questionClipPlaying } from './questionClip.ts'
 import { remainingFraction, remainingSeconds } from './timerFraction.ts'
 
@@ -159,8 +159,14 @@ export function GameScreen(props: {
                       {choice.media.map((item) => {
                         if (!item.url) return <span key={item.name}>Файл не найден: {item.name}</span>
                         if (item.kind === 'image') return <img key={item.url} src={item.url} alt="" />
-                        if (item.kind === 'audio') return <audio key={item.url} src={item.url} controls preload="none" />
-                        return <video key={item.url} src={item.url} controls playsInline preload="none" />
+                        return (
+                          <QuestionClip
+                            key={item.url}
+                            kind={item.kind}
+                            url={item.url}
+                            live={questionLive && !showAnswer}
+                          />
+                        )
                       })}
                     </span>
                   </li>
