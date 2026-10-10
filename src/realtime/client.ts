@@ -686,11 +686,10 @@ export class RealtimeClient {
       for (const line of assistantUtterances(response)) this.publishHostLine(line, earlyPurpose)
     }
     if (call?.name === 'selectQuestion' || call?.name === 'submitAnswerJudgment') {
+      // Не трогаем speech: оценка может прийти уже после таймаута, когда
+      // announce/read уже идёт. Раньше здесь обнуляли речь — stopped не
+      // вызывал finishSpeech, и партия зависала в announcing.
       this.pendingTool = null
-      this.pendingSpeak = null
-      this.clearFlushTimer()
-      this.speech = null
-      this.clearSpeechTimers()
       this.onToolCall(call, call.name === 'selectQuestion' ? 'select' : 'judge')
       return
     }

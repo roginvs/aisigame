@@ -262,6 +262,52 @@ describe('host audio completion', () => {
     expect(sent.slice(mark)).toEqual(['response.cancel', 'output_audio_buffer.clear'])
   })
 
+  it('поздняя оценка во время объявления не срывает finishSpeech', () => {
+    const { finished, feed } = open()
+    client?.requestSpeech(
+      'announce',
+      30,
+      'Ты ведущая и сейчас говоришь игрокам. Сообщение ниже — готовая фраза.',
+      'Сплин',
+    )
+    feed({
+      type: 'response.created',
+      response: { id: 'resp-announce', metadata: { purpose: 'announce', turn: '30', take: '1' } },
+    })
+    feed({ type: 'output_audio_buffer.started', response_id: 'resp-announce' })
+    feed({
+      type: 'response.output_audio_transcript.done',
+      response_id: 'resp-announce',
+      item_id: 'item-announce',
+      transcript: 'Сплин',
+    })
+    feed({
+      type: 'response.done',
+      response: {
+        id: 'resp-judge-late',
+        metadata: { purpose: 'judge', turn: '15' },
+        output: [
+          {
+            type: 'function_call',
+            name: 'submitAnswerJudgment',
+            call_id: 'call-late',
+            arguments: JSON.stringify({
+              questionId: 'r2-t5-1800-5',
+              playerId: 1,
+              attemptId: 83,
+              status: 'unintelligible',
+              heard: 'речь не распознана',
+              reason: 'поздно',
+            }),
+          },
+        ],
+      },
+    })
+    expect(finished).toEqual([])
+    feed({ type: 'output_audio_buffer.stopped', response_id: 'resp-announce' })
+    expect(finished).toEqual(['announce'])
+  })
+
   async function reachReading(feed: (event: object) => void, sent: string[]) {
     vi.spyOn(client!, 'connect').mockResolvedValue(undefined)
     const actor = createActor(gameMachine)
