@@ -27,7 +27,7 @@ export const packCatalog: PackCatalogItem[] = localPackFiles
     return {
       id,
       title: knownTitles[id] ?? id,
-      href: `/packs/${file}`,
+      href: `${import.meta.env.BASE_URL}packs/${file}`,
     }
   })
   .sort((left, right) => {

@@ -1,11 +1,13 @@
 import type { LinkStatus } from '../realtime/client.ts'
 import { hostCaption, hostCopy, hostMood, type HostMood } from './hostMood.ts'
 
+const publicFile = (path: string) => `${import.meta.env.BASE_URL}${path.replace(/^\//, '')}`
+
 const portrait: Record<HostMood, string> = {
-  listen: '/host/listen.jpg',
-  speak: '/host/speak.jpg?v=3',
-  buzz: '/host/buzz.jpg',
-  think: '/host/think.jpg',
+  listen: publicFile('/host/listen.jpg'),
+  speak: publicFile('/host/speak.jpg?v=3'),
+  buzz: publicFile('/host/buzz.jpg'),
+  think: publicFile('/host/think.jpg'),
 }
 
 export function HostPresence(props: {

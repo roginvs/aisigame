@@ -31,11 +31,13 @@ function localPackCatalog(): Plugin {
   }
 }
 
-// https://vite.dev/config/
-export default defineConfig({
+// Dev and `npm run look` stay at `/`. The production build is published at
+// https://roginvs.github.io/aisigame/, so assets need that project prefix.
+export default defineConfig(({ command, mode }) => ({
+  base: command === 'build' || mode === 'production' ? '/aisigame/' : '/',
   plugins: [react(), localPackCatalog()],
   server: {
     host: true,
     port: 5173,
   },
-})
+}))
