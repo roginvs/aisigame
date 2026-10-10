@@ -20,6 +20,14 @@ class FakeNode {
   }
 }
 
+class FakeCompressor extends FakeNode {
+  threshold = new FakeParam()
+  knee = new FakeParam()
+  ratio = new FakeParam()
+  attack = new FakeParam()
+  release = new FakeParam()
+}
+
 class FakeContext {
   state: AudioContextState = 'suspended'
   destination = new FakeNode()
@@ -29,6 +37,7 @@ class FakeContext {
   oscillators = 0
   analysers: FakeNode[] = []
   gains: FakeNode[] = []
+  compressors: FakeCompressor[] = []
   splitters: FakeNode[] = []
 
   resume() {
@@ -45,6 +54,12 @@ class FakeContext {
   createGain() {
     const node = new FakeNode()
     this.gains.push(node)
+    return node
+  }
+
+  createDynamicsCompressor() {
+    const node = new FakeCompressor()
+    this.compressors.push(node)
     return node
   }
 
@@ -91,9 +106,9 @@ describe('attachQuestionMeter', () => {
     )
   }
 
-  it('подключает клип к анализатору и к выходу один раз, без осциллятора сигнала', async () => {
+  it('подключает клип к лимитеру, анализатору и к выходу один раз, без осциллятора сигнала', async () => {
     install()
-    const { attachQuestionMeter } = await import('./questionMeter.ts')
+    const { attachQuestionMeter, questionLimiter, questionMakeupGain } = await import('./questionMeter.ts')
     const element = {} as HTMLMediaElement
     attachQuestionMeter(element)
     attachQuestionMeter(element)
@@ -106,16 +121,30 @@ describe('attachQuestionMeter', () => {
     expect(current.analysers).toHaveLength(2)
     expect(current.analysers[0]?.fftSize).toBe(1024)
     expect(current.analysers[0]?.smoothingTimeConstant).toBe(0)
-    expect(current.gains[0]?.gain.value).toBe(0)
+    expect(current.compressors).toHaveLength(1)
+    expect(current.gains).toHaveLength(2)
+    const limiter = current.compressors[0]
+    const makeup = current.gains[0]
+    const mute = current.gains[1]
+    expect(limiter?.threshold.value).toBe(questionLimiter.threshold)
+    expect(limiter?.knee.value).toBe(questionLimiter.knee)
+    expect(limiter?.ratio.value).toBe(questionLimiter.ratio)
+    expect(limiter?.attack.value).toBe(questionLimiter.attack)
+    expect(limiter?.release.value).toBe(questionLimiter.release)
+    expect(makeup?.gain.value).toBe(questionMakeupGain)
+    expect(mute?.gain.value).toBe(0)
 
     const source = current.source
     const splitter = current.splitters[0]
-    const mute = current.gains[0]
     expect(source).toBeTruthy()
     expect(splitter).toBeTruthy()
+    expect(limiter).toBeTruthy()
+    expect(makeup).toBeTruthy()
     expect(mute).toBeTruthy()
-    if (!source || !splitter || !mute) return
-    expect(source.connections.map((link) => link.to)).toEqual([current.destination, splitter])
+    if (!source || !splitter || !limiter || !makeup || !mute) return
+    expect(source.connections.map((link) => link.to)).toEqual([limiter, splitter])
+    expect(limiter.connections.map((link) => link.to)).toEqual([makeup])
+    expect(makeup.connections.map((link) => link.to)).toEqual([current.destination])
     expect(splitter.connections).toEqual([
       { to: current.analysers[0], output: 0, input: undefined },
       { to: current.analysers[1], output: 1, input: undefined },

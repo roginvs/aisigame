@@ -4,6 +4,18 @@ const silenceRms = 0.012
 const loudRms = 0.28
 const channelPresent = 0.04
 
+/** Мягкий лимитер: быстро сажает пики и держит, без сильной «качки» динамики. */
+export const questionLimiter = {
+  threshold: -10,
+  knee: 8,
+  ratio: 14,
+  attack: 0.003,
+  release: 0.22,
+} as const
+
+/** Чуть поднимает тихие клипы после лимитера; громкие уже сжаты. */
+export const questionMakeupGain = 1.28
+
 export type QuestionMeterGraph = {
   left: AnalyserNode
   right: AnalyserNode
@@ -14,9 +26,9 @@ export type QuestionMeterGraph = {
 const graphs = new WeakMap<HTMLMediaElement, QuestionMeterGraph>()
 
 /**
- * Один раз заводит элемент в граф: и в анализаторы, и в выход.
+ * Один раз заводит элемент в граф: лимитер на выход, анализаторы для стрелок.
  * Повторный вызов тот же элемент не подключает заново — второй source браузер запрещает.
- * Пи-пи-пи кнопки сюда не входит.
+ * Пи-пи-пи кнопки сюда не входит. То же для звука и для ролика.
  */
 export function attachQuestionMeter(element: HTMLMediaElement): QuestionMeterGraph {
   const ctx = gameAudioContext()
@@ -25,12 +37,19 @@ export function attachQuestionMeter(element: HTMLMediaElement): QuestionMeterGra
   if (existing) return existing
 
   const source = ctx.createMediaElementSource(element)
+  const limiter = makeLimiter(ctx)
+  const makeup = ctx.createGain()
+  makeup.gain.value = questionMakeupGain
   const splitter = ctx.createChannelSplitter(2)
   const left = makeAnalyser(ctx)
   const right = makeAnalyser(ctx)
   const mute = ctx.createGain()
   mute.gain.value = 0
-  source.connect(ctx.destination)
+
+  source.connect(limiter)
+  limiter.connect(makeup)
+  makeup.connect(ctx.destination)
+
   source.connect(splitter)
   splitter.connect(left, 0)
   splitter.connect(right, 1)
@@ -55,6 +74,16 @@ export function readMeterLevels(graph: QuestionMeterGraph): { left: number; righ
   if (left >= channelPresent && right < channelPresent) return { left, right: left }
   if (right >= channelPresent && left < channelPresent) return { left: right, right }
   return { left, right }
+}
+
+function makeLimiter(ctx: AudioContext): DynamicsCompressorNode {
+  const node = ctx.createDynamicsCompressor()
+  node.threshold.value = questionLimiter.threshold
+  node.knee.value = questionLimiter.knee
+  node.ratio.value = questionLimiter.ratio
+  node.attack.value = questionLimiter.attack
+  node.release.value = questionLimiter.release
+  return node
 }
 
 function makeAnalyser(ctx: AudioContext): AnalyserNode {

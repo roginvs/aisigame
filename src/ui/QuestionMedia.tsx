@@ -44,15 +44,14 @@ export function QuestionClip(props: { kind: 'audio' | 'video'; url: string; live
   useEffect(() => {
     const current = nodeRef.current
     if (!current) return
-    if (showMeter) {
-      try {
-        attachQuestionMeter(current)
-      } catch {
-        // элемент уже отдан другому графу — клип остаётся на своём выходе
-      }
+    try {
+      // звук и ролик идут через один граф с мягким лимитером
+      attachQuestionMeter(current)
+    } catch {
+      // элемент уже отдан другому графу — клип остаётся на своём выходе
     }
     applyQuestionClip(current, live)
-  }, [live, url, showMeter])
+  }, [live, url])
 
   useEffect(() => {
     if (!(node instanceof HTMLVideoElement)) return
