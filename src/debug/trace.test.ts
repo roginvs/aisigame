@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest'
+import { buildCommit, pageOrigin } from '../buildInfo.ts'
 import { formatDebugDump, noteLink, pushTrace } from './trace.ts'
 
 describe('formatDebugDump', () => {
@@ -56,5 +57,8 @@ describe('formatDebugDump', () => {
     expect(text).toContain('Ошибка API: bad')
     expect(text).toContain('Ведущая')
     expect(text).toContain('связь connected, микрофон live, звук blocked')
+    const tail = text.trimEnd().split('\n').slice(-2)
+    expect(tail).toEqual([`origin: ${pageOrigin() || '—'}`, `commit: ${buildCommit()}`])
+    expect(text).not.toContain('sk-')
   })
 })

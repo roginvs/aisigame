@@ -1,3 +1,5 @@
+import { buildCommit, pageOrigin } from '../buildInfo.ts'
+
 export type TraceKind = 'in' | 'out' | 'state' | 'chat' | 'note'
 
 export type ChatRole = 'host' | 'player' | 'judge'
@@ -98,6 +100,8 @@ export function formatDebugDump(extra: { path: string; context: unknown }): stri
     if (entry.detail !== undefined) lines.push(JSON.stringify(entry.detail))
     lines.push('')
   }
+  lines.push(`origin: ${pageOrigin() || '—'}`)
+  lines.push(`commit: ${buildCommit()}`)
   return lines.join('\n')
 }
 

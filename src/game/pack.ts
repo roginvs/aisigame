@@ -19,12 +19,30 @@ export function findQuestion(
   theme: string,
   value: number,
   kind: RoundKind,
+  playedIds: readonly string[] = [],
 ): Question | undefined {
   const needle = norm(theme)
   const inRound = questionsInRound(questions, roundIndex)
-  const themed = inRound.filter((question) => themeMatches(question, needle))
+  const themed = inRound.filter((question) => themeMatches(question, needle) && !playedIds.includes(question.id))
   if (kind === 'final') return themed[0]
   return themed.find((question) => question.value === value)
+}
+
+/** Следующий несыгранный вопрос ячейки. Для финала value = null: берётся тема целиком. */
+export function nextInCell(
+  questions: Question[],
+  roundIndex: number,
+  themeId: string,
+  value: number | null,
+  playedIds: readonly string[],
+): Question | undefined {
+  return questions.find(
+    (question) =>
+      question.roundIndex === roundIndex &&
+      question.themeId === themeId &&
+      (value === null || question.value === value) &&
+      !playedIds.includes(question.id),
+  )
 }
 
 function themeMatches(question: Question, needle: string): boolean {

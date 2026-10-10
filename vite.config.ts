@@ -3,6 +3,7 @@ import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import react from '@vitejs/plugin-react'
 import { defineConfig, type Plugin } from 'vite'
+import { commitStamp } from './commitStamp.ts'
 
 const rootDir = path.dirname(fileURLToPath(import.meta.url))
 const localPacksId = 'virtual:local-packs'
@@ -35,6 +36,9 @@ function localPackCatalog(): Plugin {
 // https://roginvs.github.io/aisigame/, so assets need that project prefix.
 export default defineConfig(({ command, mode }) => ({
   base: command === 'build' || mode === 'production' ? '/aisigame/' : '/',
+  define: {
+    __AISIGAME_COMMIT__: JSON.stringify(commitStamp()),
+  },
   plugins: [react(), localPackCatalog()],
   server: {
     host: true,

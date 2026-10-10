@@ -1,8 +1,8 @@
 import { useEffect, useMemo, useState, useSyncExternalStore } from 'react'
 import type { SnapshotFrom } from 'xstate'
-import { buttonsLive, falseStartCooling, falseStartOpen, gameMachine, isReadingPath, statePath } from '../game/machine.ts'
+import { buttonsLive, falseStartCooling, falseStartOpen, gameMachine, statePath } from '../game/machine.ts'
 import { falseStartMs } from '../options.ts'
-import { currentRound, questionById, roundPrices, roundThemes } from '../game/pack.ts'
+import { currentRound, nextInCell, questionById, roundPrices, roundThemes } from '../game/pack.ts'
 import { choiceIsAnswer } from '../game/choices.ts'
 import { answerIsPublic, stageMedia } from '../game/reveal.ts'
 import type { LinkStatus } from '../realtime/client.ts'
@@ -13,6 +13,7 @@ import { buzzKeyLabel, isKeyboardPlayer, playerFromBuzzKey } from './buzzKeys.ts
 import { ConversationChat, TechnicalLog } from './DebugChat.tsx'
 import { HostPresence } from './HostPresence.tsx'
 import { QuestionMedia } from './QuestionMedia.tsx'
+import { questionClipPlaying } from './questionClip.ts'
 import { remainingFraction, remainingSeconds } from './timerFraction.ts'
 
 function usageHint(totals: UsageTotals): string {
@@ -71,6 +72,21 @@ export function GameScreen(props: {
     () => stageMedia(questionMedia ?? [], answerMedia ?? [], showAnswer),
     [questionMedia, answerMedia, showAnswer],
   )
+  const held = paused || stopped
+  const questionLive = questionClipPlaying({
+    path,
+    missedCount: context.missedIds.length,
+    held,
+    finalRound,
+  })
+  const answerLive = showAnswer && !held
+  const quietQuestion = showAnswer
+    ? new Set(
+        (questionMedia ?? [])
+          .filter((item) => (item.kind === 'audio' || item.kind === 'video') && item.url)
+          .map((item) => item.url),
+      )
+    : undefined
 
   useEffect(() => {
     function onKeyDown(event: KeyboardEvent) {
@@ -151,7 +167,11 @@ export function GameScreen(props: {
                 ))}
               </ul>
             ) : null}
-            <QuestionMedia media={staged.slot} play={!paused && !stopped && !isReadingPath(path)} />
+            <QuestionMedia
+              media={staged.slot}
+              play={showAnswer ? answerLive : questionLive}
+              quiet={quietQuestion}
+            />
             {context.activePlayerId ? <p className="answerer">Отвечает игрок {context.activePlayerId}</p> : null}
             {showTimer && context.phaseStartedAt !== null && context.phaseDurationMs !== null ? (
               <Countdown startedAt={context.phaseStartedAt} durationMs={context.phaseDurationMs} />
@@ -160,7 +180,7 @@ export function GameScreen(props: {
             {showAnswer ? (
               <>
                 <p className="etalon">Правильный ответ: {question.answers.join(', ')}</p>
-                <QuestionMedia media={staged.answerAudio} play={!paused && !stopped} />
+                <QuestionMedia media={staged.answerAudio} play={answerLive} />
               </>
             ) : null}
           </article>
@@ -169,10 +189,8 @@ export function GameScreen(props: {
           {finalRound ? (
             <div className="final-themes">
               {boardThemes.map((theme) => {
-                const cell = context.questions.find(
-                  (item) => item.roundIndex === context.roundIndex && item.themeId === theme.id,
-                )
-                const played = cell ? context.playedIds.includes(cell.id) : true
+                const cell = nextInCell(context.questions, context.roundIndex, theme.id, null, context.playedIds)
+                const played = !cell
                 return (
                   <button
                     key={theme.id}
@@ -204,11 +222,14 @@ export function GameScreen(props: {
                 >
                   <div className="theme-name">{theme.name}</div>
                   {prices.map((value) => {
-                    const cell = context.questions.find(
-                      (item) =>
-                        item.roundIndex === context.roundIndex && item.themeId === theme.id && item.value === value,
+                    const cell = nextInCell(
+                      context.questions,
+                      context.roundIndex,
+                      theme.id,
+                      value,
+                      context.playedIds,
                     )
-                    const played = cell ? context.playedIds.includes(cell.id) : true
+                    const played = !cell
                     const current = cell?.id === context.activeQuestionId
                     return (
                       <button

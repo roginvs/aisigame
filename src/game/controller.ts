@@ -476,18 +476,33 @@ export function attachController(options: {
     const snapshotNow = actor.getSnapshot()
     const kind = currentRound(snapshotNow.context, snapshotNow.context.roundIndex)?.kind ?? 'normal'
     const transcript = choiceHeard.trim()
+    const played = snapshotNow.context.playedIds
     const local = matchSpokenCell(transcript, openChoiceCells(snapshotNow.context), kind)
-    const modelQuestion = findQuestion(
+    const knownQuestion = findQuestion(
       snapshotNow.context.questions,
       snapshotNow.context.roundIndex,
       themeId,
       value,
       kind,
     )
-    const played = snapshotNow.context.playedIds
+    const modelQuestion = findQuestion(
+      snapshotNow.context.questions,
+      snapshotNow.context.roundIndex,
+      themeId,
+      value,
+      kind,
+      played,
+    )
     const modelOk = Boolean(modelQuestion && confident && !played.includes(modelQuestion.id))
     const picked = local
-      ? findQuestion(snapshotNow.context.questions, snapshotNow.context.roundIndex, local.themeId, local.value, kind)
+      ? findQuestion(
+          snapshotNow.context.questions,
+          snapshotNow.context.roundIndex,
+          local.themeId,
+          local.value,
+          kind,
+          played,
+        )
       : modelOk
         ? modelQuestion
         : undefined
@@ -497,7 +512,7 @@ export function attachController(options: {
     pushJudgeLine(selectionChatText(transcript, Boolean(picked), cellLabel))
     if (!call || !picked) {
       const reason =
-        confident && modelQuestion
+        confident && knownQuestion
           ? 'Этот вопрос недоступен. Назовите другую тему и стоимость.'
           : 'Я не уверена, какую ячейку вы назвали. Повторите тему и стоимость.'
       if (call) client.sendToolOutput(call.callId, { accepted: false, reason })

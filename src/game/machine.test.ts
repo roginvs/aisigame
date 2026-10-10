@@ -3,6 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { gameConfig } from '../config.ts'
 import { announceInstructions } from './controller.ts'
 import { closeGuessCoin, falseStartCoin, gameMachine, phoneticRetryReason, statePath } from './machine.ts'
+import { nextInCell } from './pack.ts'
 import { playersFromNames } from './players.ts'
 import { demoPack } from './questions.ts'
 import type { QuestionPack } from './types.ts'
@@ -1377,4 +1378,88 @@ describe('game machine', () => {
     expect(statePath(actor.getSnapshot().value)).toBe('choosing.listening')
     expect(actor.getSnapshot().context.statusLine).toBe('Выберите тему финала')
   })
+
+  it('держит ячейку темы и номинала, пока в стопке есть несыгранный вопрос', () => {
+    const pack: QuestionPack = {
+      name: 'Стопка',
+      rounds: [{ index: 0, name: 'Разогрев', kind: 'normal' }],
+      warnings: [],
+      questions: [
+        {
+          id: 'r0-t0-100-0',
+          roundIndex: 0,
+          themeId: 'r0-t0',
+          themeName: 'Тема 1',
+          value: 100,
+          text: 'Первый',
+          answers: ['да'],
+        },
+        {
+          id: 'r0-t0-100-2',
+          roundIndex: 0,
+          themeId: 'r0-t0',
+          themeName: 'Тема 1',
+          value: 100,
+          text: 'Третий',
+          answers: ['да'],
+        },
+        {
+          id: 'r0-t1-100-0',
+          roundIndex: 0,
+          themeId: 'r0-t1',
+          themeName: 'Тема 2',
+          value: 100,
+          text: 'Другая тема',
+          answers: ['да'],
+        },
+      ],
+    }
+    const actor = createActor(gameMachine)
+    actor.start()
+    actor.send({ type: 'START_GAME', pack })
+    actor.send({ type: 'CONNECTED' })
+    actor.send({ type: 'HOST_AUDIO_FINISHED', purpose: 'welcome' })
+
+    actor.send({ type: 'QUESTION_SELECTED', themeId: 'Тема 1', value: 100 })
+    expect(actor.getSnapshot().context.activeQuestionId).toBe('r0-t0-100-0')
+    closeStack(actor, 'r0-t0-100-0')
+    const afterFirst = actor.getSnapshot().context.playedIds
+    expect(afterFirst).toEqual(['r0-t0-100-0'])
+    expect(nextInCell(pack.questions, 0, 'r0-t0', 100, afterFirst)?.id).toBe('r0-t0-100-2')
+    expect(statePath(actor.getSnapshot().value)).toBe('choosing.listening')
+
+    actor.send({ type: 'QUESTION_SELECTED', themeId: 'r0-t0', value: 100 })
+    expect(actor.getSnapshot().context.activeQuestionId).toBe('r0-t0-100-2')
+    closeStack(actor, 'r0-t0-100-2')
+    const afterStack = actor.getSnapshot().context.playedIds
+    expect(afterStack).toEqual(['r0-t0-100-0', 'r0-t0-100-2'])
+    expect(nextInCell(pack.questions, 0, 'r0-t0', 100, afterStack)).toBeUndefined()
+    expect(nextInCell(pack.questions, 0, 'r0-t1', 100, afterStack)?.id).toBe('r0-t1-100-0')
+
+    actor.send({ type: 'QUESTION_SELECTED', themeId: 'Тема 1', value: 100 })
+    expect(statePath(actor.getSnapshot().value)).toBe('choosing.clarifying')
+    actor.send({ type: 'HOST_AUDIO_FINISHED', purpose: 'clarify' })
+    actor.send({ type: 'QUESTION_SELECTED', themeId: 'Тема 2', value: 100 })
+    expect(actor.getSnapshot().context.activeQuestionId).toBe('r0-t1-100-0')
+  })
 })
+
+function closeStack(actor: ReturnType<typeof reachBuzzing>, questionId: string) {
+  vi.advanceTimersByTime(gameConfig.cellFlashMs)
+  actor.send({ type: 'HOST_AUDIO_FINISHED', purpose: 'read' })
+  actor.send({ type: 'BUZZER_PRESSED', playerId: 1 })
+  const attemptId = actor.getSnapshot().context.attemptId
+  actor.send({ type: 'PLAYER_SPEECH_FINISHED' })
+  actor.send({
+    type: 'ANSWER_JUDGED',
+    judgment: {
+      questionId,
+      playerId: 1,
+      attemptId,
+      status: 'correct',
+      heard: 'да',
+      reason: 'совпало',
+    },
+  })
+  actor.send({ type: 'HOST_AUDIO_FINISHED', purpose: 'announce' })
+}

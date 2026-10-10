@@ -1,5 +1,6 @@
 import { useEffect, useState, useSyncExternalStore } from 'react'
 import type { SnapshotFrom } from 'xstate'
+import { buildCommit, pageOrigin } from '../buildInfo.ts'
 import { copyDebugDump, getTrace, subscribeTrace, type ChatRole, type TraceEntry } from '../debug/trace.ts'
 import { gameMachine, statePath } from '../game/machine.ts'
 
@@ -70,6 +71,8 @@ export function TechnicalLog(props: { snapshot: SnapshotFrom<typeof gameMachine>
       <div className="chat-scroll">
         {entries.length === 0 ? <p className="chat-hint">Пока тишина.</p> : null}
         {entries.map((entry) => (visible(entry) ? <TechRow key={entry.id} entry={entry} /> : null))}
+        <p className="trace-line">origin {pageOrigin() || '—'}</p>
+        <p className="trace-line">commit {buildCommit()}</p>
         <div ref={setBottom} />
       </div>
     </aside>

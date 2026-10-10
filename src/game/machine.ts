@@ -361,7 +361,16 @@ export const gameMachine = setup({
     openQuestion: assign({
       activeQuestionId: ({ context, event }) => {
         if (event.type !== 'QUESTION_SELECTED') return null
-        return findQuestion(context.questions, context.roundIndex, event.themeId, event.value, roundKind(context))?.id ?? null
+        return (
+          findQuestion(
+            context.questions,
+            context.roundIndex,
+            event.themeId,
+            event.value,
+            roundKind(context),
+            context.playedIds,
+          )?.id ?? null
+        )
       },
       activePlayerId: () => null,
       missedIds: () => [],
@@ -378,7 +387,14 @@ export const gameMachine = setup({
       falseStarts: () => ({}),
       statusLine: ({ context, event }) => {
         if (event.type !== 'QUESTION_SELECTED') return 'Открываю вопрос'
-        const question = findQuestion(context.questions, context.roundIndex, event.themeId, event.value, roundKind(context))
+        const question = findQuestion(
+          context.questions,
+          context.roundIndex,
+          event.themeId,
+          event.value,
+          roundKind(context),
+          context.playedIds,
+        )
         if (!question) return 'Открываю вопрос'
         return roundKind(context) === 'final' ? question.themeName : `${question.themeName}, ${question.value}`
       },
@@ -715,17 +731,38 @@ export const gameMachine = setup({
       nextPlayableRound(context.rounds, context.questions, context.roundIndex) === -1,
     questionAvailable: ({ context, event }) => {
       if (event.type !== 'QUESTION_SELECTED') return false
-      const question = findQuestion(context.questions, context.roundIndex, event.themeId, event.value, roundKind(context))
+      const question = findQuestion(
+        context.questions,
+        context.roundIndex,
+        event.themeId,
+        event.value,
+        roundKind(context),
+        context.playedIds,
+      )
       return Boolean(question && !context.playedIds.includes(question.id))
     },
     finalQuestion: ({ context, event }) => {
       if (event.type !== 'QUESTION_SELECTED' || !isFinal(context)) return false
-      const question = findQuestion(context.questions, context.roundIndex, event.themeId, event.value, 'final')
+      const question = findQuestion(
+        context.questions,
+        context.roundIndex,
+        event.themeId,
+        event.value,
+        'final',
+        context.playedIds,
+      )
       return Boolean(question && !context.playedIds.includes(question.id) && context.players.some((player) => player.score > 0))
     },
     finalWithoutPlayers: ({ context, event }) => {
       if (event.type !== 'QUESTION_SELECTED' || !isFinal(context)) return false
-      const question = findQuestion(context.questions, context.roundIndex, event.themeId, event.value, 'final')
+      const question = findQuestion(
+        context.questions,
+        context.roundIndex,
+        event.themeId,
+        event.value,
+        'final',
+        context.playedIds,
+      )
       return Boolean(question && context.players.every((player) => player.score <= 0))
     },
     betMatches: ({ context, event }) => {
