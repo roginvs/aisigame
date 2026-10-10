@@ -6,6 +6,8 @@
 
 `docs/CONTEXT.md` тоже нужно обновлять постоянно. Не оставляй важные договорённости только в чате.
 
+Игра — этот репозиторий. Каталог раньше лежал в `playground/aisigame` и скопирован сюда без истории того git. Канонический remote: https://github.com/roginvs/aisigame. Локальный путь: `~/aisigame`.
+
 ## Сейчас
 
 Прототип уже запускается: связь, машина, пакет вопросов, несколько раундов и финал.
@@ -60,7 +62,7 @@ npm run look
 
 Dev-сервер слушает сеть на порту 5173, чтобы открыть его с планшета.
 
-Живой сайт: https://roginvs.github.io/aisigame/. Продакшен-сборка ставит Vite `base` `/aisigame/`, чтобы пакеты и портрет открывались с адреса проекта. `npm run dev` и `npm run look` остаются на `/`.
+Живой сайт: https://roginvs.github.io/aisigame/. Продакшен-сборка ставит Vite `base` `/aisigame/`, чтобы пакеты и портрет открывались с адреса проекта. `npm run dev` и `npm run look` остаются на `/`. Pull request и push в `master` проверяет `.github/workflows/ci.yml` (`npm ci`, `npm test`, `npx tsc -b`). Push в `master` ещё собирает сайт в `.github/workflows/pages.yml`: те же проверки, затем `npm run build`, и публикует Pages.
 
 ## Куда класть код
 

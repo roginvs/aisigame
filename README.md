@@ -6,6 +6,7 @@
 
 ```bash
 npm install
+npm run packs
 npm run dev
 npm test
 ```
@@ -18,4 +19,6 @@ npm test
 
 Живая сборка публикуется на GitHub Pages: https://roginvs.github.io/aisigame/
 
-На pull request и на push в `master` GitHub Actions ставит зависимости из lockfile, гоняет `npm test` и `npx tsc -b`. Push в `master` ещё и собирает сайт и выкладывает его на Pages.
+На pull request и на push в `master` workflow `.github/workflows/ci.yml` ставит зависимости из lockfile, гоняет `npm test` и `npx tsc -b`. Push в `master` ещё запускает `.github/workflows/pages.yml`: те же проверки, `npm run build` и выкладка на Pages.
+
+Каталог раньше лежал в `playground/aisigame` и скопирован в этот репозиторий без той истории git. Локальный путь — `~/aisigame`, remote — https://github.com/roginvs/aisigame.

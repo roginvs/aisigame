@@ -6,7 +6,7 @@
 
 Код прототипа собран и проверяется в браузере. Тесты машины лежат в `src/game/machine.test.ts`. Живой вызов OpenAI из этой среды не выполнялся: его делает автор своим ключом.
 
-Репозиторий отдельный: https://github.com/roginvs/aisigame. Сайт выкладывается GitHub Actions на GitHub Pages, https://roginvs.github.io/aisigame/. Сборка для Pages использует Vite `base` `/aisigame/`; локальные `npm run dev` и `npm run look` остаются на `/`. Ключ API по-прежнему вводится в браузере и в репозиторий не пишется.
+Репозиторий отдельный: https://github.com/roginvs/aisigame. Каталог раньше лежал в `playground/aisigame` и скопирован сюда без истории того git; локальный путь — `~/aisigame`. Сайт на push в `master` выкладывает `.github/workflows/pages.yml` на GitHub Pages, https://roginvs.github.io/aisigame/. Сборка для Pages использует Vite `base` `/aisigame/`; локальные `npm run dev` и `npm run look` остаются на `/`. Pull request и push в `master` проверяет `.github/workflows/ci.yml`: `npm ci`, `npm test`, `npx tsc -b`. Ключ API по-прежнему вводится в браузере и в репозиторий не пишется.
 
 ## 1. Что делаем сейчас
 
