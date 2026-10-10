@@ -46,6 +46,16 @@ ENABLE_P2P=0
 docker compose up -d
 ```
 
+Если Docker отвечает `unknown shorthand flag: 'd' in -d` и отсылает к `docker --help`, подкоманды `compose` на сервере нет. Флаг `-d` («в фоне») читает сам `docker`, а у него такого флага нет. Проверьте `docker-compose version` и `docker compose version`. Если жива команда с дефисом, запускайте `docker-compose up -d`. Если не отвечает ни одна, на Ubuntu поставьте плагин и вернитесь к команде с пробелом:
+
+```bash
+apt-get update
+apt-get install -y docker-compose-v2
+docker compose up -d
+```
+
+Пакета `docker-compose-v2` может не быть. Тогда `apt-get install -y docker-compose` и снова команда с дефисом.
+
 После правки `.env` команда та же. Каталог `~/.jitsi-meet-cfg` не удалять: там пароли и сертификаты XMPP. В файрволе наружу уже открытый 443 и UDP 10000. Порты 8000 и 8443 наружу не публикуем.
 
 ### Nginx
