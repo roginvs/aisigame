@@ -60,7 +60,9 @@ docker compose up -d
 
 ### Nginx
 
-В уже существующий `server` с сертификатом `fallout-nevada.ru`. Префикс `/jitsi` снимается: контейнер ждёт пути от корня. Более конкретные `location` стоят выше общего.
+В уже существующий `server` с сертификатом `fallout-nevada.ru`. Старые `location` на `/jitsi` из этого `server` убрать и вставить блок ниже целиком. Префикс `/jitsi` снимается: контейнер ждёт пути от корня.
+
+Одного общего `location /jitsi/` мало. Он отдаёт страницу, `config.js` и библиотеку, но заголовки `Upgrade` и `Connection` до Prosody не доходят. Игре нужны отдельные `location` для websocket и для канала моста, с этими двумя заголовками.
 
 ```nginx
 location = /jitsi/xmpp-websocket {
@@ -103,4 +105,52 @@ location /jitsi/ {
 }
 ```
 
-Проверка: `curl -s http://127.0.0.1:8000/config.js` содержит `config.hosts.domain = 'meet.jitsi'`. Снаружи открываются `https://fallout-nevada.ru/jitsi/config.js` и `https://fallout-nevada.ru/jitsi/libs/lib-jitsi-meet.min.js`. Страница Meet по адресу `/jitsi/` может открываться криво. Игра её не открывает.
+После вставки:
+
+```bash
+nginx -t && systemctl reload nginx
+```
+
+### Проверки
+
+Игре нужны `config.js`, библиотека и websocket. Страницу Meet она не открывает. Команды ниже годятся с любой машины, кроме тех, где написано «на сервере».
+
+Контейнеры на сервере. В `docker ps` четыре строки: web, prosody, jicofo, jvb. У web порт `127.0.0.1:8000->8000/tcp`, не `0.0.0.0:8000`. У jvb есть `0.0.0.0:10000->10000/udp`. Порты 8000 и 8443 снаружи не публикуются. UDP 10000 в файрволе открыт: звук и видео идут мимо nginx, и `curl` этот порт не проверяет.
+
+Страница. `curl -sI https://fallout-nevada.ru/jitsi/` начинается с `HTTP/1.1 200`. В браузере она без стилей: в HTML стоит `<base href="/">`, поэтому стили запрашиваются с корня сайта. `curl -sI https://fallout-nevada.ru/jitsi/css/all.css` даёт `200`, а `https://fallout-nevada.ru/css/all.css` даёт `404`. Так и должно быть.
+
+`config.js`:
+
+```bash
+curl -fsS https://fallout-nevada.ru/jitsi/config.js
+```
+
+В тексте есть четыре строки:
+
+```javascript
+config.hosts.domain = 'meet.jitsi';
+config.bosh = 'https://fallout-nevada.ru/jitsi/' + subdir + 'http-bind';
+config.websocket = 'wss://fallout-nevada.ru/jitsi/' + subdir + 'xmpp-websocket';
+```
+
+И в `config.p2p` стоит `enabled: false`. Домен `meet.jitsi` внутренний. Публичный адрес игры — `https://fallout-nevada.ru/jitsi`. Та же проверка на сервере: `curl -fsS http://127.0.0.1:8000/config.js`.
+
+Библиотека. `curl -sI https://fallout-nevada.ru/jitsi/libs/lib-jitsi-meet.min.js` даёт `200` и `Content-Type: application/javascript`. Файл больше мегабайта. Начало файла — комментарий лицензии `lib-jitsi-meet.min.js`, не HTML страницы.
+
+BOSH. `curl -s https://fallout-nevada.ru/jitsi/http-bind` даёт `200` и страницу «Prosody BOSH endpoint». Это запасной канал. Игра ходит по websocket.
+
+Websocket. В запросе обязателен `Sec-WebSocket-Protocol: xmpp`: так открывает сокет `lib-jitsi-meet`. Первая строка — `101 Switching Protocols`, среди заголовков есть `Sec-WebSocket-Protocol: xmpp`.
+
+```bash
+curl -sD - -o /dev/null --max-time 5 \
+  -H 'Connection: Upgrade' \
+  -H 'Upgrade: websocket' \
+  -H 'Sec-WebSocket-Version: 13' \
+  -H 'Sec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==' \
+  -H 'Sec-WebSocket-Protocol: xmpp' \
+  https://fallout-nevada.ru/jitsi/xmpp-websocket
+```
+
+Без заголовка `Sec-WebSocket-Protocol: xmpp` Prosody отвечает `501 Not Implemented`, даже когда nginx и модуль websocket в порядке. `curl -I` здесь не годится: это метод HEAD, не рукопожатие.
+
+Если снаружи не `101`, ту же команду запускают на сервере, подставив `http://127.0.0.1:8000/xmpp-websocket`. На localhost `101`, а снаружи другой код — в загруженный nginx не попал `location = /jitsi/xmpp-websocket`. Это видно так: `nginx -T | grep xmpp-websocket`. На localhost тоже нет `101`, хотя заголовок `xmpp` есть — смотреть контейнер web и Prosody, не публичный nginx. `501` без этого заголовка ни о чём не говорит.
