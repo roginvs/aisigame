@@ -119,6 +119,44 @@ describe('announceInstructions', () => {
     expect(line).not.toContain('неверно')
   })
 
+  it('не разобранный закрытый ответ называет только эталон', () => {
+    const sample = context({
+      announceKind: 'unclear',
+      judgmentStatus: 'unintelligible',
+    })
+    const line = announceInstructions(sample)
+    expect(line).toBe('Боевой Буратино')
+    expect(verbatimAnnouncement(sample)).toBe(line)
+    expect(line).not.toContain('не засчитан')
+  })
+
+  it('не разобранный ответ с несколькими формами читает эталон и коротко закрывает', () => {
+    const base = context()
+    const sample = context({
+      announceKind: 'unclear',
+      judgmentStatus: 'unintelligible',
+      judgmentReason: 'Реплика обрывочная и не позволяет понять осмысленный ответ.',
+      questions: [{ ...base.questions[0], answers: ['Солнце', 'солнечная звезда'] }],
+    })
+    const line = announceInstructions(sample)
+    expect(verbatimAnnouncement(sample)).toBeNull()
+    expect(line.startsWith('Сначала произнеси один самый очевидный ответ из списка:')).toBe(true)
+    expect(line).toContain('«Солнце»')
+    expect(line).toContain('не засчитан')
+    expect(line).not.toContain('обрывочная')
+  })
+
+  it('не разобранный ответ не называет эталон, пока ячейка открыта', () => {
+    const sample = context({
+      announceKind: 'unclear',
+      judgmentStatus: 'unintelligible',
+      playedIds: [],
+    })
+    const line = announceInstructions(sample)
+    expect(verbatimAnnouncement(sample)).toBeNull()
+    expect(line).not.toContain('Боевой Буратино')
+  })
+
   it('из нескольких ответов просит один очевидный и не велит читать список целиком', () => {
     const base = context()
     const line = announceInstructions(

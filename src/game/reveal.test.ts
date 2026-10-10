@@ -7,6 +7,7 @@ describe('answerIsPublic', () => {
     expect(answerIsPublic('nobody', true)).toBe(true)
     expect(answerIsPublic('incorrect', true)).toBe(true)
     expect(answerIsPublic('silence', true)).toBe(true)
+    expect(answerIsPublic('unclear', true)).toBe(true)
   })
 
   it('прячет ответ после верного и пока ячейка ещё открыта', () => {
@@ -14,7 +15,7 @@ describe('answerIsPublic', () => {
     expect(answerIsPublic('incorrect', false)).toBe(false)
     expect(answerIsPublic('silence', false)).toBe(false)
     expect(answerIsPublic('nobody', false)).toBe(false)
-    expect(answerIsPublic('unclear', true)).toBe(false)
+    expect(answerIsPublic('unclear', false)).toBe(false)
   })
 })
 
@@ -87,7 +88,7 @@ describe('chatAnswerNote', () => {
     ).toBe('Правильный ответ: Солнце')
   })
 
-  it('не пишет эталон при спорном закрытии и без ответов пакета', () => {
+  it('пишет эталон, когда закрытый ответ не разобрали, и молчит без ответов пакета', () => {
     expect(
       chatAnswerNote({
         kind: 'unclear',
@@ -95,7 +96,7 @@ describe('chatAnswerNote', () => {
         answers: ['Солнце'],
         spoken: 'Не засчитала.',
       }),
-    ).toBe('')
+    ).toBe('Правильный ответ: Солнце')
     expect(
       chatAnswerNote({
         kind: 'correct',

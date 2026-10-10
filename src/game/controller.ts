@@ -342,7 +342,7 @@ export function attachController(options: {
 
   function requestSelection(context: GameContext): void {
     toolTurn += 1
-    client.requestTool('select', toolTurn, 'selectQuestion', selectionInstructions(context, choiceHeard))
+    client.requestTool('select', toolTurn, 'selectQuestion', selectionInstructions(context, choiceHeard), true)
   }
 
   async function considerChoice(durationMs: number, itemId: string | null): Promise<void> {
@@ -748,6 +748,7 @@ ${availableLines(context)}
 Вызови selectQuestion. themeId — id или название темы из списка, value — номинал.
 confident=true только если в реплике ясно есть и тема, и номинал.
 Кашель, междометие или номинал без темы: confident=false, value=0.
+Если в реплике ясно названы и тема, и номинал, confident=true и value равен этому номиналу. Ноль ставь только когда стоимости в реплике нет.
 Не угадывай ячейку. heard — дословно, что сказал игрок.
 Если в названии темы стоят точки или многоточие, это та же тема, сказанная без точек.
 Не зачитывай вопрос и не говори ответ.
@@ -849,13 +850,16 @@ function withCloseGuess(cue: string, context: GameContext): string {
 
 /** Дословная реплика, когда ответ один: модель не должна пересказывать задание. */
 export function verbatimAnnouncement(context: GameContext): string | null {
-  if (context.announceKind !== 'nobody' || closeGuessApplies(context)) return null
+  const kind = context.announceKind
+  if (kind !== 'nobody' && kind !== 'unclear') return null
+  if (kind === 'nobody' && closeGuessApplies(context)) return null
+  if (kind === 'unclear' && answerStillHidden(context)) return null
   const question = questionById(context.questions, context.activeQuestionId)
   const forms = spokenChoiceForms(question?.answers ?? [], question?.choices ?? [])
   if (forms.length !== 1) return null
   const answer = forms[0] ?? ''
   if (!answer) return null
-  if (context.spokeWithoutButton || context.talkedDuringRead) {
+  if (kind === 'nobody' && (context.spokeWithoutButton || context.talkedDuringRead)) {
     return `${answer}. Ответ называют только после кнопки.`
   }
   return answer
@@ -944,10 +948,15 @@ export function announceInstructions(context: GameContext): string {
       .join(' ')
     return `${withCloseGuess(cue, context)} ${extra} Не произноси названия тем и цены.`
   }
+  if (kind === 'unclear' && publish) {
+    const exact = verbatimAnnouncement(context)
+    if (exact) return exact
+    return `${cue} Затем одной короткой фразой скажи, что ответ не засчитан и очки не изменились, и предложи выбрать следующий вопрос. Темы и номиналы не перечисляй. ${finalNote}`.trim()
+  }
   if (context.judgmentStatus === 'needs_clarification') {
     return `Одной фразой скажи, что ответ близок, но сейчас очки не меняются. Предложи выбрать следующий вопрос. Темы и номиналы не перечисляй. ${finalNote}`
   }
-  return `Одной фразой скажи, что ответ не удалось засчитать и очки не изменились. Затем предложи выбрать следующий вопрос. Темы и номиналы не перечисляй. ${finalNote} ${context.judgmentReason}`
+  return `Одной фразой скажи, что ответ не удалось засчитать и очки не изменились. Затем предложи выбрать следующий вопрос. Темы и номиналы не перечисляй. ${finalNote}`
 }
 
 export function finishedInstructions(context: GameContext): string {

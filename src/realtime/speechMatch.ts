@@ -103,7 +103,7 @@ export function verbatimResponse(text: string, meta: { purpose: string; turn: nu
       {
         type: 'message' as const,
         role: 'user' as const,
-        content: [{ type: 'input_text' as const, text: `Скажи вслух ровно эту фразу и больше ничего: ${text}` }],
+        content: [{ type: 'input_text' as const, text }],
       },
     ],
   }
