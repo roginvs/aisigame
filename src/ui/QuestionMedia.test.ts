@@ -2,6 +2,7 @@ import { createElement } from 'react'
 import { renderToStaticMarkup } from 'react-dom/server'
 import { describe, expect, it } from 'vitest'
 import { QuestionClip, QuestionMedia } from './QuestionMedia.tsx'
+import { meterRestAngle } from './QuestionMeter.tsx'
 
 describe('QuestionClip', () => {
   it('без кнопок, сам играет и крутится, пока клип должен звучать', () => {
@@ -10,6 +11,8 @@ describe('QuestionClip', () => {
     expect(html).toMatch(/autoplay/i)
     expect(html).toMatch(/\bloop\b/i)
     expect(html).toContain('data-live="1"')
+    expect(html).toContain('vu-meter')
+    expect(html).toContain(`rotate(${meterRestAngle}`)
   })
 
   it('на паузе нет кнопок, цикла и автозапуска', () => {
@@ -19,6 +22,7 @@ describe('QuestionClip', () => {
     expect(html).not.toMatch(/\bloop\b/i)
     expect(html).toContain('data-live="0"')
     expect(html).toMatch(/playsinline/i)
+    expect(html).not.toContain('vu-meter')
   })
 
   it('медиа вопроса: картинка как есть, звук без кнопок; под ответ цикл снят', () => {
@@ -32,6 +36,7 @@ describe('QuestionClip', () => {
       }),
     )
     expect(playing).toContain('<img')
+    expect(playing).toContain('vu-meter')
     expect(playing).not.toMatch(/controls/i)
     expect(playing).toMatch(/autoplay/i)
     expect(playing).toMatch(/\bloop\b/i)
@@ -47,5 +52,7 @@ describe('QuestionClip', () => {
     expect(quiet).not.toMatch(/autoplay/i)
     expect(quiet).not.toMatch(/\bloop\b/i)
     expect(quiet).toContain('data-live="0"')
+    expect(quiet).toContain('vu-meter')
+    expect(quiet).toContain(`rotate(${meterRestAngle}`)
   })
 })

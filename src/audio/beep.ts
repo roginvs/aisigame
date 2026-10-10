@@ -11,9 +11,14 @@ export function unlockAudio(): void {
   void ctx.resume()
 }
 
+/** Контекст, который открывает жест старта. Индикатор вопроса берёт его же, чтобы не остаться suspended. */
+export function gameAudioContext(): AudioContext {
+  return ensureContext()
+}
+
 /**
  * Пи-пи-пи через Web Audio, не через элемент <audio>.
- * Пауза клипа вопроса этот сигнал не останавливает: у него свой контекст, не медиа ячейки.
+ * Пауза клипа вопроса этот сигнал не останавливает: осциллятор идёт в выход контекста, не в анализатор клипа.
  */
 export function playTimeoutBeep(): void {
   const ctx = ensureContext()

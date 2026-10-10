@@ -435,6 +435,35 @@ button.continue-with-file .continue-file {
 
 .question-media audio { width: 100%; }
 
+.question-clip { display: contents; }
+
+.question-clip.has-meter {
+  display: grid;
+  position: relative;
+  width: min(100%, 440px);
+  min-height: 128px;
+  place-items: center;
+}
+
+.question-clip.has-meter audio,
+.question-clip.has-meter video {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  opacity: 0;
+  pointer-events: none;
+}
+
+.vu-meter { width: min(100%, 440px); }
+
+.vu-meter svg {
+  display: block;
+  width: 100%;
+  height: auto;
+}
+
 .timer-bar {
   position: absolute;
   right: 0;

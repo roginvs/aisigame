@@ -1,5 +1,7 @@
-import { useCallback, useEffect, useRef } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
+import { attachQuestionMeter } from '../audio/questionMeter.ts'
 import type { QuestionMedia as MediaItem } from '../game/types.ts'
+import { QuestionMeter } from './QuestionMeter.tsx'
 import { applyQuestionClip } from './questionClip.ts'
 
 export function QuestionMedia(props: { media: MediaItem[]; play: boolean; quiet?: ReadonlySet<string> }) {
@@ -21,30 +23,55 @@ export function QuestionMedia(props: { media: MediaItem[]; play: boolean; quiet?
 export function QuestionClip(props: { kind: 'audio' | 'video'; url: string; live: boolean }) {
   const { kind, url, live } = props
   const nodeRef = useRef<HTMLMediaElement | null>(null)
-  const setNode = useCallback((node: HTMLMediaElement | null) => {
-    nodeRef.current = node
+  const [node, setNode] = useState<HTMLMediaElement | null>(null)
+  const [audioOnlyVideo, setAudioOnlyVideo] = useState(false)
+  const takeNode = useCallback((next: HTMLMediaElement | null) => {
+    nodeRef.current = next
+    setNode((current) => (current === next ? current : next))
   }, [])
+  const showMeter = kind === 'audio' || audioOnlyVideo
 
   useEffect(() => {
-    const node = nodeRef.current
-    if (node) applyQuestionClip(node, live)
-  }, [live, url])
+    const current = nodeRef.current
+    if (!current) return
+    if (showMeter) {
+      try {
+        attachQuestionMeter(current)
+      } catch {
+        // элемент уже отдан другому графу — клип остаётся на своём выходе
+      }
+    }
+    applyQuestionClip(current, live)
+  }, [live, url, showMeter])
 
-  if (kind === 'audio') {
-    return (
-      <audio ref={setNode} src={url} data-live={live ? '1' : '0'} autoPlay={live} loop={live} preload="auto" />
-    )
-  }
+  useEffect(() => {
+    if (!(node instanceof HTMLVideoElement)) return
+    const sync = () => {
+      if (node.readyState < HTMLMediaElement.HAVE_METADATA) return
+      setAudioOnlyVideo(node.videoWidth === 0)
+    }
+    sync()
+    node.addEventListener('loadedmetadata', sync)
+    return () => node.removeEventListener('loadedmetadata', sync)
+  }, [node])
+
   return (
-    <video
-      ref={setNode}
-      src={url}
-      data-live={live ? '1' : '0'}
-      autoPlay={live}
-      loop={live}
-      playsInline
-      preload="auto"
-    />
+    <div className={showMeter ? 'question-clip has-meter' : 'question-clip'}>
+      {kind === 'audio' ? (
+        <audio ref={takeNode} src={url} data-live={live ? '1' : '0'} autoPlay={live} loop={live} preload="auto" />
+      ) : (
+        <video
+          ref={takeNode}
+          src={url}
+          data-live={live ? '1' : '0'}
+          autoPlay={live}
+          loop={live}
+          playsInline
+          preload="auto"
+        />
+      )}
+      {showMeter ? <QuestionMeter node={node} live={live} /> : null}
+    </div>
   )
 }
 
