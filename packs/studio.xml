@@ -1,0 +1,40 @@
+<?xml version="1.0" encoding="utf-8"?>
+<package name="Наглядно">
+  <rounds>
+    <round name="Первый раунд">
+      <themes>
+        <theme name="Наглядно">
+          <questions>
+            <question price="100">
+              <params>
+                <param name="question" type="content">
+                  <item type="image" isRef="true">studio/circle.svg</item>
+                  <item>Какого цвета круг на картинке?</item>
+                </param>
+              </params>
+              <right><answer>красный</answer><answer>красного цвета</answer></right>
+            </question>
+            <question price="200">
+              <params>
+                <param name="question" type="content">
+                  <item type="audio" isRef="true">studio/beeps.wav</item>
+                  <item>Сколько отдельных сигналов вы услышали?</item>
+                </param>
+              </params>
+              <right><answer>3</answer><answer>три</answer><answer>три сигнала</answer></right>
+            </question>
+            <question price="300">
+              <params>
+                <param name="question" type="content">
+                  <item type="video" isRef="true">studio/square.mp4</item>
+                  <item>Какая фигура показана в ролике?</item>
+                </param>
+              </params>
+              <right><answer>квадрат</answer><answer>белый квадрат</answer></right>
+            </question>
+          </questions>
+        </theme>
+      </themes>
+    </round>
+  </rounds>
+</package>

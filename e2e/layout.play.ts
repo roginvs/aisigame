@@ -1,0 +1,96 @@
+import { expect, test } from '@playwright/test'
+
+test('экран вопроса без скроллбаров и с нормальными репликами', async ({ page }) => {
+  await page.goto('/?mock=1')
+  await page.getByRole('button', { name: 'Начать игру' }).click()
+  await expect(page.locator('.talk .status-line')).toHaveCount(0)
+  await expect(page.locator('.talk .host .host-line')).toHaveText('назовите тему и стоимость')
+  await expect(page.getByRole('button', { name: 'Остановить' })).toHaveCount(0)
+  await expect(page.getByRole('button', { name: 'Пауза' })).toBeVisible()
+  await expect(page.getByRole('button', { name: 'Выход' })).toBeVisible()
+  await expect(page.locator('.talk .host')).not.toContainText('Ведущая слушает')
+  await expect(page.locator('.tech-column')).toHaveCount(0)
+  await expect(page.locator('.tech-edge')).toHaveCount(0)
+  await page.screenshot({ path: 'test-results/layout-board.png' })
+
+  await hear(page, 'Наглядно 100')
+  await expect(page.getByRole('heading', { name: 'Какого цвета круг на картинке?' })).toBeVisible()
+  await expect(page.getByText('Жмите кнопку')).toBeVisible()
+
+  await hear(page, 'Аранжировать')
+  await expect(page.locator('.bubble.from-host', { hasText: 'Какого цвета круг' })).toBeVisible()
+  await page.getByRole('button', { name: 'Игрок 2', exact: true }).click()
+  await expect(page.locator('.answerer')).toHaveText('Отвечает игрок 2')
+
+  await page.screenshot({ path: 'test-results/layout-question.png' })
+
+  const questionBox = await page.locator('.question').boundingBox()
+  const hostBox = await page.locator('.talk .host').boundingBox()
+  const chatBox = await page.locator('.talk .chat-column').boundingBox()
+  expect(questionBox && hostBox && chatBox).toBeTruthy()
+  if (!questionBox || !hostBox || !chatBox) return
+  expect(hostBox.y + hostBox.height).toBeLessThanOrEqual(chatBox.y + 4)
+  expect(hostBox.x).toBeGreaterThan(questionBox.x + questionBox.width - 8)
+  expect(chatBox.width).toBeGreaterThan(320)
+  const fontSize = await page.locator('.question h2').evaluate((node) => Number.parseFloat(getComputedStyle(node).fontSize))
+  expect(fontSize).toBeGreaterThanOrEqual(28)
+
+  const host = page.locator('.bubble.from-host', { hasText: 'Какого цвета круг' })
+  const shape = await host.evaluate((element) => {
+    const column = element.closest('.chat-scroll')
+    const style = getComputedStyle(element)
+    return {
+      display: style.display,
+      columns: style.gridTemplateColumns,
+      bubble: element.clientWidth,
+      column: column?.clientWidth ?? 0,
+      sideways: element.scrollWidth - element.clientWidth,
+    }
+  })
+  expect(shape.display).toBe('block')
+  expect(shape.columns).toBe('none')
+  expect(shape.bubble).toBeGreaterThan(180)
+  expect(shape.column - shape.bubble).toBeLessThan(40)
+  expect(shape.sideways).toBeLessThanOrEqual(1)
+
+  for (const selector of ['.question', '.chat-scroll']) {
+    const bars = await page.locator(selector).evaluateAll((nodes) =>
+      nodes.map((node) => ({
+        gutter: node.offsetWidth - node.clientWidth,
+        sideways: node.scrollWidth - node.clientWidth,
+      })),
+    )
+    for (const bar of bars) {
+      expect(bar.gutter).toBe(0)
+      expect(bar.sideways).toBeLessThanOrEqual(1)
+    }
+  }
+
+  const image = page.locator('.question-media img')
+  await expect(image).toBeVisible()
+  const imageBox = await image.boundingBox()
+  const answerer = await page.locator('.answerer').boundingBox()
+  expect(questionBox).not.toBeNull()
+  expect(imageBox).not.toBeNull()
+  expect(answerer).not.toBeNull()
+  if (!questionBox || !imageBox || !answerer) return
+  expect(imageBox.y).toBeGreaterThanOrEqual(questionBox.y - 1)
+  expect(imageBox.y + imageBox.height).toBeLessThanOrEqual(questionBox.y + questionBox.height + 2)
+  expect(answerer.y + answerer.height).toBeLessThanOrEqual(questionBox.y + questionBox.height + 2)
+
+  await page.getByRole('button', { name: 'Техническое' }).click()
+  await expect(page.locator('.tech-hide')).toHaveCount(0)
+  await expect(page.locator('.tech-column time')).toHaveCount(0)
+  await expect(page.locator('.tech-column .trace-line').first()).toHaveAttribute('title', /\d{2}:\d{2}:\d{2}/)
+  await expect(page.locator('.cost')).toHaveText('973')
+  await expect(page.locator('.topbar')).not.toContainText('$')
+})
+
+async function hear(page: import('@playwright/test').Page, text: string): Promise<void> {
+  await page.evaluate((line) => {
+    const controls = (window as unknown as { __aisigame?: { hear: (text: string, durationMs?: number) => void } })
+      .__aisigame
+    if (!controls) throw new Error('нет заглушки ведущей')
+    controls.hear(line, 1400)
+  }, text)
+}

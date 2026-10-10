@@ -1,0 +1,40 @@
+# Logs
+logs
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+lerna-debug.log*
+
+node_modules
+dist
+test-results
+playwright-report
+dist-ssr
+coverage
+*.tsbuildinfo
+*.local
+.env
+.env.*
+
+# Editor directories and files
+.vscode/*
+!.vscode/extensions.json
+.idea
+.DS_Store
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+*.sw?
+
+# Local third-party SIGame packs for testing. Project demos in this folder stay tracked.
+public/packs/Nochnye_posidelki_80.siq
+public/packs/Pak_chillovo-knopochny_3.siq
+public/packs/SolyankOchka.siq
+public/packs/Winter_is_Coming.siq
+public/packs/Zhyostkaya_solyanochka.siq
+public/packs/muzykalny_pak.siq
+public/packs/paki_dlya_debilov_v1_7.siq
+public/packs/solyanka_qxesh.siq

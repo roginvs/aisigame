@@ -1,0 +1,36 @@
+<?xml version="1.0" encoding="utf-8"?>
+<package name="Демо">
+  <rounds>
+    <round name="Первый раунд">
+      <themes>
+        <theme name="История">
+          <questions>
+            <question price="100"><params><param name="question" type="content"><item>Как звали первого римского императора?</item></param></params><right><answer>Октавиан Август</answer><answer>Август</answer><answer>Гай Октавиан</answer></right></question>
+            <question price="200"><params><param name="question" type="content"><item>В каком году пала Западная Римская империя?</item></param></params><right><answer>476</answer><answer>476 год</answer></right></question>
+            <question price="300"><params><param name="question" type="content"><item>Кто был первым президентом Соединённых Штатов?</item></param></params><right><answer>Джордж Вашингтон</answer><answer>Вашингтон</answer></right></question>
+            <question price="400"><params><param name="question" type="content"><item>Как назывался древний торговый путь из Китая в Европу?</item></param></params><right><answer>Великий шёлковый путь</answer><answer>Шёлковый путь</answer></right></question>
+            <question price="500"><params><param name="question" type="content"><item>Какой город был столицей Византийской империи?</item></param></params><right><answer>Константинополь</answer><answer>Царьград</answer></right></question>
+          </questions>
+        </theme>
+        <theme name="Космос">
+          <questions>
+            <question price="100"><params><param name="question" type="content"><item>Как называется ближайшая к Земле звезда?</item></param></params><right><answer>Солнце</answer></right></question>
+            <question price="200"><params><param name="question" type="content"><item>Какая планета Солнечной системы знаменита яркими кольцами?</item></param></params><right><answer>Сатурн</answer></right></question>
+            <question price="300"><params><param name="question" type="content"><item>Кто стал первым человеком, побывавшим в космосе?</item></param></params><right><answer>Юрий Гагарин</answer><answer>Гагарин</answer></right></question>
+            <question price="400"><params><param name="question" type="content"><item>Как называется галактика, в которой находится Солнечная система?</item></param></params><right><answer>Млечный Путь</answer><answer>Млечный путь</answer></right></question>
+            <question price="500"><params><param name="question" type="content"><item>Как назывался советский аппарат, первым достигший поверхности Луны?</item></param></params><right><answer>Луна-2</answer><answer>Луна 2</answer></right></question>
+          </questions>
+        </theme>
+        <theme name="Наука">
+          <questions>
+            <question price="100"><params><param name="question" type="content"><item>Какой газ человек использует при дыхании?</item></param></params><right><answer>кислород</answer><answer>О2</answer></right></question>
+            <question price="200"><params><param name="question" type="content"><item>Какая химическая формула у воды?</item></param></params><right><answer>H2O</answer><answer>аш два о</answer></right></question>
+            <question price="300"><params><param name="question" type="content"><item>Кто сформулировал закон всемирного тяготения?</item></param></params><right><answer>Исаак Ньютон</answer><answer>Ньютон</answer></right></question>
+            <question price="400"><params><param name="question" type="content"><item>Как называется отрицательно заряженная частица атома?</item></param></params><right><answer>электрон</answer></right></question>
+            <question price="500"><params><param name="question" type="content"><item>Как называется превращение гусеницы во взрослую бабочку?</item></param></params><right><answer>метаморфоз</answer></right></question>
+          </questions>
+        </theme>
+      </themes>
+    </round>
+  </rounds>
+</package>
