@@ -1,0 +1,342 @@
+# Состояния партии
+
+Карта машины `src/game/machine.ts` (XState 5, id `game`). Стрелки на схемах — только маршрут. Условия, счёт и табло — в списках ниже: длинный guard на стрелку не помещается.
+
+Контроллер (`src/game/controller.ts`) сам счёт не меняет. Он шлёт события машине, включает микрофон и обрывает звук ведущей. Где это меняет фазу или часы, это написано у перехода.
+
+Полоска на табло есть только когда заданы и `phaseStartedAt`, и `phaseDurationMs`. Отдельные `after`-таймеры (моргание, раннее окно, оценка, ставка) полоску не рисуют.
+
+Кнопки ответа открыты, когда `buttonsLive`: `reading.armed`, `falseStartCue` и любой `buzzing.*`. Фальстарт возможен только в обычном раунде и только в `flashing` и `reading.sealed`.
+
+## Константы
+
+Из `src/options.ts` (`matchTimings`). Имен `earlyBuzzerMinMs` и `earlyBuzzerMaxMs` в коде нет: раннее окно — одна константа `earlyBuzzerMs`.
+
+| Имя | Сейчас | Где в машине |
+| --- | ---: | --- |
+| `buzzerMs` | 10 000 | первое окно кнопки: вход в `reading.armed`, старт `buzzing` после чтения, восстановление, если на этом вопросе ещё никто не ошибся |
+| `stealBuzzerMs` | 5 000 | окно перехвата после чужой ошибки или молчания (`missedIds` не пуст) |
+| `answerMs` | 10 000 | молчание в `answering.waiting`, если повтор не просили; тишина ставки в `finalBets.hearing` |
+| `clarifyMs` | 10 000 | окно ответа после «Повторите, пожалуйста» (`clarifications > 0`) |
+| `judgeMs` | 20 000 | разбор выбора, оценка ответа, длинная речь без конца, разбор ставки |
+| `cellFlashMs` | 1 080 | `flashing` → `reading` |
+| `earlyBuzzerMs` | 5 000 | `reading.sealed` → `reading.armed` в обычном раунде |
+| `falseStartMs` | 2 500 | штраф фальстарта: этот игрок не проходит guard, чужие кнопки не держит |
+| `hostAudioFallbackMs` | 8 000 | не таймер фазы: если звук ведущей так и не начался, клиент шлёт тот же `HOST_AUDIO_FINISHED` |
+| `hostAudioHardLimitMs` | 30 000 | не таймер фазы: потолок звука ведущей, дальше тот же `HOST_AUDIO_FINISHED` |
+| `buzzerWarningMs` | 2 000 | не таймер фазы: за столько до конца полного `buzzerMs` контроллер ставит сигнал. На `stealBuzzerMs` сигнала нет |
+| `buzzerBeepMs` | 1 000 | длина этого сигнала. Кнопку ещё можно нажать |
+| `timeoutBeepMs` | 1 000 | не таймер фазы: при `announceKind === silence` контроллер ждёт столько и только потом даёт ведущей фразу |
+
+Рядом, не в `options.ts`: `maxClarifications` в `src/config.ts` равен 1. Столько раз `near_miss` просит повтор; следующий такой статус машина превращает в `incorrect`.
+
+Очки меняет ставка финала (`activeStake`), а в обычном раунде — номинал ячейки. Игроков, которые уже ошиблись или промолчали на этом вопросе, машина держит в `missedIds`: их кнопка на этом вопросе больше не принимается.
+
+## Схемы
+
+Устойчивых мест, где партия ждёт, — 24. Ещё 3 узла только проскакивают (`restoring`, `afterReading`, `finalBets.placed`) и 5 родителей (`choosing`, `reading`, `finalBets`, `buzzing`, `answering`). Вместе 32 узла. Состояния `buzzing.reminding` в машине нет: так назван только один из путей, с которых «Дальше» возвращает в `buzzing`.
+
+```mermaid
+stateDiagram-v2
+  [*] --> startMenu
+  startMenu --> connecting: старт или продолжение
+  connecting --> failed: нет связи
+  connecting --> welcoming: сессия есть, снимка нет
+  connecting --> restoring: сессия есть, снимок есть
+  restoring --> welcoming: см. список
+  restoring --> choosing: см. список
+  welcoming --> choosing: приветствие кончилось
+  choosing --> flashing: ячейка обычного раунда
+  choosing --> finalBets: тема финала, есть кому играть
+  choosing --> finished: тема финала, все при нуле или ниже
+  flashing --> reading: моргание кончилось
+  finalBets --> flashing: ставки собраны
+  reading --> turnCue: финал, дочитала
+  turnCue --> answering: назвала, чей ход
+  announcing --> bridging: раунд кончился, дальше есть раунд
+  announcing --> finished: дальше раунда нет
+  announcing --> choosing: ячейка закрыта, раунд ещё идёт
+  bridging --> choosing: мост кончился
+  finished --> finished: речь конца кончилась
+  failed --> connecting: старт или продолжение
+```
+
+Глобальные события на схеме не нарисованы: `PAUSE` → `paused`, `STOP` → `stopped`, `CONNECTION_LOST` → `failed`, `RESET_GAME` → `startMenu`, `NEXT_ROUND` → `bridging` или `finished`. Они действуют из почти любого узла; точные запреты — в списке.
+
+```mermaid
+stateDiagram-v2
+  state reading {
+    [*] --> sealed
+    sealed --> armed: earlyBuzzerMs, не финал
+  }
+  state buzzing {
+    [*] --> open
+  }
+  state answering {
+    [*] --> waiting
+    waiting --> hearing: речь началась
+  }
+  reading --> afterReading: дочитала раньше раннего окна
+  afterReading --> falseStartCue: монетка фальстарта
+  afterReading --> buzzing: иначе, полные buzzerMs
+  falseStartCue --> buzzing: фраза фальстарта кончилась
+  reading --> buzzing: дочитала уже из armed, полоска та же
+  reading --> announcing: buzzerMs вышли, пока ещё читает
+  reading --> answering: кнопка в armed
+  falseStartCue --> answering: кнопка
+  buzzing --> answering: кнопка
+  buzzing --> announcing: окно вышло
+  answering --> judging: договорил
+  answering --> announcing: молчит
+  judging --> announcing: оценка или judgeMs
+  judging --> answering: эхо, не оценка
+  announcing --> answering: созвучие, тот же игрок
+  announcing --> buzzing: ошибка или молчание, есть кому перехватить
+```
+
+```mermaid
+stateDiagram-v2
+  state finalBets {
+    [*] --> asking
+    asking --> hearing: попросила ставку
+    hearing --> resolving: игрок договорил
+    hearing --> placed: тишина и повтор уже был
+    hearing --> asking: тишина, первый промах
+    resolving --> placed: ставка принята или сдались
+    resolving --> asking: неясно, ещё можно повторить
+    placed --> asking: есть следующий игрок
+  }
+  finalBets --> flashing: ставки кончились
+```
+
+## Узлы
+
+**startMenu.** Меню. Сессии нет, табло партии не показано, кнопки закрыты, часы не идут.
+
+**connecting.** Идёт подключение. Кнопки закрыты, часы не идут. Пустой ключ контроллер сразу превращает в `CONNECTION_FAILED`.
+
+**restoring.** Снимок продолжения. Узел не ждёт: сразу выбирает фазу по `resumePath` и стирает его. Часы заново ставит только ветка `buzzing.open`.
+
+**welcoming.** Ведущая коротко здоровается и зовёт выбрать вопрос. Темы и цены не называет. Табло раунда уже есть, текст вопроса нет. Кнопки закрыты, полоски нет. Микрофон выключен, пока она говорит.
+
+**choosing.** Родитель. На входе гасит вопрос, игрока ответа, услышанное и часы. В финале статус «Выберите тему финала», иначе «назовите тему и стоимость». Кнопка выбирающего подсвечена. Дальше всегда один из детей.
+
+**choosing.listening.** Слушает выбор. Микрофон открыт. Кнопки ответа закрыты, полоски нет. Кашель ячейку не открывает: это решает контроллер и либо молчит, либо шлёт `QUESTION_UNCLEAR` или `QUESTION_SELECTED`.
+
+**choosing.resolving.** Ведущая разбирает выбор отдельным ходом. Микрофон закрыт. Через `judgeMs` без ответа она возвращается к слушанию. Полоски нет.
+
+**choosing.clarifying.** Просит назвать ячейку ещё раз. Микрофон открыт: если игрок заговорил, её фразу обрывают и снова слушают.
+
+**flashing.** Выбранная ячейка моргает `cellFlashMs`. Текста вопроса на табло ещё нет. Микрофон закрыт. В обычном раунде ранняя кнопка — фальстарт, очки не меняются. В финале фальстарта нет.
+
+**reading.** Родитель. На входе статус «Ведущая читает вопрос», полоска ещё пустая. Текст вопроса уже на табло. Речь комнаты во время чтения ответ не засчитывает; если это не шум и не сам текст вопроса, контроллер ставит `TALKED_OVER`.
+
+**reading.sealed.** С начала чтения идёт раннее окно `earlyBuzzerMs`. Кнопки ответа закрыты. Нажатие в обычном раунде — фальстарт. Полоски десяти секунд нет. В финале раннее окно в `armed` не переходит: ждут конца чтения.
+
+**reading.armed.** Обычный раунд, раннее окно вышло, ведущая может ещё читать. На входе `startArmedBuzzer`: статус «Жмите свою кнопку», полоска стартует на полные `buzzerMs`, `spokeWithoutButton` сбрасывается. Кнопки открыты. Нажатие обрывает её звук. Сигнал за `buzzerWarningMs` до конца этого окна ставит контроллер. Звук и ролик вопроса здесь ещё не играют: клип вопроса молчит всё `reading.*`.
+
+**afterReading.** Чтение обычного вопроса кончилось раньше раннего окна. Узел не ждёт. Если на вопросе был фальстарт и монетка (`falseStartCoin`, около половины) выпала, дальше фраза фальстарта. Иначе сразу полное окно `buzzerMs`. Если десять секунд уже шли в `armed`, этот узел не используется и полоска заново не начинается.
+
+**falseStartCue.** Короткая фраза вроде «Вася, фальшстарт», без ответа пакета. Кнопки открыты, полоски ещё нет: `buzzerMs` стартуют после фразы. Игрок на штрафе фальстарта по-прежнему не проходит guard. Клип вопроса в обычном раунде здесь играет и крутится.
+
+**bridging.** Между раундами. Ведущая называет имя и счёт каждого и объявляет следующий раунд или финал. Раунд уже переключён, выбирает снова игрок 2, если игроков хотя бы двое, иначе первый. Кнопки закрыты, полоски нет.
+
+**finalBets.** Родитель ставок. Сюда попадают только если тема финала выбрана и у кого-то счёт больше нуля. Список — игроки со счётом больше нуля, от меньшего к большему. Кнопок нет.
+
+**finalBets.asking.** Ведущая просит текущего игрока назвать ставку от 1 до его счёта. Микрофон закрыт, пока она говорит.
+
+**finalBets.hearing.** Слушает ставку. Молчание `answerMs`: первый раз просит ещё раз, второй ставит 1. Полоски на табло нет, таймер машины есть.
+
+**finalBets.resolving.** Разбирает ставку, потолок `judgeMs`. Принятая ставка — целое от 1 до счёта именно этого игрока.
+
+**finalBets.placed.** Узел не ждёт: либо следующий игрок, либо моргание вопроса финала.
+
+**turnCue.** Финал. На входе назначает отвечающего по курсору и его ставку (если ставки нет — 1). Ведущая говорит, чей ход. Кнопок нет, полоски нет. Вопрос заново не читает.
+
+**buzzing.** Родитель окна кнопки. Сейчас единственный ребёнок — `open`. Кнопки открыты. Речь без кнопки часы не останавливает и не продлевает.
+
+**buzzing.open.** Полоска уже идёт: полные `buzzerMs` или `stealBuzzerMs`, либо остаток, если окно началось ещё в `reading.armed`. Конец окна закрывает ячейку. В первом окне обычного раунда клип вопроса играет и крутится. В перехвате (`missedIds` не пуст) клип не продолжается. Сигнал предупреждения — только на полном `buzzerMs`, и контроллер не ставит его второй раз, если окно уже шло из `reading.armed`.
+
+**answering.** Родитель ответа. Кнопки закрыты. На входе растёт `attemptId`, игрок записан, часы ответа ещё впереди.
+
+**answering.waiting.** Ждёт речь. Полоска `answerMs` или, после повтора, `clarifyMs`. Микрофон открыт. В финале клип вопроса здесь играет; в обычном раунде на ответе он на паузе.
+
+**answering.hearing.** Игрок говорит. Полоска ответа снята. Если речь не кончится за `judgeMs`, это то же молчание, что и пустое окно.
+
+**judging.** «Ведущая оценивает ответ». Микрофон закрыт. Полоски нет. Потолок `judgeMs`: нет оценки — очки не меняются. Чужой `questionId`, игрок или `attemptId` событие не принимает.
+
+**announcing.** Ведущая говорит решение. Часы сняты, кнопки закрыты. Ответ пакета на табло и вслух — только если ячейка уже закрыта и повод `nobody`, `incorrect` или `silence`. При молчании контроллер выдерживает `timeoutBeepMs` и затем даёт ей фразу. Клип вопроса здесь не играет; показ ответа — картинка сразу, звук и ролик ответа после объявления, пока это объявление ответа.
+
+**paused.** Микрофон и звук ведущей выключены локально, таймеры машины не тикают. Фаза, из которой ушли, лежит в `resumePath`. Штраф фальстарта замирает: при продолжении метки сдвигаются на длительность паузы. Остаток `earlyBuzzerMs` в `reading.sealed` запоминается. Остаток полоски `buzzerMs` / `stealBuzzerMs` / `answerMs` машина не хранит: «Дальше» ставит полную длительность этого окна заново. Возврат в `reading.armed` заново выполняет вход и тоже ставит полные `buzzerMs` и статус «Жмите свою кнопку».
+
+**stopped.** «Остановлена». Сессия и таймеры закрыты, экран партии остаётся. Своих переходов дальше нет. «Пауза» и «Дальше» отсюда не уводят.
+
+**finished.** «Игра закончена». Ведущая называет победителя. Кнопки закрыты.
+
+**failed.** Связь потеряна или старт не удался. Сессия закрыта, экран возвращается в меню с ошибкой. Счёт этой сессии партия дальше не крутит, пока не начнут снова.
+
+## Переходы
+
+Один и тот же `HOST_AUDIO_FINISHED` с чужим `purpose` состояние не меняет. Ниже — только то, что машина принимает. Пунктов 104: выбор ячейки из `choosing.resolving` сведён в один пункт на четыре guard, а речь конца и мост между раундами названы сразу после объявления, без отдельного номера. Если считать каждый guard, переходов 109.
+
+### Из любого узла
+
+1. `RESET_GAME` → `startMenu`. Контекст заново, демо-пакет.
+2. `CONNECTION_LOST` → `failed`. В контекст пишется текст ошибки и «Связь с ведущей потеряна». Контроллер не шлёт это из `startMenu`, `connecting`, `failed` и `stopped`.
+3. `PAUSE` → `paused`, если это не `paused` и не `stopped`. Запоминает путь и статус, гасит полоску, замирает фальстарт.
+4. `STOP` → `stopped`, если это ещё не `stopped`. Статус «Остановлена», часы гаснут.
+5. `NEXT_ROUND` → `bridging`, если партия живая и следующий играбельный раунд есть. Раунд переключается сразу, узел моста входится заново.
+6. `NEXT_ROUND` → `finished`, если партия живая, а следующего раунда нет. Вопрос и финальные ставки стираются, сыгранные id остаются.
+   Живая партия — всё, кроме `startMenu`, `connecting`, `failed`, `stopped`, `finished` и паузы, снятой уже с конца.
+
+### Меню и связь
+
+7. `startMenu` + `START_GAME` → `connecting`. Пакет и имена становятся партией.
+8. `startMenu` + `CONTINUE_GAME` → `connecting`. Поверх пустой партии ложится снимок, включая `resumePath`.
+9. `connecting` + `CONNECTED`, `resumePath` не пуст → `restoring`.
+10. `connecting` + `CONNECTED`, снимка нет → `welcoming`.
+11. `connecting` + `CONNECTION_FAILED` → `failed`.
+12. `failed` + `START_GAME` → `connecting`.
+13. `failed` + `CONTINUE_GAME` → `connecting`.
+14. `welcoming` + `HOST_AUDIO_FINISHED` purpose `welcome` → `choosing`.
+
+### Восстановление снимка
+
+Все ветки стирают `resumePath`. Часы заново ставит только пункт 21.
+
+15. `welcoming` → `welcoming`.
+16. `choosing.listening` → `choosing.listening`.
+17. `flashing` → `flashing`.
+18. `reading.sealed` → `reading.sealed`.
+19. `reading.armed` → `reading.armed`. Вход снова ставит полные `buzzerMs` и «Жмите свою кнопку».
+20. `falseStartCue` → `falseStartCue`.
+21. `buzzing.open` → `buzzing`. Статус «Жмите свою кнопку», полоска с нуля: `stealBuzzerMs`, если кто-то уже в `missedIds`, иначе `buzzerMs`.
+22. `answering.waiting` → `answering.waiting`.
+23. `announcing` → `announcing`.
+24. `bridging` → `bridging`.
+25. `turnCue` → `turnCue`.
+26. `finalBets.asking` → `finalBets.asking`.
+27. `finished` → `finished`.
+28. Любой другой путь → `choosing.listening`.
+
+### Выбор ячейки
+
+`QUESTION_SELECTED` смотрится сверху вниз.
+
+29. `choosing.listening` + `PLAYER_SPEECH_FINISHED` → `choosing.resolving`.
+30. Тот же выбор, финал, вопрос есть, у всех счёт не больше нуля → `finished`. Вопрос не открывается.
+31. Тот же выбор, финал, вопрос ещё не сыгран, у кого-то счёт больше нуля → `finalBets`. Вопрос открыт, финалисты собраны, курсор ставок на меньшем положительном счёте.
+32. Тот же выбор, вопрос этого раунда ещё не сыгран → `flashing`. Вопрос открыт, промахи и фальстарты пустые.
+33. Тот же выбор, но вопроса нет или он уже сыгран → `choosing.clarifying`. «Этот вопрос недоступен».
+34. `QUESTION_UNCLEAR` → `choosing.clarifying`. Текст причины становится статусом.
+35. `choosing.resolving`, те же четыре исхода `QUESTION_SELECTED`, что в пунктах 30–33.
+36. `choosing.resolving` + `QUESTION_UNCLEAR` → `choosing.clarifying`.
+37. `choosing.resolving` + `SELECTION_FAILED` → `choosing.listening`.
+38. `choosing.resolving`, прошло `judgeMs` → `choosing.listening`. «Не удалось разобрать выбор».
+39. `choosing.clarifying` + `HOST_AUDIO_FINISHED` purpose `clarify` → `choosing.listening`. Статус выбора заново.
+40. `choosing.clarifying` + `PLAYER_SPEECH_STARTED` → `choosing.listening`. Контроллер обрывает её фразу.
+
+### Моргание и чтение
+
+41. `flashing`, прошло `cellFlashMs` → `reading`. Стартует раннее окно `earlyBuzzerMs`.
+42. `flashing` + `BUZZER_PRESSED`, игрок в составе, раунд не финал, штраф фальстарта не идёт → остаётся `flashing`. Метка фальстарта. Очки те же, ячейка не открыта текстом.
+43. `reading` + `TALKED_OVER` → остаётся в текущем ребене. `talkedDuringRead`. Часы не трогает.
+44. `reading.sealed`, прошло оставшееся раннее окно и раунд не финал → `reading.armed`. Полоска и «Жмите свою кнопку» с этого момента, даже если чтение ещё звучит.
+45. `reading.sealed` + `BUZZER_PRESSED` с тем же guard, что в пункте 42 → остаётся `reading.sealed`. Фальстарт, очки те же.
+46. `reading.sealed` + `HOST_AUDIO_FINISHED` purpose `read`, это финал → `turnCue`. Раннее окно снято. Кнопок в финале не будет.
+47. `reading.sealed` + `HOST_AUDIO_FINISHED` purpose `read`, обычный раунд → `afterReading`. Если фальстарт был, монетка решает, называть ли его.
+48. `reading.armed`, прошло `buzzerMs` с входа → `announcing`, повод `nobody`. Ячейка в `playedIds`. Очки те же. Близость — только если уже были неверные реплики после кнопки и монетка `closeGuessCoin` выпала.
+49. `reading.armed` + `BUZZER_PRESSED`, игрок в составе, не в `missedIds`, не на штрафе фальстарта → `answering`. Звук чтения обрывается. Этот игрок отвечает.
+50. `reading.armed` + `HOST_AUDIO_FINISHED` purpose `read` → `buzzing`. Полоска не обнуляется: в `buzzing.open` тикает остаток того же `buzzerMs`. Монетку фальстарта здесь не бросают.
+51. `afterReading`, `sayFalseStart` → `falseStartCue`.
+52. `afterReading` иначе → `buzzing`. Полоска с нуля на `buzzerMs`, «Жмите свою кнопку».
+53. `falseStartCue` + `TALKED_OVER` → остаётся. Помечает речь поверх.
+54. `falseStartCue` + `HOST_AUDIO_FINISHED` purpose `falseStart` → `buzzing`. Полные `buzzerMs` стартуют после фразы.
+55. `falseStartCue` + `BUZZER_PRESSED` с guard пункта 49 → `answering`. Фраза фальстарта обрывается.
+
+Нажатие, которое не проходит guard, машина игнорирует: состояние, счёт и метка фальстарта не меняются.
+
+### Окно кнопки и ответ
+
+56. `buzzing` + `BUZZER_PRESSED` с guard пункта 49 → `answering`. Полоска гаснет. Отвечает нажавший.
+57. `buzzing` + `UNBUTTONED_TALK` → остаётся. `spokeWithoutButton`. Часы идут дальше. Короткий шум контроллер сюда не шлёт.
+58. `buzzing` + `TALKED_OVER` → остаётся. `talkedDuringRead`.
+59. `buzzing.open`, вышло окно (`buzzerLeft`: остаток полоски, а если старта не было — вся длительность) → `announcing`, повод `nobody`. Ячейка закрыта. Очки те же.
+60. `answering.waiting`, вышло `answerMs` или `clarifyMs` → `announcing`, повод `silence`. Списывается ставка или номинал. Игрок в обычном раунде попадает в `missedIds`. Ячейка закрывается, только если перехватывать больше некому или это последний ход финала. Выбирает следующий вопрос тот, кто промолчал. Близость — только если ячейка этим ходом закрылась и монетка выпала.
+61. `answering.waiting` + `PLAYER_SPEECH_STARTED` → `answering.hearing`. Полоска ответа снята, штраф за молчание не копится, пока речь идёт.
+62. `answering.waiting` + `PLAYER_SPEECH_FINISHED` → `judging`.
+63. `answering.hearing`, прошло `judgeMs` → `announcing`, тот же штраф молчания, что в пункте 60.
+64. `answering.hearing` + `PLAYER_SPEECH_FINISHED` → `judging`.
+65. `turnCue` + `HOST_AUDIO_FINISHED` purpose `turn` → `answering`. Отвечает текущий финалист, без кнопки.
+
+### Оценка
+
+66. `judging`, прошло `judgeMs` → `announcing`, повод `unclear`. Очки те же. В обычном раунде ячейка закрывается. В финале ячейка закрывается только на последнем финалисте. Фразы про близость нет. Ответ пакета не публикуется: повод не из тройки `nobody` / `incorrect` / `silence`.
+67. `judging` + `ANSWER_ECHO` → `answering`. Оценка отброшена, окно ответа начинается заново.
+68. `judging` + `ANSWER_JUDGED`, тот же вопрос, игрок и попытка → `announcing`. Дальше правила счёта.
+
+Что делает принятая оценка:
+
+- `correct`: плюс номинал или ставка. В обычном раунде ячейка закрывается. В финале ячейка закрывается только если это последний финалист. Выбирает следующий вопрос этот игрок. Ответ пакета не публикуется. Повод `correct`.
+- `incorrect`: минус номинал или ставка. Игрок в обычном раунде в `missedIds`. Ячейка остаётся, если ещё есть кому жать. Иначе закрывается по тому же правилу финала. Выбирает этот игрок. Повод `incorrect`. Если ячейка закрылась и в `wrongHeard` есть непустая реплика, монетка решает, говорить ли, что попытка была близкой.
+- `near_miss`, и повторов ещё меньше `maxClarifications`: очки те же, ячейка открыта, выбирающий не меняется, `clarifications` плюс один. Повод `repeat`. Следующий `near_miss` сверх лимита машина считает `incorrect`.
+- `unintelligible`, `ambiguous`, `needs_clarification`: очки те же. Ячейка закрывается, как при верном ответе. Повод `unclear`, ответ пакета не публикуется. Для `needs_clarification` статус прямо говорит, что в этом прототипе вопрос закрыт.
+
+`wrongHeard` пополняется только настоящим `incorrect`, без причины «созвучие уже переспрашивали».
+
+### Объявление
+
+`HOST_AUDIO_FINISHED` purpose `announce` смотрится сверху вниз. Первый подошедший guard забирает переход.
+
+69. Повод `repeat` → `answering`. Тот же игрок, новая попытка, полоска сразу `clarifyMs`.
+70. Финал, финалисты есть, курсор ещё не на последнем → `turnCue`. Курсор на следующего. Ответ пакета всё ещё скрыт, пока ячейка не закрыта.
+71. Обычный раунд, повод `incorrect` или `silence`, ячейка ещё не в `playedIds` → `buzzing`. Полоска `stealBuzzerMs`, кнопки снова открыты, кроме тех, кто в `missedIds`. Предупреждающего сигнала нет. Клип вопроса не продолжается.
+72. Ячейка закрыта, раунд доигран, следующий играбельный раунд есть → `bridging`.
+73. Ячейка закрыта, раунд доигран, следующего раунда нет → `finished`.
+74. Иначе, purpose всё ещё `announce` → `choosing`. Так уходит верный ответ, пока в раунде есть ячейки, и закрытие без публичного ответа.
+
+`finished` + `HOST_AUDIO_FINISHED` purpose `finished` остаётся в `finished` и только гасит часы.
+
+`bridging` + `HOST_AUDIO_FINISHED` purpose `bridge` → `choosing`.
+
+### Ставки финала
+
+75. `finalBets.asking` + `HOST_AUDIO_FINISHED` purpose `bet` → `finalBets.hearing`.
+76. `finalBets.hearing`, прошло `answerMs`, повтор ставки уже был (`betMisses >= 1`) → `finalBets.placed`. Ставка 1.
+77. `finalBets.hearing`, прошло `answerMs`, повтора ещё не было → `finalBets.asking` заново. «Назовите ставку ещё раз».
+78. `finalBets.hearing` + `PLAYER_SPEECH_FINISHED` → `finalBets.resolving`.
+79. `finalBets.resolving`, прошло `judgeMs`, повтор уже был → `finalBets.placed`, ставка 1.
+80. `finalBets.resolving`, прошло `judgeMs`, повтора не было → `finalBets.asking` заново.
+81. `finalBets.resolving` + `BET_PLACED`, игрок — текущий финалист, сумма от 1 до его счёта → `finalBets.placed`. Ставка записана.
+82. `finalBets.resolving` + `BET_UNCLEAR`, повтор уже был → `finalBets.placed`, ставка 1.
+83. `finalBets.resolving` + `BET_UNCLEAR`, повтора не было → `finalBets.asking` заново.
+84. `finalBets.placed`, курсор не на последнем финалисте → `finalBets.asking`. Курсор дальше, счётчик повторов сброшен.
+85. `finalBets.placed`, ставки кончились → `flashing`. Курсор ответов снова на первом финалисте. Дальше моргание и чтение, без кнопок.
+
+### Пауза, «Дальше»
+
+`RESUME` возвращает ровно сохранённый путь. Часы заново, полной длительностью, получают только пути из `showsClock`: `buzzing`, `buzzing.open`, строка `buzzing.reminding`, `answering.waiting`. Для `answering.waiting` длительность — `clarifyMs`, если повтор уже был, иначе `answerMs`. Для окна кнопки — `stealBuzzerMs`, если `missedIds` не пуст, иначе `buzzerMs`.
+
+86. `welcoming` → `welcoming`.
+87. `bridging` → `bridging`.
+88. `choosing.listening` → `choosing.listening`.
+89. `choosing.resolving` → `choosing.resolving`.
+90. `choosing.clarifying` → `choosing.clarifying`.
+91. `flashing` → `flashing`.
+92. `reading.armed` → `reading.armed`. Вход заново ставит полные `buzzerMs`.
+93. `falseStartCue` → `falseStartCue`.
+94. `reading` или `reading.sealed` → `reading.sealed`. Остаток раннего окна продолжается.
+95. `buzzing`, `buzzing.open` или `buzzing.reminding` → `buzzing`. Полное окно кнопки заново.
+96. `answering.waiting` → `answering.waiting`. Полное окно ответа заново.
+97. `answering.hearing` → `answering.hearing`.
+98. `judging` → `judging`.
+99. `announcing` → `announcing`.
+100. `turnCue` → `turnCue`.
+101. `finalBets.asking` → `finalBets.asking`.
+102. `finalBets.hearing` → `finalBets.hearing`.
+103. `finalBets.resolving` → `finalBets.resolving`.
+104. `finished` → `finished`.
+
+Другой `resumePath` команду `RESUME` не принимает: партия остаётся в `paused`. Отдельного узла `finalBets.placed` среди целей нет: этот узел и так не ждёт.
+
+Пока пауза, контроллер копит конец фразы ведущей и вызовы выбора и оценки. «Дальше» сначала выпускает накопленное, если фаза та же и это не новый раунд и не конец, на который ушли кнопкой «Следующий раунд».
