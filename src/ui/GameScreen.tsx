@@ -8,9 +8,10 @@ import { answerIsPublic, stageMedia } from '../game/reveal.ts'
 import type { LinkStatus } from '../realtime/client.ts'
 import { billedTokens, formatTokens, getUsageSnapshot, subscribeUsage, type UsageTotals } from '../realtime/usage.ts'
 import type { PlayerId } from '../game/types.ts'
+import { copyDebugDump } from '../debug/trace.ts'
 import { AirStatus } from './airStatus.tsx'
 import { buzzKeyLabel, isKeyboardPlayer, playerFromBuzzKey } from './buzzKeys.ts'
-import { ConversationChat, TechnicalLog } from './DebugChat.tsx'
+import { ConversationChat } from './DebugChat.tsx'
 import { HostPresence } from './HostPresence.tsx'
 import { QuestionClip, QuestionMedia } from './QuestionMedia.tsx'
 import { questionClipPlaying } from './questionClip.ts'
@@ -31,9 +32,14 @@ export function GameScreen(props: {
   onNextRound: () => void
 }) {
   const { snapshot, link, onBuzz, onPick, onPause, onReset, onNextRound } = props
-  const [techOpen, setTechOpen] = useState(false)
+  const [copyLabel, setCopyLabel] = useState('Скопировать дебаг')
   const path = statePath(snapshot.value)
   const context = snapshot.context
+  async function copyDebug() {
+    const ok = await copyDebugDump({ path, context })
+    setCopyLabel(ok ? 'Скопировано' : 'Не скопировалось')
+    window.setTimeout(() => setCopyLabel('Скопировать дебаг'), 1600)
+  }
   const question = questionById(context.questions, context.activeQuestionId)
   const round = currentRound(context, context.roundIndex)
   const prices = roundPrices(context.questions, context.roundIndex)
@@ -138,19 +144,22 @@ export function GameScreen(props: {
           <button type="button" className="ghost" onClick={onReset}>
             🚪 Выход
           </button>
+          <button type="button" className="ghost" onClick={() => void copyDebug()}>
+            🔧 {copyLabel}
+          </button>
           <button
             type="button"
-            className={techOpen ? 'ghost tech-on' : 'ghost'}
-            aria-expanded={techOpen}
-            aria-controls="tech-log"
-            onClick={() => setTechOpen((open) => !open)}
+            className="ghost"
+            title="Для проверки: закончить раунд с тем же счётом"
+            onClick={onNextRound}
+            disabled={!snapshot.can({ type: 'NEXT_ROUND' })}
           >
-            🔧 Техническое
+            ⏭ Пропустить раунд
           </button>
         </div>
       </header>
 
-      <section className={techOpen ? 'layout' : 'layout tech-collapsed'}>
+      <section className="layout">
         <div className="play">
         <div className="stage">
         {showQuestion && question ? (
@@ -314,7 +323,6 @@ export function GameScreen(props: {
           <HostPresence path={path} link={link} status={context.statusLine} error={context.error} />
           <ConversationChat />
         </aside>
-        {techOpen ? <TechnicalLog snapshot={snapshot} onNextRound={onNextRound} /> : null}
       </section>
     </main>
   )

@@ -2,7 +2,7 @@ import { unlockAudio } from '../audio/beep.ts'
 import { speakExact } from '../audio/localSpeech.ts'
 import { gameConfig, hostInstructions } from '../config.ts'
 import { recordResponseUsage, resetUsage } from './usage.ts'
-import { pushHostLine, pushPlayerLine, pushTrace } from '../debug/trace.ts'
+import { logTrace, pushHostLine, pushPlayerLine, pushTrace } from '../debug/trace.ts'
 import { outputCut, outputFlushWaitMs, timersAfterPlaybackStarted, timersAfterResponseDone } from './playback.ts'
 import type { HostAudioTimers, OutputCutState } from './playback.ts'
 import { isolatedCue, isolatedToolResponse, speechMatches, verbatimResponse } from './speechMatch.ts'
@@ -606,7 +606,8 @@ export class RealtimeClient {
       return
     }
     const type = typeof event.type === 'string' ? event.type : 'unknown'
-    if (!type.endsWith('.delta')) pushTrace('in', type, event)
+    if (type.endsWith('.delta')) logTrace('in', type, deltaNote(event))
+    else pushTrace('in', type, event)
     this.sessionUpdatedWaiter?.(event)
     if (type === 'session.updated') this.sessionUpdatedWaiter = null
 
@@ -1092,6 +1093,12 @@ function assistantUtterances(response: Record<string, unknown>): string[] {
     }
   }
   return lines
+}
+
+function deltaNote(event: LooseEvent): { responseId: string; chars: number } {
+  const delta = typeof event.delta === 'string' ? event.delta : ''
+  const responseId = typeof event.response_id === 'string' ? event.response_id : ''
+  return { responseId, chars: delta.length }
 }
 
 function asRecord(value: unknown): Record<string, unknown> {

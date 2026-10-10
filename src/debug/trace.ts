@@ -32,6 +32,14 @@ export function noteLink(patch: Partial<typeof linkStatus>): void {
   pushTrace('note', `связь ${next.connection}, микрофон ${next.mic}, звук ${next.host}`)
 }
 
+/** Строка в консоль браузера. В копию дебага и на экран не кладётся: покадровые `.delta` иначе вытесняют полезный обмен. */
+export function logTrace(kind: TraceKind, title: string, detail?: unknown): void {
+  const at = new Date().toISOString()
+  const safeTitle = redact(title)
+  const safeDetail = detail === undefined ? '' : sanitize(detail)
+  console.log(`[aisigame ${at}] ${kind} ${safeTitle}`, safeDetail)
+}
+
 export function pushTrace(kind: TraceKind, title: string, detail?: unknown): void {
   const entry: TraceEntry = {
     id: ++sequence,

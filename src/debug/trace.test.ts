@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { buildCommit, pageOrigin } from '../buildInfo.ts'
-import { formatDebugDump, noteLink, pushTrace } from './trace.ts'
+import { formatDebugDump, getTrace, logTrace, noteLink, pushTrace } from './trace.ts'
 
 describe('formatDebugDump', () => {
   it('сохраняет путь машины, полный контекст, связь и обмен', () => {
@@ -60,5 +60,23 @@ describe('formatDebugDump', () => {
     const tail = text.trimEnd().split('\n').slice(-2)
     expect(tail).toEqual([`origin: ${pageOrigin() || '—'}`, `commit: ${buildCommit()}`])
     expect(text).not.toContain('sk-')
+  })
+
+  it('покадровое событие пишет в консоль и не попадает в копию', () => {
+    const lines: unknown[][] = []
+    const original = console.log
+    console.log = (...args: unknown[]) => {
+      lines.push(args)
+    }
+    const before = getTrace().length
+    try {
+      logTrace('in', 'response.output_audio.delta', { responseId: 'r1', chars: 12 })
+    } finally {
+      console.log = original
+    }
+    expect(getTrace().length).toBe(before)
+    expect(formatDebugDump({ path: 'choosing.listening', context: {} })).not.toContain('response.output_audio.delta')
+    expect(String(lines[0]?.[0])).toContain('[aisigame')
+    expect(String(lines[0]?.[0])).toContain('response.output_audio.delta')
   })
 })

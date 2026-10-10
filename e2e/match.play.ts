@@ -118,8 +118,7 @@ test('картинка, звук, ролик, выбор, вопрос без т
   await expect(page.getByRole('group', { name: 'Игрок 1: 100' })).toBeVisible()
   await expect(page.getByRole('status').filter({ hasText: 'назовите тему и стоимость' })).toBeVisible()
 
-  await page.getByRole('button', { name: 'Техническое' }).click()
-  await page.getByRole('button', { name: 'Следующий раунд' }).click()
+  await page.getByRole('button', { name: 'Пропустить раунд' }).click()
   await expect(page.getByText('Демо · Наглядно')).toBeVisible()
   await expect(page.getByRole('status').filter({ hasText: 'назовите тему и стоимость' })).toBeVisible()
 

@@ -1,6 +1,8 @@
 import { expect, test } from '@playwright/test'
 
 test('экран вопроса без скроллбаров и с нормальными репликами', async ({ page }) => {
+  const logs: string[] = []
+  page.on('console', (message) => logs.push(message.text()))
   await page.goto('/?mock=1')
   await page.getByRole('button', { name: 'Начать игру' }).click()
   await expect(page.locator('.talk .status-line')).toHaveCount(0)
@@ -78,10 +80,10 @@ test('экран вопроса без скроллбаров и с нормал
   expect(imageBox.y + imageBox.height).toBeLessThanOrEqual(questionBox.y + questionBox.height + 2)
   expect(answerer.y + answerer.height).toBeLessThanOrEqual(questionBox.y + questionBox.height + 2)
 
-  await page.getByRole('button', { name: 'Техническое' }).click()
-  await expect(page.locator('.tech-hide')).toHaveCount(0)
-  await expect(page.locator('.tech-column time')).toHaveCount(0)
-  await expect(page.locator('.tech-column .trace-line').first()).toHaveAttribute('title', /\d{2}:\d{2}:\d{2}/)
+  await expect(page.locator('.tech-column')).toHaveCount(0)
+  await expect(page.getByRole('button', { name: 'Скопировать дебаг' })).toBeVisible()
+  await expect(page.getByRole('button', { name: 'Пропустить раунд' })).toBeVisible()
+  expect(logs.some((line) => line.includes('[aisigame'))).toBe(true)
   await expect(page.locator('.cost')).toHaveText('973')
   await expect(page.locator('.topbar')).not.toContainText('$')
 })

@@ -33,8 +33,7 @@ test('выход стирает партию, обновление страни�
   await page.getByRole('button', { name: 'Игрок 2', exact: true }).click()
   await hear(page, 'Каспийское')
   await expect(page.locator('.player', { hasText: 'Игрок 2' })).toContainText('100')
-  await page.getByRole('button', { name: 'Техническое' }).click()
-  await page.getByRole('button', { name: 'Следующий раунд' }).click()
+  await page.getByRole('button', { name: 'Пропустить раунд' }).click()
   await expect(page.locator('.eyebrow').first()).toContainText('Второй раунд')
 
   const mid = await readGame(page)
