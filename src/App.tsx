@@ -8,11 +8,14 @@ import { playersFromNames } from './game/players.ts'
 import { gameMachine, statePath } from './game/machine.ts'
 import {
   clearSavedGame,
+  decideResumeFile,
   packCanResume,
   persistMatch,
   readSavedGame,
+  resumeFileName,
   resumeNeedsFile,
   resumePackTitle,
+  sha256Hex,
   type SavedGame,
 } from './game/savedGame.ts'
 import { loadSiq, revokePackMedia } from './game/siq.ts'
@@ -63,6 +66,7 @@ export default function App() {
   const [savedGame, setSavedGame] = useState<SavedGame | null>(() => readSavedGame())
   const [playerNames, setPlayerNames] = useState(() => readStartPrefs().names)
   const [ownFileName, setOwnFileName] = useState('')
+  const [ownFileHash, setOwnFileHash] = useState('')
   const [pendingContinue, setPendingContinue] = useState(false)
   const [diskResume, setDiskResume] = useState<SavedGame | null>(null)
   const [readingResume, setReadingResume] = useState(false)
@@ -140,6 +144,7 @@ export default function App() {
     packId === ownPackId
       ? ownFileName
       : (packCatalog.find((item) => item.id === packId)?.href.split('/').pop() ?? `${packId}.siq`)
+  const packHash = packId === ownPackId ? ownFileHash : ''
 
   useEffect(() => {
     if (suppressSave.current) {
@@ -150,8 +155,8 @@ export default function App() {
       }
       return
     }
-    setSavedGame(persistMatch({ packId, packFile, path, context: snapshot.context }))
-  }, [snapshot, packId, packFile, path])
+    setSavedGame(persistMatch({ packId, packFile, packHash, path, context: snapshot.context }))
+  }, [snapshot, packId, packFile, packHash, path])
 
   useEffect(() => {
     if (!pendingContinue) return
@@ -203,13 +208,17 @@ export default function App() {
 
   async function chooseFile(file: File) {
     setOwnFileName(file.name)
+    setOwnFileHash('')
     setPackId(ownPackId)
     setLoadingPack(true)
     setPackError(null)
     try {
-      const parsed = await loadSiq(await file.arrayBuffer())
+      const bytes = await file.arrayBuffer()
+      const hash = await sha256Hex(bytes.slice(0))
+      const parsed = await loadSiq(bytes)
       const named = { ...parsed, name: parsed.name || file.name }
       loadedPackId.current = ownPackId
+      setOwnFileHash(hash)
       setPack((current) => {
         revokePackMedia(current)
         return named
@@ -217,6 +226,7 @@ export default function App() {
       setPackError(named.questions.length > 0 ? null : 'В пакете нет вопросов')
     } catch (error: unknown) {
       loadedPackId.current = null
+      setOwnFileHash('')
       setPack(null)
       setPackError(error instanceof Error ? error.message : 'Пакет не прочитался')
     } finally {
@@ -234,18 +244,33 @@ export default function App() {
     const saved = readSavedGame()
     const catalogIds = packCatalog.map((item) => item.id)
     if (!saved || resumeNeedsFile(saved, ownPackId) || !packCanResume(saved, catalogIds, ownPackId)) return
+    unlockAudio()
     setPendingContinue(true)
     if (packId !== saved.packId) setPackId(saved.packId)
   }
 
   async function resumeFromFile(file: File) {
+    unlockAudio()
     const saved = readSavedGame()
     if (!saved || !resumeNeedsFile(saved, ownPackId)) return
     const ticket = ++resumeTicket.current
     setReadingResume(true)
     setPackError(null)
     try {
-      const parsed = await loadSiq(await file.arrayBuffer())
+      const bytes = await file.arrayBuffer()
+      if (ticket !== resumeTicket.current) return
+      const chosenHash = await sha256Hex(bytes.slice(0))
+      if (ticket !== resumeTicket.current) return
+      const decision = decideResumeFile({
+        savedHash: saved.packHash,
+        chosenHash,
+        fileName: saved.packFile,
+      })
+      if (!decision.ok) {
+        window.alert(decision.message)
+        return
+      }
+      const parsed = await loadSiq(bytes)
       if (ticket !== resumeTicket.current) {
         revokePackMedia(parsed)
         return
@@ -258,6 +283,7 @@ export default function App() {
       const named = { ...parsed, name: parsed.name || file.name }
       skipCatalogLoad.current = true
       loadedPackId.current = ownPackId
+      setOwnFileHash(chosenHash)
       setOwnFileName(file.name)
       setPack((current) => {
         revokePackMedia(current)
@@ -295,6 +321,7 @@ export default function App() {
         )}
         resumeFromDisk={resumeNeedsFile(savedGame, ownPackId)}
         resumePackName={resumePackTitle(savedGame, ownPackId)}
+        resumeFileName={resumeFileName(savedGame, ownPackId)}
         readingResume={readingResume}
         loadingPack={loadingPack}
         packId={packId}

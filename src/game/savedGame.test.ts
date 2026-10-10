@@ -7,9 +7,12 @@ import {
   packCanResume,
   persistMatch,
   readSavedGame,
+  decideResumeFile,
+  resumeFileName,
   resumeNeedsFile,
   resumePackTitle,
   restoredMatch,
+  sha256Hex,
   type SavedGame,
 } from './savedGame.ts'
 import { demoPack } from './questions.ts'
@@ -97,6 +100,7 @@ function sample(patch: Partial<SavedGame> = {}): SavedGame {
     packId: 'demo',
     packFile: 'demo.siq',
     packName: 'Демо',
+    packHash: '',
     players: [
       { id: 1, name: 'Игрок 1', score: 100 },
       { id: 2, name: 'Игрок 2', score: -40 },
@@ -393,5 +397,106 @@ describe('saved game', () => {
     expect(readSavedGame(storage)?.sayCloseGuess).toBe(false)
     storage.setItem(gameStorageKey, JSON.stringify({ ...sample(), wrongHeard: 'нет' }))
     expect(readSavedGame(storage)).toBeNull()
+  })
+
+  it('сверяет sha256 своего файла: совпадение продолжает, чужой файл нет, старый снимок без хеша можно', async () => {
+    const hash = 'ab'.repeat(32)
+    const other = 'cd'.repeat(32)
+    expect(await sha256Hex(new TextEncoder().encode('abc'))).toBe(
+      'ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad',
+    )
+
+    expect(decideResumeFile({ savedHash: hash.toUpperCase(), chosenHash: hash, fileName: 'chill.siq' })).toEqual({
+      ok: true,
+    })
+    const miss = decideResumeFile({ savedHash: hash, chosenHash: other, fileName: 'chill.siq' })
+    expect(miss.ok).toBe(false)
+    if (!miss.ok) {
+      expect(miss.message).toContain('не из сохранённой игры')
+      expect(miss.message).toContain('«chill.siq»')
+      expect(miss.message).toContain(hash)
+      expect(miss.message).toContain(other)
+    }
+    expect(decideResumeFile({ savedHash: '', chosenHash: other, fileName: 'chill.siq' }).ok).toBe(true)
+    expect(decideResumeFile({ savedHash: undefined, chosenHash: other, fileName: 'old.siq' }).ok).toBe(true)
+    expect(decideResumeFile({ savedHash: '   ', chosenHash: other, fileName: 'old.siq' }).ok).toBe(true)
+    const nameless = decideResumeFile({ savedHash: hash, chosenHash: other, fileName: '  ' })
+    expect(nameless.ok).toBe(false)
+    if (!nameless.ok) {
+      expect(nameless.message).not.toContain('«')
+      expect(nameless.message).toContain(hash)
+      expect(nameless.message).toContain(other)
+    }
+
+    const storage = memory()
+    persistMatch(
+      {
+        packId: 'file',
+        packFile: 'chill.siq',
+        packHash: hash.toUpperCase(),
+        path: 'choosing.listening',
+        context: context({ packName: 'Чил' }),
+      },
+      storage,
+    )
+    const saved = readSavedGame(storage)
+    expect(saved?.packFile).toBe('chill.siq')
+    expect(saved?.packHash).toBe(hash)
+    const raw = storage.getItem(gameStorageKey) ?? ''
+    expect(raw).toContain('chill.siq')
+    expect(raw).toContain(hash)
+    expect(raw).not.toContain('fileBytes')
+    expect(resumeFileName(saved)).toBe('chill.siq')
+
+    persistMatch(
+      {
+        packId: 'file',
+        packFile: 'chill.siq',
+        path: 'buzzing.open',
+        context: context({ packName: 'Чил', roundIndex: 0, activeQuestionId: 'history-100' }),
+      },
+      storage,
+    )
+    expect(readSavedGame(storage)?.packHash).toBe(hash)
+
+    persistMatch(
+      {
+        packId: 'file',
+        packFile: 'other.siq',
+        path: 'choosing.listening',
+        context: context({ packName: 'Чил' }),
+      },
+      storage,
+    )
+    expect(readSavedGame(storage)?.packFile).toBe('other.siq')
+    expect(readSavedGame(storage)?.packHash).toBe('')
+
+    persistMatch(
+      { packId: 'demo', packFile: 'demo.siq', path: 'choosing.listening', context: context() },
+      storage,
+    )
+    expect(readSavedGame(storage)?.packHash).toBe('')
+    expect(resumeFileName(readSavedGame(storage))).toBe('')
+
+    const legacy = { ...sample(), packId: 'file', packFile: 'legacy.siq', packName: 'Название внутри' } as Record<
+      string,
+      unknown
+    >
+    delete legacy.packHash
+    storage.setItem(gameStorageKey, JSON.stringify(legacy))
+    const old = readSavedGame(storage)
+    expect(old?.packFile).toBe('legacy.siq')
+    expect(old?.packHash).toBe('')
+    expect(resumeFileName(old)).toBe('legacy.siq')
+    expect(resumeFileName(sample({ packId: 'file', packFile: '   ', packName: 'Не имя файла' }))).toBe('')
+    expect(decideResumeFile({ savedHash: old?.packHash, chosenHash: other, fileName: old?.packFile ?? '' }).ok).toBe(
+      true,
+    )
+
+    storage.setItem(gameStorageKey, JSON.stringify({ ...legacy, packHash: 12, packFile: 'kept.siq' }))
+    const weird = readSavedGame(storage)
+    expect(weird?.packFile).toBe('kept.siq')
+    expect(weird?.packHash).toBe('')
+    expect(weird).not.toBeNull()
   })
 })

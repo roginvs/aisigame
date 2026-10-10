@@ -28,6 +28,7 @@ export function StartScreen(props: {
   canContinue: boolean
   resumeFromDisk: boolean
   resumePackName: string
+  resumeFileName: string
   readingResume: boolean
   onContinue: () => void
   onResumeFile: (file: File) => void
@@ -55,6 +56,7 @@ export function StartScreen(props: {
     canContinue,
     resumeFromDisk,
     resumePackName,
+    resumeFileName,
     readingResume,
     onContinue,
     onResumeFile,
@@ -152,7 +154,7 @@ export function StartScreen(props: {
         {resumeFromDisk && resumePackName ? <p className="status-line">Пак «{resumePackName}»</p> : null}
         <button
           type="button"
-          className="ghost"
+          className={resumeFileName ? 'ghost continue-with-file' : 'ghost'}
           disabled={!canContinue || busy || readingResume || (needsKey && apiKey.trim().length === 0)}
           onClick={() => {
             if (resumeFromDisk) {
@@ -162,7 +164,8 @@ export function StartScreen(props: {
             onContinue()
           }}
         >
-          Продолжить прошлую игру
+          <span>Продолжить прошлую игру</span>
+          {resumeFileName ? <span className="continue-file">{resumeFileName}</span> : null}
         </button>
         <input
           ref={resumeFileRef}

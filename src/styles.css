@@ -172,6 +172,21 @@ button.ghost.stop:disabled {
   border: 1px solid #5c7188;
 }
 
+button.continue-with-file {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+  line-height: 1.25;
+  white-space: normal;
+}
+
+button.continue-with-file .continue-file {
+  font-size: 0.85rem;
+  color: #d5dbe3;
+  overflow-wrap: anywhere;
+}
+
 .status {
   display: grid;
   grid-template-columns: repeat(3, 1fr);

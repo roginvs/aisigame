@@ -19,6 +19,8 @@ export type SavedGame = SavedMatch & {
   packId: string
   packFile: string
   packName: string
+  /** SHA-256 своего файла, hex. Пусто у каталога и у старых снимков без хеша. */
+  packHash: string
 }
 
 const announceKinds: AnnounceKind[] = ['correct', 'incorrect', 'silence', 'nobody', 'unclear', 'repeat']
@@ -93,7 +95,7 @@ export function clearSavedGame(storage: Storage = localStorage): void {
   storage.removeItem(gameStorageKey)
 }
 
-/** Id своего файла. Совпадает с `ownPackId`: в снимке есть имя, самих байтов нет. */
+/** Id своего файла. Совпадает с `ownPackId`: в снимке имя и sha256, самих байтов нет. */
 const uploadedPackId = 'file'
 
 export function packCanResume(
@@ -116,18 +118,64 @@ export function resumePackTitle(saved: SavedGame | null, diskPackId = uploadedPa
   return saved.packName.trim() || saved.packFile.trim()
 }
 
+/** Имя файла с диска, как его выбрали. Пустое не подменяется названием пакета. */
+export function resumeFileName(saved: SavedGame | null, diskPackId = uploadedPackId): string {
+  if (!resumeNeedsFile(saved, diskPackId) || !saved) return ''
+  return saved.packFile.trim()
+}
+
+export async function sha256Hex(bytes: BufferSource): Promise<string> {
+  const digest = await crypto.subtle.digest('SHA-256', bytes)
+  return [...new Uint8Array(digest)].map((byte) => byte.toString(16).padStart(2, '0')).join('')
+}
+
+export type ResumeFileDecision = { ok: true } | { ok: false; message: string }
+
+/**
+ * Сверка файла со снимком. Пустой хеш — старое сохранение, продолжаем без проверки.
+ * Совпавший хеш продолжает партию, чужой — нет.
+ */
+export function decideResumeFile(input: {
+  savedHash: string | null | undefined
+  chosenHash: string
+  fileName: string
+}): ResumeFileDecision {
+  const expected = normalizeHash(input.savedHash)
+  if (!expected) return { ok: true }
+  const chosen = normalizeHash(input.chosenHash)
+  if (expected === chosen) return { ok: true }
+  const name = input.fileName.trim()
+  const named = name ? ` «${name}»` : ''
+  return {
+    ok: false,
+    message: `Этот файл не из сохранённой игры. Нужен файл${named} с хешем ${expected}, а у выбранного файла хеш ${chosen}.`,
+  }
+}
+
+function normalizeHash(value: string | null | undefined): string {
+  return (value ?? '').trim().toLowerCase()
+}
+
 export function persistMatch(
-  input: { packId: string; packFile: string; path: string; context: GameContext },
+  input: { packId: string; packFile: string; packHash?: string; path: string; context: GameContext },
   storage: Storage = localStorage,
 ): SavedGame | null {
   if (input.path === 'startMenu') return readSavedGame(storage)
   const phase = phaseForSave(input.path, input.context.resumePath)
   if (!phase) return readSavedGame(storage)
+  const previous = readSavedGame(storage)
+  const requested = normalizeHash(input.packHash)
+  const packHash =
+    requested ||
+    (input.packId === uploadedPackId && previous?.packId === input.packId && previous.packFile === input.packFile
+      ? previous.packHash
+      : '')
   const game = sanitize({
     version: 1,
     packId: input.packId,
     packFile: input.packFile,
     packName: input.context.packName,
+    packHash,
     ...matchFromContext(input.context, phase),
   })
   if (!game) return readSavedGame(storage)
@@ -264,6 +312,7 @@ function sanitize(value: unknown): SavedGame | null {
   if (typeof record.packId !== 'string' || !record.packId.trim()) return null
   if (typeof record.packFile !== 'string') return null
   if (typeof record.packName !== 'string') return null
+  const packHash = typeof record.packHash === 'string' ? record.packHash.trim().toLowerCase() : ''
   const players = normalizePlayers(record.players)
   const playedIds = stringList(record.playedIds)
   const missedIds = playerList(record.missedIds)
@@ -309,6 +358,7 @@ function sanitize(value: unknown): SavedGame | null {
     packId: record.packId,
     packFile: record.packFile,
     packName: record.packName,
+    packHash,
     players,
     roundIndex,
     playedIds,
