@@ -3,7 +3,7 @@ import { useMachine } from '@xstate/react'
 import { unlockAudio } from './audio/beep.ts'
 import { ownPackId, packCatalog } from './game/catalog.ts'
 import { attachController } from './game/controller.ts'
-import { playersFromNames } from './game/players.ts'
+import { defaultPlayerNames, playersFromNames } from './game/players.ts'
 import { gameMachine, statePath } from './game/machine.ts'
 import {
   clearSavedGame,
@@ -68,7 +68,7 @@ export default function App() {
   const [packError, setPackError] = useState<string | null>(null)
   const [loadingPack, setLoadingPack] = useState(true)
   const [savedGame, setSavedGame] = useState<SavedGame | null>(() => readSavedGame())
-  const [playerNames, setPlayerNames] = useState(() => readStartPrefs().names)
+  const [playerNames, setPlayerNames] = useState(() => readStartPrefs().names || defaultPlayerNames)
   const [ownFileName, setOwnFileName] = useState('')
   const [ownFileHash, setOwnFileHash] = useState('')
   const [pendingContinue, setPendingContinue] = useState(false)
@@ -377,6 +377,7 @@ export default function App() {
       onStop={() => send({ type: 'STOP' })}
       onReset={exitToMenu}
       onNextRound={() => send({ type: 'NEXT_ROUND' })}
+      modelLabel={model.label}
     />
   )
 }

@@ -6,7 +6,7 @@ test('экран вопроса без скроллбаров и с нормал
   await page.goto('/?mock=1')
   await page.getByRole('button', { name: 'Начать игру' }).click()
   await expect(page.locator('.talk .status-line')).toHaveCount(0)
-  await expect(page.locator('.talk .host .host-line')).toHaveText('назовите тему и стоимость')
+  await expect(page.locator('.eyebrow').first()).toContainText('Мок для тестов')
   await expect(page.getByRole('button', { name: 'Остановить' })).toHaveCount(0)
   await expect(page.getByRole('button', { name: 'Пауза' })).toBeVisible()
   await expect(page.getByRole('button', { name: 'Выход' })).toBeVisible()

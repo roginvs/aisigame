@@ -1,5 +1,8 @@
 import type { Player, PlayerId } from './types.ts'
 
+/** То, что стоит в поле имён, пока человек ничего не вписал. Пустое поле даёт тех же троих. */
+export const defaultPlayerNames = 'Игрок 1; Игрок 2; Игрок 3;'
+
 export function defaultPlayers(): Player[] {
   return [
     { id: 1, name: 'Игрок 1', score: 0 },
@@ -8,10 +11,10 @@ export function defaultPlayers(): Player[] {
   ]
 }
 
-/** Пустые строки пропускаются. Пустое поле — три игрока по умолчанию. */
+/** Имена через перевод строки или точку с запятой. Пустые куски пропускаются. Пустое поле — три игрока по умолчанию. */
 export function playersFromNames(text: string): Player[] {
   const names = text
-    .split(/\r?\n/)
+    .split(/[;\r\n]+/)
     .map((line) => line.trim())
     .filter((line) => line.length > 0)
   if (names.length === 0) return defaultPlayers()

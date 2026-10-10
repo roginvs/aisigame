@@ -1,5 +1,6 @@
 import { useRef } from 'react'
 import { ownPackId, packCatalog } from '../game/catalog.ts'
+import { defaultPlayerNames } from '../game/players.ts'
 import type { LinkStatus } from '../realtime/client.ts'
 import { keyFieldLabel, voiceById, voiceModels } from '../realtime/models.ts'
 import { startupStatus } from './startupStatus.ts'
@@ -122,12 +123,12 @@ export function StartScreen(props: {
           <textarea
             rows={3}
             value={playerNames}
-            placeholder={'Игрок 1\nИгрок 2\nИгрок 3'}
+            placeholder={defaultPlayerNames}
             spellCheck={false}
             onChange={(event) => onPlayerNames(event.target.value)}
           />
         </label>
-        <p className="status-line">По одному имени в строке. Пустое поле — Игрок 1, Игрок 2 и Игрок 3.</p>
+        <p className="status-line">Имя с новой строки или через точку с запятой. Пустое поле — Игрок 1, Игрок 2 и Игрок 3.</p>
         <label className="field">
           <span>Модель</span>
           <select value={modelId} onChange={(event) => onModel(event.target.value)}>

@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { buzzKeyLabel, isKeyboardPlayer, playerFromBuzzKey } from '../ui/buzzKeys.ts'
-import { defaultPlayers, openingChooser, playersFromNames } from './players.ts'
+import { defaultPlayerNames, defaultPlayers, openingChooser, playersFromNames } from './players.ts'
 
 const plain = { alt: false, ctrl: false, meta: false, shift: false }
 
@@ -12,8 +12,12 @@ describe('playersFromNames', () => {
       'Вера',
       'Глеб',
     ])
+    expect(playersFromNames('Анна; Борис; Вера;').map((player) => player.name)).toEqual(['Анна', 'Борис', 'Вера'])
+    expect(playersFromNames('Анна; Борис\nВера').map((player) => player.name)).toEqual(['Анна', 'Борис', 'Вера'])
+    expect(playersFromNames(defaultPlayerNames)).toEqual(defaultPlayers())
     expect(playersFromNames('Анна\nБорис').map((player) => player.id)).toEqual([1, 2])
     expect(playersFromNames('  \n')).toEqual(defaultPlayers())
+    expect(playersFromNames(' ; ; ')).toEqual(defaultPlayers())
     expect(playersFromNames('')).toEqual(defaultPlayers())
   })
 

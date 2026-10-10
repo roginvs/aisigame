@@ -30,8 +30,9 @@ export function GameScreen(props: {
   onStop: () => void
   onReset: () => void
   onNextRound: () => void
+  modelLabel: string
 }) {
-  const { snapshot, link, onBuzz, onPick, onPause, onReset, onNextRound } = props
+  const { snapshot, link, onBuzz, onPick, onPause, onReset, onNextRound, modelLabel } = props
   const [copyLabel, setCopyLabel] = useState('Скопировать дебаг')
   const path = statePath(snapshot.value)
   const context = snapshot.context
@@ -130,7 +131,7 @@ export function GameScreen(props: {
       </p>
       <header className="topbar">
         <div>
-          <p className="eyebrow">{[context.packName, round?.name].filter(Boolean).join(' · ') || 'Раунд'}</p>
+          <p className="eyebrow">{[context.packName, round?.name, modelLabel].filter(Boolean).join(' · ') || 'Раунд'}</p>
           <h1>Своя игра</h1>
         </div>
         <div className="pills">
