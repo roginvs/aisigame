@@ -12,6 +12,8 @@
 
 Прототип уже запускается: связь, машина, пакет вопросов, несколько раундов и финал.
 
+Онлайн-режим ещё не написан. План партии — [docs/ONLINE.md](docs/ONLINE.md). Как поднять Jitsi на сервере — [docs/JITSI.md](docs/JITSI.md). Игра за одним столом от этого не меняется.
+
 - React + TypeScript + Vite + XState 5.
 - Обычный ключ выбранной модели вводится в браузере и хранится в `localStorage` отдельно от других: OpenAI — `aisigame.openaiApiKey`, xAI — `aisigame.xaiApiKey`, Google — `aisigame.googleApiKey`. Выбранная модель — `aisigame.voiceModel`. Смена модели не стирает чужой ключ. `?mock=1` на этот заход берёт мок и не переписывает сохранённую модель, пока в списке не выбрали другую.
 - На старте список модели: GPT Realtime 2.1 Mini, GPT Realtime 2.1, Grok Voice Latest, Grok Voice Think Fast 2.0, Gemini 3.8 Live, Gemini 3.8 Live Extended Thinking и «Мок для тестов». Подпись поля ключа меняется вместе с провайдером. У мока поля ключа нет. OpenAI идёт WebRTC на `POST https://api.openai.com/v1/realtime/calls`, голос `marin`. Grok и Gemini идут через тот же `RealtimeClient`, но провод `VoiceWire` переводит их события в форму OpenAI: своего backend нет. Grok берёт короткий секрет `POST https://api.x.ai/v1/realtime/client_secrets` и открывает WebSocket с протоколом `xai-client-secret.…`, голос `eve`, PCM 24 кГц. Gemini открывает WebSocket Live с ключом в адресе запроса; адрес в лог не пишется. Первый `setup` уже с инструкциями и функциями: посередине партии Gemini подсказку распознавания не меняет. У Extended Thinking в setup стоит `thinkingLevel: LOW` и `behavior: NON_BLOCKING` у функций. Если браузер не пускает секрет xAI, на экране ошибка, сервер не добавляем.
