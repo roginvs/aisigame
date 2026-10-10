@@ -3,7 +3,7 @@ import { playTimeoutBeep } from '../audio/beep.ts'
 import { gameConfig } from '../config.ts'
 import { noteLink, pushJudgeLine, pushPlayerLine, pushTrace } from '../debug/trace.ts'
 import type { GameVoice, LinkStatus, ToolCall } from '../realtime/client.ts'
-import { verbatimSpeech } from '../realtime/speechMatch.ts'
+import { verbatimSpeech, withPlayNote } from '../realtime/speechMatch.ts'
 import { parseBet } from './bet.ts'
 import { questionSpeech, spokenChoiceForms } from './choices.ts'
 import { matchSpokenCell, selectionChatText } from './choiceMatch.ts'
@@ -670,17 +670,29 @@ function openChoiceCells(context: GameContext) {
     .map((question) => ({ themeId: question.themeId, themeName: question.themeName, value: question.value }))
 }
 
+/** Звук смеха. В слова реплики не входит. */
+const giggleNote =
+  'Один короткий звук «хи-хи». Это звук, не слово в предложении. Не произноси «смешок», «с лёгким смешком», «хихикаем», «тёплая фраза», «в скобках» и не читай ремарку в скобках.'
+
+/** Ошибка без смеха. В слова реплики не входит. */
+const dryNote = 'Ровно и коротко, без смеха. Не произноси «сухая фраза» и не читай ремарку в скобках.'
+
+function sayLine(parts: string[]): string {
+  return parts.filter(Boolean).join(' ').replace(/\s+/g, ' ').trim()
+}
+
 export function welcomeInstructions(context: GameContext): string {
   const round = currentRound(context, context.roundIndex)
   const chooser = playerName(context.players, context.chooserId) || 'игрока'
-  return `
-Одной короткой тёплой фразой поздоровайся и сразу позови выбрать вопрос.
+  const spoken = `
+Одной короткой фразой поздоровайся и сразу позови выбрать вопрос.
 Сейчас вопрос выбирает ${chooser}. Можно обратиться по имени.
 Пакет «${context.packName}», сейчас «${round?.name ?? 'раунд'}».
 Темы не называй: они на табло.
 Цены вопросов не называй и не перечисляй: они тоже на табло.
 Больше ничего не добавляй. Не задавай вопрос викторины и не называй ответы.
 `.trim()
+  return withPlayNote(spoken, giggleNote)
 }
 
 export function bridgeInstructions(context: GameContext): string {
@@ -856,13 +868,41 @@ export function announceInstructions(context: GameContext): string {
   const plus = delta > 0 ? `Сразу назови очки: плюс ${delta}.` : ''
   const minus = delta > 0 ? `Сразу назови очки: минус ${delta}.` : ''
   if (kind === 'correct' && hidden) {
-    return `Одна короткая тёплая фраза, можно с лёгким смешком: верно, или синоним вроде «правильно», «отлично». ${plus} ${named} Правильный ответ не произноси. ${finalNote}`.replace(/\s+/g, ' ').trim()
+    return withPlayNote(
+      sayLine([
+        'Одна короткая фраза: верно, или синоним вроде «правильно», «отлично».',
+        plus,
+        named,
+        'Правильный ответ не произноси.',
+        finalNote,
+      ]),
+      giggleNote,
+    )
   }
   if (kind === 'correct') {
-    return `Одна короткая тёплая фраза, можно с лёгким смешком: верно, или синоним вроде «правильно», «отлично». ${plus} ${named} Можно добавить «дальше». Правильный ответ не произноси. Не повторяй вопрос. ${finalNote}`.replace(/\s+/g, ' ').trim()
+    return withPlayNote(
+      sayLine([
+        'Одна короткая фраза: верно, или синоним вроде «правильно», «отлично».',
+        plus,
+        named,
+        'Можно добавить «дальше».',
+        'Правильный ответ не произноси. Не повторяй вопрос.',
+        finalNote,
+      ]),
+      giggleNote,
+    )
   }
   if (kind === 'incorrect' && !publish) {
-    return `Одна короткая сухая фраза: неверно, или синоним вроде «нет», «мимо». ${minus} ${named} Правильный ответ не называй и не намекай. Не зови нажимать кнопку. ${finalNote}`.replace(/\s+/g, ' ').trim()
+    return withPlayNote(
+      sayLine([
+        'Одна короткая фраза: неверно, или синоним вроде «нет», «мимо».',
+        minus,
+        named,
+        'Правильный ответ не называй и не намекай. Не зови нажимать кнопку.',
+        finalNote,
+      ]),
+      dryNote,
+    )
   }
   if (kind === 'incorrect') {
     const rest = [named, minus, finalNote].filter(Boolean).join(' ')
@@ -876,7 +916,7 @@ export function announceInstructions(context: GameContext): string {
     return `${withCloseGuess(cue, context)} Только после этого коротко скажи, что время на ответ вышло.${rest ? ` ${rest}` : ''}`
   }
   if (kind === 'repeat') {
-    return 'Одной короткой вежливой фразой скажи только: «Повторите, пожалуйста». Правильный ответ не называй и не намекай. Не говори, верно это или нет, и не зови нажимать кнопку.'
+    return 'Одной короткой фразой скажи только: «Повторите, пожалуйста». Правильный ответ не называй и не намекай. Не говори, верно это или нет, и не зови нажимать кнопку.'
   }
   if (kind === 'nobody') {
     const exact = verbatimAnnouncement(context)
@@ -903,7 +943,7 @@ export function announceInstructions(context: GameContext): string {
   return `Одной фразой скажи, что ответ не удалось засчитать и очки не изменились. Затем предложи выбрать следующий вопрос. Темы и номиналы не перечисляй. ${finalNote} ${context.judgmentReason}`
 }
 
-function finishedInstructions(context: GameContext): string {
+export function finishedInstructions(context: GameContext): string {
   const scores = context.players.map((player) => `${player.name} — ${player.score}`).join(', ')
   const best = Math.max(...context.players.map((player) => player.score))
   const leaders = context.players.filter((player) => player.score === best)
@@ -911,5 +951,5 @@ function finishedInstructions(context: GameContext): string {
     leaders.length === 1
       ? `Победил ${leaders[0]?.name ?? 'игрок'} со счётом ${best}.`
       : `Ничья: ${leaders.map((player) => player.name).join(' и ')}, по ${best}.`
-  return `Подведи итог двумя короткими тёплыми фразами, с улыбкой. Счёт: ${scores}. ${outcome}`
+  return withPlayNote(`Подведи итог двумя короткими фразами. Счёт: ${scores}. ${outcome}`, giggleNote)
 }

@@ -1,10 +1,12 @@
 import { describe, expect, it } from 'vitest'
 import { gameConfig, hostInstructions } from '../config.ts'
+import { playNote, spokenPayload } from '../realtime/speechMatch.ts'
 import {
   announceInstructions,
   bridgeInstructions,
   buzzerWarningDelay,
   falseStartInstructions,
+  finishedInstructions,
   verbatimAnnouncement,
   welcomeInstructions,
 } from './controller.ts'
@@ -323,6 +325,62 @@ describe('announceInstructions', () => {
     expect(line).toContain('верно')
     expect(line).not.toContain('Боевой Буратино')
   })
+
+  it('в словах похвалы нет смешка: звук только в пометке, как сыграть', () => {
+    const line = announceInstructions(
+      context({
+        announceKind: 'correct',
+        activePlayerId: 2,
+        players: [
+          { id: 1, name: 'Вася', score: 0 },
+          { id: 2, name: 'Маша', score: 300 },
+          { id: 3, name: 'Игрок 3', score: 0 },
+        ],
+        questions: [
+          {
+            id: 'q1',
+            roundIndex: 0,
+            themeId: 't1',
+            themeName: 'Б.Б.',
+            value: 300,
+            text: 'Кто это?',
+            answers: ['Боевой Буратино'],
+          },
+        ],
+      }),
+    )
+    const spoken = spokenPayload(line)
+    expect(spoken).toContain('верно')
+    expect(spoken).toContain('плюс 300')
+    expect(spoken).toContain('Маша')
+    expect(spoken).toContain('дальше')
+    expect(spoken).not.toContain('смешок')
+    expect(spoken).not.toContain('хихикаем')
+    expect(spoken).not.toContain('тёпл')
+    expect(spoken).not.toContain('хи-хи')
+    expect(spoken).not.toContain('Боевой Буратино')
+    const note = playNote(line)
+    expect(line).toContain('Как сыграть, вслух не читать')
+    expect(note).toContain('хи-хи')
+    expect(note).toContain('смешок')
+    expect(note).toContain('хихикаем')
+    expect(note).toContain('не читай')
+  })
+
+  it('неверный ответ без смеха и без слова «сухая» в реплике', () => {
+    const line = announceInstructions(context({ announceKind: 'incorrect', playedIds: [] }))
+    const spoken = spokenPayload(line)
+    expect(spoken).toContain('неверно')
+    expect(spoken).toContain('минус 100')
+    expect(spoken).not.toContain('смешок')
+    expect(spoken).not.toContain('хихи')
+    expect(spoken).not.toContain('сух')
+    expect(spoken).not.toContain('тёпл')
+    const note = playNote(line)
+    expect(note).not.toContain('хи-хи')
+    expect(note).not.toContain('хихикаем')
+    expect(note).toContain('сухая фраза')
+  })
 })
 
 describe('welcomeInstructions', () => {
@@ -355,6 +413,36 @@ describe('welcomeInstructions', () => {
     }
     expect(hostInstructions).not.toContain('первом приветствии')
     expect(hostInstructions).toContain('Номиналы и цены вопросов не называй')
+    expect(hostInstructions).toContain('текст вопроса')
+    expect(hostInstructions).toContain('ответ пакета')
+    expect(hostInstructions).not.toContain('«ах»')
+    const spoken = spokenPayload(line)
+    expect(spoken).toContain('поздоровайся')
+    expect(spoken).not.toContain('смешок')
+    expect(spoken).not.toContain('хихикаем')
+    expect(spoken).not.toContain('тёпл')
+    expect(playNote(line)).toContain('хи-хи')
+  })
+})
+
+describe('finishedInstructions', () => {
+  it('в итоге звук смеха не входит в слова счёта', () => {
+    const line = finishedInstructions(
+      context({
+        players: [
+          { id: 1, name: 'Вася', score: 100 },
+          { id: 2, name: 'Маша', score: 0 },
+        ],
+      }),
+    )
+    const spoken = spokenPayload(line)
+    expect(spoken).toContain('Вася — 100')
+    expect(spoken).toContain('Победил Вася')
+    expect(spoken).not.toContain('смешок')
+    expect(spoken).not.toContain('хихикаем')
+    expect(spoken).not.toContain('улыб')
+    expect(spoken).not.toContain('тёпл')
+    expect(playNote(line)).toContain('хи-хи')
   })
 })
 

@@ -12,6 +12,29 @@ export function verbatimSpeech(text: string): string {
   return `Произнеси дословно только эту фразу. Это уже вопрос.\nНе говори, что тема выбрана. Не называй тему и номинал. Не добавляй слово «вопрос» перед фразой.\n${text}`
 }
 
+/** Второй абзац модель играет, но игрокам не читает. */
+export const playNoteMark = '\n\nКак сыграть, вслух не читать:\n'
+
+export function withPlayNote(spoken: string, note: string): string {
+  const line = spoken.trim()
+  const aside = note.trim()
+  if (!aside) return line
+  return `${line}${playNoteMark}${aside}`
+}
+
+/** Текст, который можно сказать. Пометка «как сыграть» сюда не входит. */
+export function spokenPayload(cue: string): string {
+  const at = cue.indexOf(playNoteMark)
+  return (at === -1 ? cue : cue.slice(0, at)).trim()
+}
+
+/** Как сыграть. Пусто, если пометки нет. */
+export function playNote(cue: string): string {
+  const at = cue.indexOf(playNoteMark)
+  if (at === -1) return ''
+  return cue.slice(at + playNoteMark.length).trim()
+}
+
 export function isolatedToolResponse(options: {
   name: string
   instructions: string
@@ -37,20 +60,31 @@ export function isolatedToolResponse(options: {
   }
 }
 
+const toneAside =
+  'Ремарку, скобки и слова про тон вслух не читай и в скобки не ставь: «смешок», «с лёгким смешком», «хихикаем», «тёплая фраза», «сухая фраза», «в скобках».'
+
 export function isolatedCue(instructions: string, meta: { purpose: string; turn: number; take: number }) {
+  const spoken = spokenPayload(instructions)
+  const aside = playNote(instructions)
+  const performance = aside ? `Как сыграть, этот абзац игрокам не говорить: ${aside}` : ''
   return {
     conversation: 'none' as const,
     output_modalities: ['audio'] as const,
     tool_choice: 'none' as const,
     tools: [] as const,
     metadata: { purpose: meta.purpose, turn: String(meta.turn), take: String(meta.take) },
-    instructions:
-      'Сразу скажи игрокам то, что в реплике, без предисловия. Не пересказывай задание и не говори, что сейчас что-то произнесёшь. Если в реплике нет правильного ответа, не произноси его и не вспоминай его из других знаний. Не повторяй вопрос.',
+    instructions: [
+      'Сразу скажи игрокам только текст реплики, без предисловия. Не пересказывай задание и не говори, что сейчас что-то произнесёшь. Если в реплике нет правильного ответа, не произноси его и не вспоминай его из других знаний. Не повторяй вопрос.',
+      toneAside,
+      performance,
+    ]
+      .filter(Boolean)
+      .join(' '),
     input: [
       {
         type: 'message' as const,
         role: 'user' as const,
-        content: [{ type: 'input_text' as const, text: instructions }],
+        content: [{ type: 'input_text' as const, text: spoken }],
       },
     ],
   }

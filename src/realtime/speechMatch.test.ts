@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { isolatedCue, isolatedToolResponse, speechMatches, verbatimResponse } from './speechMatch.ts'
+import { isolatedCue, isolatedToolResponse, speechMatches, verbatimResponse, withPlayNote } from './speechMatch.ts'
 
 const newton = 'Кто сформулировал закон всемирного тяготения?'
 const melting = 'Как называется процесс, при котором вещество переходит из твердого состояния в жидкое, и наоборот?'
@@ -61,6 +61,26 @@ describe('isolatedCue', () => {
     expect(response.input[0]?.content[0]?.text).toContain('плюс 100')
     expect(response.input[0]?.content[0]?.text).not.toContain('Вивальди')
   })
+
+  it('пометку как сыграть не кладёт в текст, который говорят игрокам', () => {
+    const response = isolatedCue(
+      withPlayNote(
+        'Одна короткая фраза: верно. Сразу назови очки: плюс 300. Можно добавить «дальше».',
+        'Один короткий звук «хи-хи». Не произноси «смешок» и «хихикаем».',
+      ),
+      { purpose: 'announce', turn: 4, take: 1 },
+    )
+    const said = response.input[0]?.content[0]?.text ?? ''
+    expect(said).toContain('плюс 300')
+    expect(said).toContain('дальше')
+    expect(said).not.toContain('смешок')
+    expect(said).not.toContain('хихикаем')
+    expect(said).not.toContain('хи-хи')
+    expect(response.instructions).toContain('без предисловия')
+    expect(response.instructions).toContain('хи-хи')
+    expect(response.instructions).toContain('смешок')
+    expect(response.instructions).toContain('не читай')
+  })
 })
 
 describe('verbatimResponse', () => {
@@ -68,8 +88,10 @@ describe('verbatimResponse', () => {
     const response = verbatimResponse('Сколько струн у обычной скрипки?', { purpose: 'read', turn: 8, take: 1 })
     expect(response.conversation).toBe('none')
     expect(response.tools).toEqual([])
+    expect(response.instructions).toContain('дословно')
     expect(response.instructions).toContain('Не называй тему')
     expect(response.input[0]?.content[0]?.text).toContain('больше ничего')
     expect(response.input[0]?.content[0]?.text).toContain('Сколько струн у обычной скрипки?')
+    expect(response.input[0]?.content[0]?.text).not.toContain('смешок')
   })
 })
