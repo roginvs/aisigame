@@ -9,7 +9,7 @@ export function speechMatches(said: string, expected: string): boolean {
 }
 
 export function verbatimSpeech(text: string): string {
-  return `Произнеси дословно только эту фразу. Это уже вопрос.\nНе говори, что тема выбрана. Не называй тему и номинал. Не добавляй слово «вопрос» перед фразой.\n${text}`
+  return text.trim()
 }
 
 /** Второй абзац модель играет, но игрокам не читает. */
@@ -98,7 +98,7 @@ export function verbatimResponse(text: string, meta: { purpose: string; turn: nu
     tools: [] as const,
     metadata: { purpose: meta.purpose, turn: String(meta.turn), take: String(meta.take) },
     instructions:
-      'Повтори фразу пользователя дословно и сразу с неё начни. Это уже текст вопроса. Не говори, что тема или ячейка выбрана. Не называй тему и номинал. Не добавляй «вопрос», «отлично» и никакой другой текст до или после.',
+      'Ты ведущая и сейчас говоришь игрокам. Сообщение ниже — готовая фраза: сам вопрос или уже принятая реплика. Начни сразу с этой фразы и скажи только её, символ в символ. Не объявляй тему и номинал. Не говори, что ячейка выбрана. Не добавляй «вопрос», «отлично» и ничего до или после.',
     input: [
       {
         type: 'message' as const,
