@@ -49,6 +49,16 @@ export function GameScreen(props: {
     const timer = window.setInterval(() => setNow(Date.now()), 50)
     return () => window.clearInterval(timer)
   }, [paused, penaltyLive])
+  const [beepCue, setBeepCue] = useState('')
+  useEffect(() => {
+    let count = 0
+    const onBeep = () => {
+      count += 1
+      setBeepCue(`Короткий сигнал ${count}`)
+    }
+    window.addEventListener('aisigame-beep', onBeep)
+    return () => window.removeEventListener('aisigame-beep', onBeep)
+  }, [])
   const usage = useSyncExternalStore(subscribeUsage, getUsageSnapshot)
   const buttonsOpen = buttonsLive(path)
   const earlyLive = path === 'reading.armed'
@@ -109,6 +119,9 @@ export function GameScreen(props: {
 
   return (
     <main className="table">
+      <p className="visually-hidden" role="status" aria-live="assertive">
+        {beepCue}
+      </p>
       <header className="topbar">
         <div>
           <p className="eyebrow">{[context.packName, round?.name].filter(Boolean).join(' · ') || 'Раунд'}</p>
@@ -147,7 +160,7 @@ export function GameScreen(props: {
             </p>
             <h2>{question.text}</h2>
             {question.choices?.length ? (
-              <ul className="choices">
+              <ul className="choices" aria-label="Варианты ответа">
                 {question.choices.map((choice) => (
                   <li
                     key={choice.label}
@@ -158,13 +171,14 @@ export function GameScreen(props: {
                       {choice.text ? <span>{choice.text}</span> : null}
                       {choice.media.map((item) => {
                         if (!item.url) return <span key={item.name}>Файл не найден: {item.name}</span>
-                        if (item.kind === 'image') return <img key={item.url} src={item.url} alt="" />
+                        if (item.kind === 'image') return <img key={item.url} src={item.url} alt="Иллюстрация варианта" />
                         return (
                           <QuestionClip
                             key={item.url}
                             kind={item.kind}
                             url={item.url}
                             live={questionLive && !showAnswer}
+                            label={item.kind === 'audio' ? 'Звук варианта' : 'Ролик варианта'}
                           />
                         )
                       })}
@@ -177,6 +191,7 @@ export function GameScreen(props: {
               media={staged.slot}
               play={showAnswer ? answerLive : questionLive}
               quiet={quietQuestion}
+              answerUrls={new Set(staged.answerVisual.map((item) => item.url))}
             />
             {context.activePlayerId ? <p className="answerer">Отвечает игрок {context.activePlayerId}</p> : null}
             {showTimer && context.phaseStartedAt !== null && context.phaseDurationMs !== null ? (
@@ -186,7 +201,7 @@ export function GameScreen(props: {
             {showAnswer ? (
               <>
                 <p className="etalon">Правильный ответ: {question.answers.join(', ')}</p>
-                <QuestionMedia media={staged.answerAudio} play={answerLive} />
+                <QuestionMedia media={staged.answerAudio} play={answerLive} answer />
               </>
             ) : null}
           </article>
@@ -203,6 +218,7 @@ export function GameScreen(props: {
                     type="button"
                     className={cellClass(cell?.id === context.activeQuestionId, played, flashing)}
                     disabled={!canPick || played || !cell}
+                    aria-label={played ? `${theme.name}, сыграно` : theme.name}
                     onClick={() => cell && onPick(theme.id, 0)}
                   >
                     {theme.name}
@@ -243,6 +259,7 @@ export function GameScreen(props: {
                         type="button"
                         className={cellClass(current, played, flashing)}
                         disabled={!canPick || played || !cell}
+                        aria-label={played ? `${theme.name}, ${value}, сыграно` : `${theme.name}, ${value}`}
                         onClick={() => cell && onPick(theme.id, value)}
                       >
                         {played ? '—' : value}
@@ -267,7 +284,7 @@ export function GameScreen(props: {
           const cooling = falseStartCooling(flareAt, penaltyClock)
           const key = isKeyboardPlayer(playerId) ? buzzKeyLabel[playerId] : ''
           return (
-            <div key={playerId} className={active ? 'player active' : 'player'}>
+            <div key={playerId} className={active ? 'player active' : 'player'} role="group" aria-label={`${player.name}: ${player.score}`}>
               <div className="player-meta">
                 <strong>{player.name}</strong>
                 <span>{player.score}</span>
@@ -285,6 +302,7 @@ export function GameScreen(props: {
                 onClick={() => onBuzz(playerId)}
               >
                 {chooses ? 'выбирайте вопрос' : missed ? 'Уже отвечал' : player.name}
+                {earlyLive ? <span className="visually-hidden">, вопрос ещё читается</span> : null}
               </button>
               <p className="key-hint">{key ? (earlyLive ? `${key} · уже можно` : key) : ''}</p>
             </div>

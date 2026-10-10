@@ -238,7 +238,7 @@ export function attachController(options: {
       const token = ++connectToken
       const apiKey = getApiKey().trim()
       if (!apiKey) {
-        actor.send({ type: 'CONNECTION_FAILED', message: 'Введите ключ OpenAI' })
+        actor.send({ type: 'CONNECTION_FAILED', message: 'Введите ключ' })
         return
       }
       void client.connect(apiKey).then(

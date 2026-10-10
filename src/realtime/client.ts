@@ -7,6 +7,7 @@ import { outputCut, outputFlushWaitMs, timersAfterPlaybackStarted, timersAfterRe
 import type { HostAudioTimers, OutputCutState } from './playback.ts'
 import { isolatedCue, isolatedToolResponse, speechMatches, verbatimResponse } from './speechMatch.ts'
 import { sessionTools } from './tools.ts'
+import type { VoiceWire } from './wire.ts'
 import { echoesAnswerPrompt } from '../game/answerPrompt.ts'
 import { echoesChoicePrompt } from '../game/choicePrompt.ts'
 import { transcriptionConfidence, transcriptOf, type StoredTranscript } from './utterance.ts'
@@ -44,10 +45,10 @@ export type ToolCall = {
 
 const callsUrl = 'https://api.openai.com/v1/realtime/calls'
 
-function sessionBody() {
+function sessionBody(model: string) {
   return {
     type: 'realtime',
-    model: gameConfig.model,
+    model,
     instructions: hostInstructions,
     output_modalities: ['audio'],
     audio: {
@@ -89,6 +90,10 @@ function clip(text: string): string {
 }
 
 export class RealtimeClient {
+  readonly model: string
+  private wire: VoiceWire | null
+  private wireOpen = false
+  private micLive = false
   private pc: RTCPeerConnection | null = null
   private dc: RTCDataChannel | null = null
   private mic: MediaStream | null = null
@@ -124,6 +129,11 @@ export class RealtimeClient {
   onSpeechStarted: () => void = () => {}
   onSpeechStopped: (info: { durationMs: number; itemId: string | null }) => void = () => {}
 
+  constructor(options: { model?: string; wire?: VoiceWire | null } = {}) {
+    this.model = options.model ?? gameConfig.model
+    this.wire = options.wire ?? null
+  }
+
   async connect(apiKey: string): Promise<void> {
     this.stopSession()
     this.dropped = false
@@ -132,6 +142,10 @@ export class RealtimeClient {
     const alive = () => token === this.sessionToken
     this.onLink({ connection: 'connecting', mic: 'requesting', host: 'idle' })
     unlockAudio()
+    if (this.wire) {
+      await this.connectWire(apiKey, token, alive)
+      return
+    }
 
     let mic: MediaStream
     try {
@@ -217,14 +231,14 @@ export class RealtimeClient {
     const sdp = pc.localDescription?.sdp
     if (!sdp) throw new Error('Браузер не подготовил описание соединения')
 
-    const answer = await exchangeSdp(apiKey, sdp)
+    const answer = await exchangeSdp(apiKey, sdp, this.model)
     if (!alive()) return
     await pc.setRemoteDescription({ type: 'answer', sdp: answer })
     await opened
     if (!alive()) return
     this.send({
       type: 'session.update',
-      session: sessionBody(),
+      session: sessionBody(this.model),
     })
     await this.waitForSessionUpdated(token)
     if (!alive()) return
@@ -233,6 +247,18 @@ export class RealtimeClient {
   }
 
   setMicEnabled(enabled: boolean): void {
+    if (this.wire) {
+      const wasLive = this.micLive
+      this.micLive = enabled
+      this.wire.setMicEnabled(enabled)
+      if (enabled && !this.canSend()) {
+        this.dropLink('Связь с ведущей прервалась. Начните игру ещё раз.')
+        return
+      }
+      this.onLink({ mic: enabled ? 'live' : 'muted' })
+      if (enabled && !wasLive) this.send({ type: 'input_audio_buffer.clear' })
+      return
+    }
     if (!this.mic) return
     const wasLive = this.mic.getAudioTracks().some((track) => track.enabled)
     for (const track of this.mic.getAudioTracks()) track.enabled = enabled
@@ -245,7 +271,8 @@ export class RealtimeClient {
   }
 
   setOutputMuted(muted: boolean): void {
-    this.audio.muted = muted
+    if (this.wire) this.wire.setOutputMuted(muted)
+    else this.audio.muted = muted
     if (muted) this.send({ type: 'input_audio_buffer.clear' })
   }
 
@@ -418,6 +445,9 @@ export class RealtimeClient {
     this.playbackResponseId = null
     this.outputFlush = 'idle'
     this.pendingTool = null
+    this.wireOpen = false
+    this.micLive = false
+    this.wire?.close()
     this.inputStartedAt = null
     this.inputItemId = null
     this.transcriptionPrompt = ''
@@ -444,6 +474,7 @@ export class RealtimeClient {
   }
 
   private canSend(): boolean {
+    if (this.wire) return this.wireOpen
     return Boolean(this.dc && this.dc.readyState === 'open')
   }
 
@@ -457,6 +488,9 @@ export class RealtimeClient {
     this.playbackResponseId = null
     this.outputFlush = 'idle'
     this.pendingTool = null
+    const waiter = this.sessionUpdatedWaiter
+    this.sessionUpdatedWaiter = null
+    waiter?.({ type: 'session.wait-failed', message })
     pushTrace('note', message)
     this.onLink({ connection: 'error', mic: 'error', host: 'idle' })
     this.onFailure(message)
@@ -464,6 +498,14 @@ export class RealtimeClient {
 
   private send(event: object): boolean {
     const type = eventType(event)
+    if (this.wire) {
+      if (!this.wireOpen) {
+        pushTrace('note', `не отправлено, канал закрыт: ${type}`, event)
+        return false
+      }
+      pushTrace('out', type, event)
+      return this.wire.send(event)
+    }
     if (!this.canSend() || !this.dc) {
       pushTrace('note', `не отправлено, канал закрыт: ${type}`, event)
       return false
@@ -510,6 +552,12 @@ export class RealtimeClient {
           reject(new Error('Подключение отменено'))
           return
         }
+        if (event.type === 'session.wait-failed') {
+          window.clearTimeout(timer)
+          const message = typeof event.message === 'string' ? event.message : 'Сессия не открылась'
+          reject(new Error(message))
+          return
+        }
         if (event.type === 'session.updated') {
           window.clearTimeout(timer)
           resolve()
@@ -520,6 +568,35 @@ export class RealtimeClient {
   }
 
   private sessionUpdatedWaiter: ((event: LooseEvent) => void) | null = null
+
+  private async connectWire(apiKey: string, token: number, alive: () => boolean): Promise<void> {
+    const wire = this.wire
+    if (!wire) return
+    try {
+      await wire.open(apiKey, {
+        message: (raw) => {
+          if (alive()) this.handleMessage(raw)
+        },
+        closed: (message) => {
+          if (alive()) this.dropLink(message)
+        },
+      })
+    } catch (error) {
+      this.onLink({ connection: 'error', mic: 'error' })
+      throw error instanceof Error ? error : new Error('Не удалось подключиться')
+    }
+    if (!alive()) return
+    this.wireOpen = true
+    this.onLink({ mic: 'muted' })
+    this.send({
+      type: 'session.update',
+      session: sessionBody(this.model),
+    })
+    await this.waitForSessionUpdated(token)
+    if (!alive()) return
+    this.onLink({ connection: 'connected' })
+    pushTrace('note', 'Сессия Realtime готова')
+  }
 
   private handleMessage(raw: string): void {
     let event: LooseEvent
@@ -934,8 +1011,8 @@ function waitForIce(pc: RTCPeerConnection): Promise<void> {
   })
 }
 
-async function exchangeSdp(apiKey: string, sdp: string): Promise<string> {
-  const multipart = await postMultipart(apiKey, sdp)
+async function exchangeSdp(apiKey: string, sdp: string, model: string): Promise<string> {
+  const multipart = await postMultipart(apiKey, sdp, model)
   if (multipart.sdp) {
     pushTrace('note', 'SDP принят через multipart')
     return multipart.sdp
@@ -949,10 +1026,10 @@ async function exchangeSdp(apiKey: string, sdp: string): Promise<string> {
   throw new Error(multipart.message ?? raw.message ?? 'OpenAI не принял соединение')
 }
 
-async function postMultipart(apiKey: string, sdp: string): Promise<{ sdp?: string; message?: string }> {
+async function postMultipart(apiKey: string, sdp: string, model: string): Promise<{ sdp?: string; message?: string }> {
   const body = new FormData()
   body.set('sdp', sdp)
-  body.set('session', JSON.stringify(sessionBody()))
+  body.set('session', JSON.stringify(sessionBody(model)))
   return postSdp(apiKey, body, undefined)
 }
 

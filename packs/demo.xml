@@ -1,33 +1,124 @@
 <?xml version="1.0" encoding="utf-8"?>
 <package name="Демо">
   <rounds>
-    <round name="Первый раунд">
+    <round name="Разминка">
       <themes>
-        <theme name="История">
+        <theme name="Текст">
           <questions>
-            <question price="100"><params><param name="question" type="content"><item>Как звали первого римского императора?</item></param></params><right><answer>Октавиан Август</answer><answer>Август</answer><answer>Гай Октавиан</answer></right></question>
-            <question price="200"><params><param name="question" type="content"><item>В каком году пала Западная Римская империя?</item></param></params><right><answer>476</answer><answer>476 год</answer></right></question>
-            <question price="300"><params><param name="question" type="content"><item>Кто был первым президентом Соединённых Штатов?</item></param></params><right><answer>Джордж Вашингтон</answer><answer>Вашингтон</answer></right></question>
-            <question price="400"><params><param name="question" type="content"><item>Как назывался древний торговый путь из Китая в Европу?</item></param></params><right><answer>Великий шёлковый путь</answer><answer>Шёлковый путь</answer></right></question>
-            <question price="500"><params><param name="question" type="content"><item>Какой город был столицей Византийской империи?</item></param></params><right><answer>Константинополь</answer><answer>Царьград</answer></right></question>
+            <question price="100">
+              <params><param name="question" type="content"><item>Как звали первого римского императора?</item></param></params>
+              <right><answer>Октавиан Август</answer><answer>Август</answer></right>
+            </question>
+            <question price="200">
+              <params><param name="question" type="content"><item>В этом длинном вопросе ведущая читает несколько фраз подряд, и полоска ответа может пойти, пока она ещё не договорила. Какой газ человек вдыхает при дыхании? Слушайте спокойно: кнопка откроется раньше, чем чтение закончится, если фраза не уложится в несколько секунд.</item></param></params>
+              <right><answer>кислород</answer></right>
+            </question>
+          </questions>
+        </theme>
+        <theme name="Выбор">
+          <questions>
+            <question price="100">
+              <params>
+                <param name="question" type="content"><item>Что появилось раньше?</item></param>
+                <param name="answerType">select</param>
+                <param name="answerOptions" type="group">
+                  <param name="A" type="content"><item>Индиана Джонс</item></param>
+                  <param name="B" type="content"><item>Назад в будущее</item></param>
+                  <param name="C" type="content"><item>Терминатор</item></param>
+                  <param name="D" type="content"><item>Звёздные войны</item></param>
+                </param>
+              </params>
+              <right><answer>D</answer></right>
+            </question>
           </questions>
         </theme>
         <theme name="Космос">
           <questions>
-            <question price="100"><params><param name="question" type="content"><item>Как называется ближайшая к Земле звезда?</item></param></params><right><answer>Солнце</answer></right></question>
-            <question price="200"><params><param name="question" type="content"><item>Какая планета Солнечной системы знаменита яркими кольцами?</item></param></params><right><answer>Сатурн</answer></right></question>
-            <question price="300"><params><param name="question" type="content"><item>Кто стал первым человеком, побывавшим в космосе?</item></param></params><right><answer>Юрий Гагарин</answer><answer>Гагарин</answer></right></question>
-            <question price="400"><params><param name="question" type="content"><item>Как называется галактика, в которой находится Солнечная система?</item></param></params><right><answer>Млечный Путь</answer><answer>Млечный путь</answer></right></question>
-            <question price="500"><params><param name="question" type="content"><item>Как назывался советский аппарат, первым достигший поверхности Луны?</item></param></params><right><answer>Луна-2</answer><answer>Луна 2</answer></right></question>
+            <question price="100">
+              <params><param name="question" type="content"><item>Кто был вторым человеком в космосе?</item></param></params>
+              <right><answer>Герман Титов</answer></right>
+            </question>
           </questions>
         </theme>
-        <theme name="Наука">
+      </themes>
+    </round>
+    <round name="Наглядно">
+      <themes>
+        <theme name="Картинка">
           <questions>
-            <question price="100"><params><param name="question" type="content"><item>Какой газ человек использует при дыхании?</item></param></params><right><answer>кислород</answer><answer>О2</answer></right></question>
-            <question price="200"><params><param name="question" type="content"><item>Какая химическая формула у воды?</item></param></params><right><answer>H2O</answer><answer>аш два о</answer></right></question>
-            <question price="300"><params><param name="question" type="content"><item>Кто сформулировал закон всемирного тяготения?</item></param></params><right><answer>Исаак Ньютон</answer><answer>Ньютон</answer></right></question>
-            <question price="400"><params><param name="question" type="content"><item>Как называется отрицательно заряженная частица атома?</item></param></params><right><answer>электрон</answer></right></question>
-            <question price="500"><params><param name="question" type="content"><item>Как называется превращение гусеницы во взрослую бабочку?</item></param></params><right><answer>метаморфоз</answer></right></question>
+            <question price="100">
+              <params>
+                <param name="question" type="content">
+                  <item type="image" isRef="true">demo/circle.svg</item>
+                  <item>Какого цвета круг на картинке?</item>
+                </param>
+              </params>
+              <right><answer>красный</answer></right>
+            </question>
+          </questions>
+        </theme>
+        <theme name="Музыка">
+          <questions>
+            <question price="100">
+              <params>
+                <param name="question" type="content">
+                  <item type="audio" isRef="true">demo/beeps.wav</item>
+                  <item>Сколько отдельных сигналов вы услышали?</item>
+                </param>
+              </params>
+              <right><answer>3</answer><answer>три</answer></right>
+            </question>
+          </questions>
+        </theme>
+        <theme name="Ролик">
+          <questions>
+            <question price="100">
+              <params>
+                <param name="question" type="content">
+                  <item type="video" isRef="true">demo/square.mp4</item>
+                  <item>Какая фигура показана в ролике?</item>
+                </param>
+              </params>
+              <right><answer>квадрат</answer></right>
+            </question>
+          </questions>
+        </theme>
+        <theme name="Без слов">
+          <questions>
+            <question price="100">
+              <params>
+                <param name="question" type="content">
+                  <item type="image" isRef="true">demo/circle.svg</item>
+                </param>
+              </params>
+              <right><answer>красный</answer></right>
+            </question>
+          </questions>
+        </theme>
+        <theme name="Показ">
+          <questions>
+            <question price="100">
+              <params>
+                <param name="question" type="content">
+                  <item>Что поставлено после метки ответа?</item>
+                  <item type="marker"></item>
+                  <item type="image" isRef="true">demo/seal.svg</item>
+                </param>
+              </params>
+              <right><answer>печать</answer></right>
+            </question>
+          </questions>
+        </theme>
+        <theme name="Стопка">
+          <questions>
+            <question price="100">
+              <params><param name="question" type="content"><item>Первый вопрос стопки?</item></param></params>
+              <right><answer>первый</answer></right>
+            </question>
+            <question price="100">
+              <params><param name="question" type="content"><item>Второй вопрос стопки?</item></param></params>
+              <right><answer>второй</answer></right>
+            </question>
           </questions>
         </theme>
       </themes>

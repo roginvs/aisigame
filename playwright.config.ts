@@ -3,7 +3,8 @@ import { defineConfig, devices } from '@playwright/test'
 export default defineConfig({
   testDir: 'e2e',
   testMatch: '**/*.play.ts',
-  timeout: 30_000,
+  timeout: 60_000,
+  fullyParallel: true,
   use: {
     ...devices['Desktop Chrome'],
     baseURL: 'http://127.0.0.1:5173',

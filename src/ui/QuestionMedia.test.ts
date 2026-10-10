@@ -6,7 +6,9 @@ import { meterRestAngle } from './QuestionMeter.tsx'
 
 describe('QuestionClip', () => {
   it('без кнопок, сам играет и крутится, пока клип должен звучать', () => {
-    const html = renderToStaticMarkup(createElement(QuestionClip, { kind: 'audio', url: 'studio/beeps.wav', live: true }))
+    const html = renderToStaticMarkup(
+      createElement(QuestionClip, { kind: 'audio', url: 'studio/beeps.wav', live: true, label: 'Звук вопроса' }),
+    )
     expect(html).not.toMatch(/controls/i)
     expect(html).toMatch(/autoplay/i)
     expect(html).toMatch(/\bloop\b/i)
@@ -16,7 +18,9 @@ describe('QuestionClip', () => {
   })
 
   it('на паузе нет кнопок, цикла и автозапуска', () => {
-    const html = renderToStaticMarkup(createElement(QuestionClip, { kind: 'video', url: 'studio/square.mp4', live: false }))
+    const html = renderToStaticMarkup(
+      createElement(QuestionClip, { kind: 'video', url: 'studio/square.mp4', live: false, label: 'Ролик вопроса' }),
+    )
     expect(html).not.toMatch(/controls/i)
     expect(html).not.toMatch(/autoplay/i)
     expect(html).not.toMatch(/\bloop\b/i)

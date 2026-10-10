@@ -92,12 +92,13 @@ test('пакет с диска продолжается повторным вы�
     buffer: Buffer.from(diskPackXml),
   })
   await expect(page.locator('.eyebrow').first()).toContainText('С диска')
-  await expect(page.locator('.talk .host')).toContainText('Раунд с диска')
+  await expect(page.locator('.eyebrow').first()).toContainText('Раунд с диска')
+  await expect(page.locator('.talk .host')).toContainText('назовите тему и стоимость')
   await expect(page.locator('.player', { hasText: 'Игрок 1' })).toContainText('250')
   await expect(page.locator('.player', { hasText: 'Игрок 2' })).toContainText('-30')
   await expect(page.locator('.player', { hasText: 'Игрок 3' })).toContainText('40')
   await expect(page.locator('.player', { hasText: 'Игрок 3' }).getByRole('button')).toHaveText('выбирайте вопрос')
-  await expect(page.locator('.theme-row', { hasText: 'Реки' }).getByRole('button', { name: '—' })).toBeDisabled()
+  await expect(page.locator('.theme-row', { hasText: 'Реки' }).getByRole('button', { name: /сыграно/ })).toBeDisabled()
   await expect(page.locator('.theme-row', { hasText: 'Реки' }).getByRole('button', { name: '200' })).toBeEnabled()
 
   const resumed = await readGame(page)

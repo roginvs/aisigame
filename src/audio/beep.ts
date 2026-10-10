@@ -31,6 +31,9 @@ export function playTimeoutBeep(): void {
     if (until > origin + duration + 0.0001) break
     pip(ctx, at, until)
   }
+  if (typeof window !== 'undefined' && typeof window.dispatchEvent === 'function') {
+    window.dispatchEvent(new CustomEvent('aisigame-beep'))
+  }
 }
 
 function ensureContext(): AudioContext {

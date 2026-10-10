@@ -1,15 +1,19 @@
 import { pushHostLine, pushPlayerLine } from '../debug/trace.ts'
 import { echoesAnswerPrompt } from '../game/answerPrompt.ts'
 import { echoesChoicePrompt } from '../game/choicePrompt.ts'
-import { sharesAnswer } from '../game/judgment.ts'
+import { nearHomophone, sharesAnswer } from '../game/judgment.ts'
 import type { GameVoice, LinkStatus, ToolCall } from './client.ts'
 import type { StoredTranscript } from './utterance.ts'
 import { recordResponseUsage, resetUsage } from './usage.ts'
 
 const speechPauseMs = 40
+/** Длинная дословная фраза: полоска кнопки успевает открыться, пока заглушка ещё «читает». */
+const longSpeechChars = 180
+const longSpeechMs = 8_000
 
 export type MockControls = {
   hear: (text: string, durationMs?: number) => void
+  setSpeechMs: (ms: number) => void
 }
 
 declare global {
@@ -28,6 +32,7 @@ export class MockRealtimeClient implements GameVoice {
 
   private transcriptionPrompt = ''
   private speechToken = 0
+  private speechMs = speechPauseMs
   private itemSeq = 0
   private callSeq = 0
   private transcripts = new Map<string, StoredTranscript>()
@@ -60,6 +65,10 @@ export class MockRealtimeClient implements GameVoice {
     this.transcriptionPrompt = prompt
   }
 
+  setSpeechMs(ms: number): void {
+    this.speechMs = ms
+  }
+
   waitForTranscript(
     itemId: string | null,
     _timeoutMs: number,
@@ -77,20 +86,21 @@ export class MockRealtimeClient implements GameVoice {
   requestSpeech(
     purpose: string,
     turn: number,
-    _instructions: string,
+    instructions: string,
     expect?: string,
     _isolated = false,
     chatNote?: (spoken: string) => string,
   ): void {
     const token = ++this.speechToken
-    const line = expect || hostLine(purpose)
+    const line = expect || hostLine(purpose, instructions)
+    const wait = expect && expect.length > longSpeechChars ? longSpeechMs : this.speechMs
     pushHostLine(line, chatNote?.(line) ?? '')
     this.onLink({ host: 'speaking' })
     window.setTimeout(() => {
       if (token !== this.speechToken) return
       this.onLink({ host: 'idle' })
       this.onAudioFinished({ purpose, turn })
-    }, speechPauseMs)
+    }, wait)
   }
 
   requestTool(purpose: string, _turn: number, name: string, instructions: string, _isolated = false): void {
@@ -126,15 +136,30 @@ export class MockRealtimeClient implements GameVoice {
   }
 }
 
-function hostLine(purpose: string): string {
+function hostLine(purpose: string, instructions = ''): string {
   if (purpose === 'welcome') return 'Здравствуйте. Выбирайте вопрос.'
   if (purpose === 'clarify') return 'Не расслышала. Назовите тему и стоимость ещё раз.'
-  if (purpose === 'announce') return 'Неверно.'
+  if (purpose === 'announce') return announceLine(instructions)
   if (purpose === 'bridge') return 'Следующий раунд. Выбирайте вопрос.'
   if (purpose === 'finished') return 'Игра окончена.'
   if (purpose === 'bet') return 'Назовите ставку.'
   if (purpose === 'turn') return 'Ваш ответ.'
+  if (purpose === 'falseStart') {
+    const line = [...instructions.matchAll(/«([^»]+)»/g)].map((match) => match[1]?.trim() ?? '').find(Boolean)
+    return line || 'Фальстарт.'
+  }
   return 'Слушаю.'
+}
+
+function announceLine(instructions: string): string {
+  const folded = instructions.toLowerCase().replaceAll('ё', 'е')
+  if (folded.includes('повторите, пожалуйста') && folded.includes('скажи только')) return 'Повторите, пожалуйста.'
+  if (folded.includes('фраза: верно')) return 'Верно.'
+  if (folded.includes('фраза: неверно') || folded.includes('скажи, что неверно')) return 'Неверно.'
+  if (folded.includes('игрок не ответил') || folded.includes('время на ответ вышло')) return 'Время вышло.'
+  const quoted = [...instructions.matchAll(/«([^»]+)»/g)].map((match) => match[1]?.trim() ?? '').filter(Boolean)
+  if (folded.includes('произнеси') && quoted[0]) return quoted[0]
+  return 'Дальше.'
 }
 
 function selectArguments(instructions: string): Record<string, unknown> {
@@ -159,19 +184,40 @@ function selectArguments(instructions: string): Record<string, unknown> {
 
 function judgeArguments(instructions: string): Record<string, unknown> {
   const heard = quoted(instructions, 'Реплика игрока')
-  const answers = field(instructions, 'Эталон, с которым нужно сравнить смысл')
-    .split(';')
-    .map((item) => item.trim())
-    .filter(Boolean)
+  const answers = choiceForms(
+    instructions,
+    field(instructions, 'Эталон, с которым нужно сравнить смысл')
+      .split(';')
+      .map((item) => item.trim())
+      .filter(Boolean),
+  )
   const correct = sharesAnswer(heard, answers)
+  const clarify = !correct && nearHomophone(heard, answers)
   return {
     questionId: field(instructions, 'questionId'),
     playerId: Number(field(instructions, 'playerId')) || 0,
     attemptId: Number(field(instructions, 'attemptId')) || 0,
-    status: correct ? 'correct' : 'incorrect',
+    status: correct ? 'correct' : clarify ? 'needs_clarification' : 'incorrect',
     heard,
-    reason: correct ? 'Смысл совпал с эталоном.' : 'Смысл не совпал с эталоном.',
+    reason: correct
+      ? 'Смысл совпал с эталоном.'
+      : clarify
+        ? 'Реплика созвучна эталону, нужно повторить.'
+        : 'Смысл не совпал с эталоном.',
   }
+}
+
+/** Буква эталона и текст того же варианта — один ответ, как в инструкции оценки. */
+function choiceForms(instructions: string, answers: string[]): string[] {
+  const letters = new Set(answers.map((item) => item.trim().toLowerCase()))
+  const forms = [...answers]
+  for (const match of instructions.matchAll(/(?:^|\n)([A-Za-zА-Яа-я])\.\s+([^\n]+)/g)) {
+    const letter = (match[1] ?? '').trim().toLowerCase()
+    const text = (match[2] ?? '').trim()
+    if (!letters.has(letter) || !text) continue
+    forms.push(text)
+  }
+  return forms
 }
 
 function quoted(instructions: string, label: string): string {

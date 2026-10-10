@@ -1,7 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import { useMachine } from '@xstate/react'
 import { unlockAudio } from './audio/beep.ts'
-import { storageKey } from './config.ts'
 import { ownPackId, packCatalog } from './game/catalog.ts'
 import { attachController } from './game/controller.ts'
 import { playersFromNames } from './game/players.ts'
@@ -21,13 +20,15 @@ import {
 import { loadSiq, revokePackMedia } from './game/siq.ts'
 import { preferredPackId, readStartPrefs, writeStartPrefs } from './game/startPrefs.ts'
 import type { PlayerId, QuestionPack } from './game/types.ts'
-import { RealtimeClient, type LinkStatus } from './realtime/client.ts'
+import type { LinkStatus } from './realtime/client.ts'
 import { MockRealtimeClient } from './realtime/mockClient.ts'
+import { readProviderKey, readVoiceModelId, voiceById, writeProviderKey, writeVoiceModelId } from './realtime/models.ts'
+import { createVoice } from './realtime/voice.ts'
 import { GameScreen } from './ui/GameScreen.tsx'
 import { StartScreen } from './ui/StartScreen.tsx'
 
 const initialLink: LinkStatus = { connection: 'idle', mic: 'idle', host: 'idle' }
-const mockVoice = new URLSearchParams(window.location.search).get('mock') === '1'
+const queryMock = new URLSearchParams(window.location.search).get('mock') === '1'
 
 function packSummary(pack: QuestionPack | null, loading: boolean, packId: string): string {
   if (loading) return ''
@@ -55,7 +56,10 @@ function questionsLabel(count: number): string {
 
 export default function App() {
   const [snapshot, send, actor] = useMachine(gameMachine)
-  const [apiKey, setApiKey] = useState(() => localStorage.getItem(storageKey) ?? '')
+  const [modelId, setModelId] = useState(() => (queryMock ? 'mock' : readVoiceModelId()))
+  const [apiKey, setApiKey] = useState(() => readProviderKey('openai'))
+  const [xaiKey, setXaiKey] = useState(() => readProviderKey('xai'))
+  const [googleKey, setGoogleKey] = useState(() => readProviderKey('google'))
   const [showKey, setShowKey] = useState(false)
   const [link, setLink] = useState<LinkStatus>(initialLink)
   const catalogIds = packCatalog.map((item) => item.id)
@@ -74,10 +78,14 @@ export default function App() {
   const loadedPackId = useRef<string | null>(null)
   const skipCatalogLoad = useRef(false)
   const resumeTicket = useRef(0)
-  const keyRef = useRef(apiKey)
+  const model = voiceById(modelId)
+  const needsKey = model.provider !== 'mock'
+  const activeKey =
+    model.provider === 'xai' ? xaiKey : model.provider === 'google' ? googleKey : model.provider === 'openai' ? apiKey : ''
+  const keyRef = useRef(needsKey ? activeKey : 'mock')
   useEffect(() => {
-    keyRef.current = apiKey
-  }, [apiKey])
+    keyRef.current = needsKey ? activeKey : 'mock'
+  }, [needsKey, activeKey])
 
   useEffect(() => {
     if (packId === ownPackId) return
@@ -121,21 +129,24 @@ export default function App() {
   }, [packId])
 
   useEffect(() => {
-    const client = mockVoice ? new MockRealtimeClient() : new RealtimeClient()
+    const client = createVoice(modelId)
     if (client instanceof MockRealtimeClient) {
-      window.__aisigame = { hear: (text, durationMs) => client.hear(text, durationMs) }
+      window.__aisigame = {
+        hear: (text, durationMs) => client.hear(text, durationMs),
+        setSpeechMs: (ms) => client.setSpeechMs(ms),
+      }
     }
     const stop = attachController({
       actor,
       client,
-      getApiKey: () => (mockVoice ? 'mock' : keyRef.current),
+      getApiKey: () => keyRef.current,
       setLink,
     })
     return () => {
-      if (mockVoice) delete window.__aisigame
+      delete window.__aisigame
       stop()
     }
-  }, [actor])
+  }, [actor, modelId])
 
   const path = statePath(snapshot.value)
   const phase = path.split('.')[0] ?? path
@@ -191,9 +202,17 @@ export default function App() {
   }, [diskResume, packId, pack, send])
 
   function rememberKey(value: string) {
-    setApiKey(value)
-    if (value.trim()) localStorage.setItem(storageKey, value.trim())
-    else localStorage.removeItem(storageKey)
+    if (model.provider === 'mock') return
+    const provider = model.provider
+    if (provider === 'xai') setXaiKey(value)
+    else if (provider === 'google') setGoogleKey(value)
+    else setApiKey(value)
+    writeProviderKey(provider, value)
+  }
+
+  function chooseModel(id: string) {
+    setModelId(id)
+    if (!queryMock || id !== 'mock') writeVoiceModelId(id)
   }
 
   function choosePack(id: string) {
@@ -309,7 +328,7 @@ export default function App() {
   if (!inGame) {
     return (
       <StartScreen
-        apiKey={apiKey}
+        apiKey={needsKey ? activeKey : ''}
         showKey={showKey}
         link={link}
         error={packError ?? snapshot.context.error}
@@ -326,7 +345,9 @@ export default function App() {
         loadingPack={loadingPack}
         packId={packId}
         packReady={pack !== null && pack.questions.length > 0}
-        needsKey={!mockVoice}
+        needsKey={needsKey}
+        modelId={modelId}
+        onModel={chooseModel}
         packSummary={packSummary(pack, loadingPack, packId)}
         packWarnings={pack?.warnings ?? []}
         playerNames={playerNames}

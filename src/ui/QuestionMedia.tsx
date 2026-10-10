@@ -4,24 +4,34 @@ import type { QuestionMedia as MediaItem } from '../game/types.ts'
 import { QuestionMeter } from './QuestionMeter.tsx'
 import { applyQuestionClip } from './questionClip.ts'
 
-export function QuestionMedia(props: { media: MediaItem[]; play: boolean; quiet?: ReadonlySet<string> }) {
-  const { media, play, quiet } = props
+export function QuestionMedia(props: {
+  media: MediaItem[]
+  play: boolean
+  quiet?: ReadonlySet<string>
+  answer?: boolean
+  /** Картинка и ролик ответа лежат в той же стопке, что и оставшийся звук вопроса. */
+  answerUrls?: ReadonlySet<string>
+}) {
+  const { media, play, quiet, answer = false, answerUrls } = props
   if (!media.length) return null
   return (
     <div className="question-media">
       {media.map((item) => {
         if (!item.url) return <p key={item.name}>Файл не найден: {item.name}</p>
         const live = itemLive(item, play, quiet)
-        if (item.kind === 'image') return <img key={item.url} src={item.url} alt="" />
-        return <QuestionClip key={item.url} kind={item.kind} url={item.url} live={live} />
+        const reveal = answer || Boolean(item.url && answerUrls?.has(item.url))
+        if (item.kind === 'image') return <img key={item.url} src={item.url} alt={mediaLabel('image', reveal)} />
+        return (
+          <QuestionClip key={item.url} kind={item.kind} url={item.url} live={live} label={mediaLabel(item.kind, reveal)} />
+        )
       })}
     </div>
   )
 }
 
 /** Звук или ролик без кнопок плеера: сам стартует и крутится, пока `live`. */
-export function QuestionClip(props: { kind: 'audio' | 'video'; url: string; live: boolean }) {
-  const { kind, url, live } = props
+export function QuestionClip(props: { kind: 'audio' | 'video'; url: string; live: boolean; label: string }) {
+  const { kind, url, live, label } = props
   const nodeRef = useRef<HTMLMediaElement | null>(null)
   const [node, setNode] = useState<HTMLMediaElement | null>(null)
   const [audioOnlyVideo, setAudioOnlyVideo] = useState(false)
@@ -56,7 +66,7 @@ export function QuestionClip(props: { kind: 'audio' | 'video'; url: string; live
   }, [node])
 
   return (
-    <div className={showMeter ? 'question-clip has-meter' : 'question-clip'}>
+    <div className={showMeter ? 'question-clip has-meter' : 'question-clip'} role="group" aria-label={label}>
       {kind === 'audio' ? (
         <audio ref={takeNode} src={url} data-live={live ? '1' : '0'} autoPlay={live} loop={live} preload="auto" />
       ) : (
@@ -73,6 +83,12 @@ export function QuestionClip(props: { kind: 'audio' | 'video'; url: string; live
       {showMeter ? <QuestionMeter node={node} live={live} /> : null}
     </div>
   )
+}
+
+function mediaLabel(kind: 'image' | 'audio' | 'video', answer: boolean): string {
+  if (kind === 'image') return answer ? 'Иллюстрация к ответу' : 'Иллюстрация к вопросу'
+  if (kind === 'audio') return answer ? 'Звук ответа' : 'Звук вопроса'
+  return answer ? 'Ролик ответа' : 'Ролик вопроса'
 }
 
 function itemLive(item: MediaItem, play: boolean, quiet?: ReadonlySet<string>): boolean {

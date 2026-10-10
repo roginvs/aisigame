@@ -3,7 +3,7 @@ import { localPackFiles } from 'virtual:local-packs'
 /** Подписи своих пакетов. Чужой файл из public/packs показывается по имени. */
 const knownTitles: Record<string, string> = {
   studio: 'Наглядно: картинка, звук и ролик',
-  demo: 'Демо, один раунд',
+  demo: 'Демо: два раунда',
   tournament: 'Турнир: три раунда и финал',
   evening: 'Вечерний: два раунда и финал',
 }

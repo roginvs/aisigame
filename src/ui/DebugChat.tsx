@@ -10,7 +10,7 @@ export function ConversationChat() {
   const bubbles = entries.filter((entry) => entry.kind === 'chat')
   const pinned = usePinColumn(chatPinKey(bubbles))
   return (
-    <aside className="chat-column">
+    <aside className="chat-column" aria-label="Разговор">
       <div className="chat-head">
         <div>
           <p className="eyebrow">Разговор</p>

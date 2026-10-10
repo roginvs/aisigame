@@ -1,6 +1,7 @@
 import { useRef } from 'react'
 import { ownPackId, packCatalog } from '../game/catalog.ts'
 import type { LinkStatus } from '../realtime/client.ts'
+import { keyFieldLabel, voiceById, voiceModels } from '../realtime/models.ts'
 import { startupStatus } from './startupStatus.ts'
 
 const packFileAccept = '.siq,.zip,.xml,application/zip,text/xml'
@@ -13,6 +14,8 @@ export function StartScreen(props: {
   busy: boolean
   loadingPack: boolean
   packId: string
+  modelId: string
+  onModel: (id: string) => void
   packReady: boolean
   needsKey: boolean
   packSummary: string
@@ -41,6 +44,8 @@ export function StartScreen(props: {
     busy,
     loadingPack,
     packId,
+    modelId,
+    onModel,
     packReady,
     needsKey,
     packSummary,
@@ -69,11 +74,22 @@ export function StartScreen(props: {
         <p className="eyebrow">Голосовая викторина</p>
         <h1>Своя игра</h1>
         <p className="lead">
-          Игроки за одним планшетом. Ведущая слушает и говорит сама. Ключ остаётся в этом браузере.
+          Игроки за одним планшетом. Ведущая слушает и говорит сама. Ключ выбранной модели остаётся в этом
+          браузере.
         </p>
         {needsKey ? null : (
           <p className="status-line">Заглушка ведущей: ключ не нужен, ответы подставляет игра.</p>
         )}
+        <label className="field">
+          <span>Модель</span>
+          <select value={modelId} onChange={(event) => onModel(event.target.value)}>
+            {voiceModels.map((item) => (
+              <option key={item.id} value={item.id}>
+                {item.label}
+              </option>
+            ))}
+          </select>
+        </label>
         <label className="field">
           <span>Пакет вопросов</span>
           <select
@@ -125,24 +141,28 @@ export function StartScreen(props: {
           />
         </label>
         <p className="status-line">По одному имени в строке. Пустое поле — Игрок 1, Игрок 2 и Игрок 3.</p>
-        <label className="field">
-          <span>Ключ OpenAI</span>
-          <input
-            type={showKey ? 'text' : 'password'}
-            value={apiKey}
-            autoComplete="off"
-            spellCheck={false}
-            onChange={(event) => onApiKey(event.target.value)}
-          />
-        </label>
-        <div className="row">
-          <button type="button" className="ghost" onClick={onToggleKey}>
-            {showKey ? 'Скрыть ключ' : 'Показать ключ'}
-          </button>
-          <button type="button" className="ghost" onClick={onClearKey}>
-            Удалить ключ
-          </button>
-        </div>
+        {needsKey ? (
+          <>
+            <label className="field">
+              <span>{keyFieldLabel(voiceById(modelId).provider)}</span>
+              <input
+                type={showKey ? 'text' : 'password'}
+                value={apiKey}
+                autoComplete="off"
+                spellCheck={false}
+                onChange={(event) => onApiKey(event.target.value)}
+              />
+            </label>
+            <div className="row">
+              <button type="button" className="ghost" onClick={onToggleKey}>
+                {showKey ? 'Скрыть ключ' : 'Показать ключ'}
+              </button>
+              <button type="button" className="ghost" onClick={onClearKey}>
+                Удалить ключ
+              </button>
+            </div>
+          </>
+        ) : null}
         <button
           type="button"
           className="primary"
