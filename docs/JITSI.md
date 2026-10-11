@@ -60,52 +60,74 @@ docker compose up -d
 
 ### Nginx
 
-В уже существующий `server` с сертификатом `fallout-nevada.ru`. Старые `location` на `/jitsi` из этого `server` убрать и вставить блок ниже целиком. Префикс `/jitsi` снимается: контейнер ждёт пути от корня.
+В уже существующий `server` с сертификатом `fallout-nevada.ru`. Старые `location` на `/jitsi` из этого `server` убрать и вставить блоки ниже. Префикс `/jitsi` снимается: контейнер ждёт пути от корня.
 
-Одного общего `location /jitsi/` мало. Он отдаёт страницу, `config.js` и библиотеку, но заголовки `Upgrade` и `Connection` до Prosody не доходят. Игре нужны отдельные `location` для websocket и для канала моста, с этими двумя заголовками.
+На запрос nginx выбирает ровно один `location`; «сначала общий, потом ещё один» не бывает. Общие заголовки и прокси задаёт внешний `location /jitsi/`, а узкие вложенные `location` внутри него перебивают только то, что им нужно: websocket, мост, BOSH, `OPTIONS` для `config.js`. Вложенный `location` сравнивается с полным URI (`/jitsi/xmpp-websocket`, не `/xmpp-websocket`). Свои `add_header` во вложенном не повторяем — наследуются с родителя. Стоит свой `add_header` во вложенном — родительские CORS пропадут. Свой `proxy_set_header` во вложенном сбрасывает наследованные proxy-заголовки: на websocket-локациях `Host` и `X-Forwarded-*` повторяем вместе с `Upgrade` и `Connection`.
+
+Игра с другого origin делает `fetch('https://fallout-nevada.ru/jitsi/config.js')`: с локального dev (`http://127.0.0.1:5173` или `http://localhost:5173`) и с GitHub Pages (`https://roginvs.github.io`). Без `Access-Control-Allow-Origin` браузер режет ответ. Prosody и веб-контейнер уже отдают этот заголовок на `xmpp-websocket`, `http-bind` и `lib-jitsi-meet.min.js`; у `config.js` его нет. Два одинаковых заголовка в одном ответе браузер тоже отвергает. На внешнем `location /jitsi/` один раз: `proxy_hide_header Access-Control-Allow-Origin;`, затем свой `add_header Access-Control-Allow-Origin $jitsi_cors always;` и `add_header Vary Origin always;` — так и `config.js`, и библиотека, и HTTP-ответ websocket получают ровно одну строку allow.
+
+Websocket: браузер для `wss` не смотрит на `Access-Control-Allow-Origin`; нужны `101 Switching Protocols` и `Sec-WebSocket-Protocol: xmpp`. Заголовок CORS всё равно не должен дублироваться — его заменяет тот же блок на родителе.
+
+Перед `server` с `fallout-nevada.ru`, в контексте `http { }`, **рядом с другими `server`, не внутри `server`**, вставьте `map`:
 
 ```nginx
-location = /jitsi/xmpp-websocket {
-    proxy_pass http://127.0.0.1:8000/xmpp-websocket;
-    proxy_http_version 1.1;
-    proxy_set_header Upgrade $http_upgrade;
-    proxy_set_header Connection "upgrade";
-    proxy_set_header Host $host;
-    proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
-    proxy_set_header X-Forwarded-Proto $scheme;
-    proxy_read_timeout 900s;
-    tcp_nodelay on;
+map $http_origin $jitsi_cors {
+    default "";
+    "http://127.0.0.1:5173" $http_origin;
+    "http://localhost:5173" $http_origin;
+    "https://roginvs.github.io" $http_origin;
 }
+```
 
-location /jitsi/colibri-ws/ {
-    proxy_pass http://127.0.0.1:8000/colibri-ws/;
-    proxy_http_version 1.1;
-    proxy_set_header Upgrade $http_upgrade;
-    proxy_set_header Connection "upgrade";
-    proxy_set_header Host $host;
-    proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
-    proxy_set_header X-Forwarded-Proto $scheme;
-    proxy_read_timeout 900s;
-    tcp_nodelay on;
-}
+Пустой `default` — чужой `Origin` не получает allow. В `server` — один внешний блок (отдельный `location = /jitsi/config.js` снаружи не нужен):
 
-location /jitsi/http-bind {
-    proxy_pass http://127.0.0.1:8000/http-bind;
-    proxy_set_header Host $host;
-    proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
-    proxy_set_header X-Forwarded-Proto $scheme;
-}
-
+```nginx
 location /jitsi/ {
     proxy_pass http://127.0.0.1:8000/;
     proxy_http_version 1.1;
     proxy_set_header Host $host;
     proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
     proxy_set_header X-Forwarded-Proto $scheme;
+    proxy_hide_header Access-Control-Allow-Origin;
+    add_header Access-Control-Allow-Origin $jitsi_cors always;
+    add_header Vary Origin always;
+
+    location = /jitsi/config.js {
+        if ($request_method = OPTIONS) {
+            return 204;
+        }
+        proxy_pass http://127.0.0.1:8000/config.js;
+    }
+
+    location = /jitsi/xmpp-websocket {
+        proxy_pass http://127.0.0.1:8000/xmpp-websocket;
+        proxy_set_header Upgrade $http_upgrade;
+        proxy_set_header Connection "upgrade";
+        proxy_set_header Host $host;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_read_timeout 900s;
+        tcp_nodelay on;
+    }
+
+    location /jitsi/colibri-ws/ {
+        proxy_pass http://127.0.0.1:8000/colibri-ws/;
+        proxy_set_header Upgrade $http_upgrade;
+        proxy_set_header Connection "upgrade";
+        proxy_set_header Host $host;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_read_timeout 900s;
+        tcp_nodelay on;
+    }
+
+    location /jitsi/http-bind {
+        proxy_pass http://127.0.0.1:8000/http-bind;
+    }
 }
 ```
 
-После вставки:
+У вложенного `location = /jitsi/config.js` своих `add_header` нет: на GET и на `return 204` для `OPTIONS` с родителя наследуются CORS-строки с `always`. После правки конфига:
 
 ```bash
 nginx -t && systemctl reload nginx
@@ -124,6 +146,14 @@ nginx -t && systemctl reload nginx
 ```bash
 curl -fsS https://fallout-nevada.ru/jitsi/config.js
 ```
+
+CORS для игры с другого origin — ровно одна строка allow, без дубликата:
+
+```bash
+curl -sI -H 'Origin: http://127.0.0.1:5173' https://fallout-nevada.ru/jitsi/config.js | grep -i access-control-allow-origin
+```
+
+Должно вывести одну строку: `access-control-allow-origin: http://127.0.0.1:5173`. То же с `-H 'Origin: https://roginvs.github.io'` — одна строка `access-control-allow-origin: https://roginvs.github.io`. Две строки с одним именем заголовка, пустой allow или его нет — `map` не в `http { }`, не сработал `proxy_hide_header`, или конфиг не перезагружен: `nginx -t && systemctl reload nginx`.
 
 В тексте есть четыре строки:
 
