@@ -37,12 +37,18 @@ function VideoTile(props: {
 }) {
   const { tile, bindVideo, onToggleMic, onToggleCamera, onNextCamera, mediaBusy } = props
   const videoRef = useRef<HTMLVideoElement | null>(null)
+  const bindVideoRef = useRef(bindVideo)
+
+  useEffect(() => {
+    bindVideoRef.current = bindVideo
+  }, [bindVideo])
 
   useEffect(() => {
     const node = videoRef.current
-    bindVideo(tile.id, node)
-    return () => bindVideo(tile.id, null)
-  }, [bindVideo, tile.id, tile.cameraOn])
+    const bind = bindVideoRef.current
+    bind(tile.id, node)
+    return () => bind(tile.id, null)
+  }, [tile.id, tile.cameraOn])
 
   return (
     <div
@@ -54,7 +60,7 @@ function VideoTile(props: {
         {tile.cameraOn ? (
           <video ref={videoRef} autoPlay playsInline muted={tile.isLocal} />
         ) : (
-          <span className="video-placeholder">{initials(tile.name)}</span>
+          <span className="video-placeholder">{tile.name.trim() || 'Игрок'}</span>
         )}
       </div>
       <div className="video-meta">
@@ -98,11 +104,4 @@ function VideoTile(props: {
       ) : null}
     </div>
   )
-}
-
-function initials(name: string): string {
-  const parts = name.trim().split(/\s+/).filter(Boolean)
-  if (parts.length === 0) return '?'
-  if (parts.length === 1) return parts[0]!.slice(0, 2).toUpperCase()
-  return `${parts[0]!.slice(0, 1)}${parts[1]!.slice(0, 1)}`.toUpperCase()
 }

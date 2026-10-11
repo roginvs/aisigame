@@ -19,6 +19,7 @@ export type SpeechPurpose =
   | 'bet'
   | 'turn'
   | 'chooserHandoff'
+  | 'micWarning'
   | 'falseStart'
 
 export type RoundKind = 'normal' | 'final'

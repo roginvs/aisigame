@@ -37,9 +37,10 @@ test('joiner на телефоне не обрезан и управляется
 
   await joiner.getByRole('button', { name: 'Я готов' }).click()
   await master.getByRole('button', { name: 'Начать игру' }).click()
-  await expect(joiner.getByRole('status').filter({ hasText: 'назовите тему и стоимость' })).toBeVisible({
+  await expect(joiner.getByRole('status').filter({ hasText: 'Гость выбирает вопрос' })).toBeVisible({
     timeout: 30_000,
   })
+  await expect(joiner.getByRole('status').filter({ hasText: 'Не говорите' })).toHaveCount(0)
 
   const self = joiner.getByRole('group', { name: /Гость: 0/ })
   await expect(self).toBeVisible()

@@ -4,7 +4,7 @@ import { gameConfig } from '../config.ts'
 import { getTrace } from '../debug/trace.ts'
 import type { ToolCall } from '../realtime/client.ts'
 import { MockRealtimeClient } from '../realtime/mockClient.ts'
-import { attachController } from './controller.ts'
+import { attachController, type GameControllerActions } from './controller.ts'
 import { gameMachine, statePath } from './machine.ts'
 import type { Question, QuestionPack } from './types.ts'
 
@@ -86,16 +86,27 @@ async function boot(client: MockRealtimeClient, questions = pack) {
   })
   const actor = createActor(gameMachine)
   actor.start()
+  let actions: GameControllerActions | null = null
   const stop = attachController({
     actor,
     client,
     getApiKey: () => 'test-key',
     setLink: () => {},
+    onActions: (next) => {
+      actions = next
+    },
   })
   actor.send({ type: 'START_GAME', pack: questions })
   await vi.advanceTimersByTimeAsync(0)
   await vi.advanceTimersByTimeAsync(80)
-  return { actor, stop }
+  return {
+    actor,
+    stop,
+    actions: () => {
+      if (!actions) throw new Error('Действия контроллера не подключены')
+      return actions
+    },
+  }
 }
 
 describe('attachController choice', () => {
@@ -178,6 +189,30 @@ describe('attachController answer listening', () => {
   afterEach(() => {
     vi.useRealTimers()
     vi.unstubAllGlobals()
+  })
+
+  it('напоминает отвечающему о выключенном микрофоне, не закрывая ожидание ответа', async () => {
+    const client = new MockRealtimeClient()
+    const requestSpeech = vi.spyOn(client, 'requestSpeech')
+    const { actor, stop, actions } = await boot(client)
+    actor.send({ type: 'QUESTION_SELECTED', themeId: 'p', value: 400 })
+    await vi.advanceTimersByTimeAsync(gameConfig.cellFlashMs + 80)
+    actor.send({ type: 'BUZZER_PRESSED', playerId: 1 })
+    expect(statePath(actor.getSnapshot().value)).toBe('answering.waiting')
+
+    actions().remindMutedAnswerer('Игрок 1')
+    expect(requestSpeech).toHaveBeenLastCalledWith(
+      'micWarning',
+      expect.any(Number),
+      expect.any(String),
+      'Игрок 1, микрофон-то выключен.',
+      true,
+    )
+    await vi.advanceTimersByTimeAsync(80)
+    expect(statePath(actor.getSnapshot().value)).toBe('answering.waiting')
+
+    stop()
+    actor.stop()
   })
 
   it('подсказывает ответы только после кнопки и не оценивает эхо подсказки', async () => {

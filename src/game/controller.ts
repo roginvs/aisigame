@@ -20,6 +20,10 @@ import type { AnnounceKind, GameContext, JudgmentStatus, SpeechPurpose } from '.
 
 type GameActor = Actor<typeof gameMachine>
 
+export type GameControllerActions = {
+  remindMutedAnswerer: (playerName: string) => void
+}
+
 const judgmentStatuses: JudgmentStatus[] = [
   'correct',
   'incorrect',
@@ -37,8 +41,10 @@ export function attachController(options: {
   keepVoiceSession?: () => boolean
   /** Конференция: модель уже подключена до START_GAME. */
   voiceAlreadyConnected?: () => boolean
+  /** Дополнительные реплики конференции, которые не меняют состояние партии. */
+  onActions?: (actions: GameControllerActions | null) => void
 }): () => void {
-  const { actor, client, getApiKey, setLink, keepVoiceSession, voiceAlreadyConnected } = options
+  const { actor, client, getApiKey, setLink, keepVoiceSession, voiceAlreadyConnected, onActions } = options
   let previousPath = statePath(actor.getSnapshot().value)
   let connectToken = 0
   let speechTurn = 0
@@ -336,9 +342,9 @@ export function attachController(options: {
     client.setMicEnabled(true)
   }
 
-  function speakWhileListening(purpose: SpeechPurpose, instructions: string): void {
+  function speakWhileListening(purpose: SpeechPurpose, instructions: string, expect?: string): void {
     speechTurn += 1
-    client.requestSpeech(purpose, speechTurn, instructions)
+    client.requestSpeech(purpose, speechTurn, instructions, expect, Boolean(expect))
     client.setMicEnabled(true)
   }
 
@@ -586,7 +592,16 @@ export function attachController(options: {
     actor.send({ type: 'ANSWER_JUDGED', judgment })
   }
 
+  onActions?.({
+    remindMutedAnswerer(playerName) {
+      if (statePath(actor.getSnapshot().value) !== 'answering.waiting') return
+      const line = `${playerName}, микрофон-то выключен.`
+      speakWhileListening('micWarning', verbatimSpeech(line), line)
+    },
+  })
+
   return () => {
+    onActions?.(null)
     connectToken += 1
     subscription.unsubscribe()
     client.stopSession()
@@ -661,6 +676,7 @@ function isSpeechPurpose(purpose: string): purpose is SpeechPurpose {
     purpose === 'bet' ||
     purpose === 'turn' ||
     purpose === 'chooserHandoff' ||
+    purpose === 'micWarning' ||
     purpose === 'falseStart'
   )
 }

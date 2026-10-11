@@ -17,8 +17,6 @@ export type ConferenceMedia = {
   localMicStream: () => MediaStream | null
   /** Общий поток локального микрофона и удалённых игроков для ведущей-модели. */
   modelInputStream: () => MediaStream | null
-  /** null — слышны все; пустой список — никто. Нужно для личного выбора ячейки. */
-  setModelInputParticipants: (participantIds: readonly string[] | null) => void
   localParticipantId: () => string
   subscribeTiles: (handler: (tiles: ConferenceTile[]) => void) => () => void
   bindVideo: (participantId: string, element: HTMLVideoElement | null) => void
@@ -67,7 +65,6 @@ export function createBroadcastMedia(displayName: string): ConferenceMedia & { d
     cameraOn: () => camera,
     localMicStream: () => micStream,
     modelInputStream: () => micStream,
-    setModelInputParticipants() {},
     localParticipantId: () => 'local',
     subscribeTiles(handler) {
       listeners.add(handler)

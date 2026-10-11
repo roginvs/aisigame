@@ -80,7 +80,7 @@ test.describe('конференция на BroadcastChannel', () => {
     await expect(joiner.getByRole('button', { name: 'Я готов' })).toBeEnabled({ timeout: 60_000 })
     await joiner.getByRole('button', { name: 'Я готов' }).click()
     await master.getByRole('button', { name: 'Начать игру' }).click()
-    await expect(joiner.getByRole('status').filter({ hasText: 'назовите тему и стоимость' })).toBeVisible({
+    await expect(joiner.getByRole('status').filter({ hasText: 'Гость выбирает вопрос' })).toBeVisible({
       timeout: 30_000,
     })
 
@@ -97,6 +97,21 @@ test.describe('конференция на BroadcastChannel', () => {
     await joiner.getByRole('button', { name: 'Гость' }).click()
     await hear(master, 'август')
     await expect(master.getByRole('group', { name: /Гость: 100/ })).toBeVisible({ timeout: 20_000 })
+
+    await expect(joiner.getByRole('button', { name: 'Текст, 200' })).toBeEnabled({ timeout: 10_000 })
+    await joiner.getByRole('button', { name: 'Текст, 200' }).click()
+    await expect(master.getByRole('status').filter({ hasText: 'Жмите кнопку' })).toBeVisible({ timeout: 20_000 })
+    await master.getByRole('group', { name: /Мастер: 0/ }).getByRole('button', { name: 'Мастер' }).click()
+    await expect(joiner.getByRole('status').filter({ hasText: 'Мастер отвечает' })).toBeVisible()
+    const mutedReminder = master.getByText('Мастер, микрофон-то выключен.')
+    await master.waitForTimeout(2_500)
+    await expect(mutedReminder).toHaveCount(0)
+    await expect(mutedReminder).toBeVisible({ timeout: 2_000 })
+    await hear(master, 'кислород')
+    await expect(joiner.getByRole('status').filter({ hasText: 'Мастер выбирает вопрос' })).toBeVisible({
+      timeout: 20_000,
+    })
+    await expect(joiner.getByRole('status').filter({ hasText: 'Не говорите' })).toHaveCount(0)
   })
 
   test('мастер продолжает ту же комнату, а вернувшийся clientId сохраняет счёт', async ({ browser }) => {
@@ -122,7 +137,7 @@ test.describe('конференция на BroadcastChannel', () => {
     await expect(joiner.getByRole('button', { name: 'Я готов' })).toBeEnabled({ timeout: 60_000 })
     await joiner.getByRole('button', { name: 'Я готов' }).click()
     await master.getByRole('button', { name: 'Начать игру' }).click()
-    await expect(joiner.getByRole('status').filter({ hasText: 'назовите тему и стоимость' })).toBeVisible({
+    await expect(joiner.getByRole('status').filter({ hasText: 'Гость выбирает вопрос' })).toBeVisible({
       timeout: 30_000,
     })
 
@@ -145,7 +160,7 @@ test.describe('конференция на BroadcastChannel', () => {
 
     await master.reload()
     await master.getByRole('button', { name: 'Продолжить прошлую игру' }).click()
-    await expect(master.getByRole('status').filter({ hasText: 'назовите тему и стоимость' })).toBeVisible({
+    await expect(master.getByRole('status').filter({ hasText: 'Гость выбирает вопрос' })).toBeVisible({
       timeout: 30_000,
     })
     await expect(master.getByRole('group', { name: /Гость: 300/ })).toBeVisible()

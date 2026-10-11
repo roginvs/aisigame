@@ -16,6 +16,14 @@ describe('ConferenceVideoStrip', () => {
             cameraOn: true,
             speaking: true,
           },
+          {
+            id: 'remote',
+            name: 'Василий Петров',
+            isLocal: false,
+            micLive: false,
+            cameraOn: false,
+            speaking: false,
+          },
         ],
         onToggleMic: vi.fn(),
         onToggleCamera: vi.fn(),
@@ -26,5 +34,6 @@ describe('ConferenceVideoStrip', () => {
 
     expect(html).toContain('video-tile mic-live speaking')
     expect(html).toContain('aria-label="Следующая камера"')
+    expect(html).toContain('<span class="video-placeholder">Василий Петров</span>')
   })
 })

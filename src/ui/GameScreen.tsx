@@ -19,12 +19,14 @@ import { ConferenceVideoStrip } from './ConferenceVideoStrip.tsx'
 import { AirStatus } from './airStatus.tsx'
 import { buzzKeyLabel, isKeyboardPlayer, playerFromBuzzKey } from './buzzKeys.ts'
 import { ConversationChat } from './DebugChat.tsx'
-import { canBuzzPlayer, canPickCell } from './conferenceTurn.ts'
+import { canBuzzPlayer, canPickCell, conferenceTurnTitle } from './conferenceTurn.ts'
 import { HostPresence } from './HostPresence.tsx'
 import { InviteDialog } from './InviteDialog.tsx'
 import { QuestionClip, QuestionMedia } from './QuestionMedia.tsx'
 import { questionClipPlaying } from './questionClip.ts'
 import { remainingFraction, remainingSeconds } from './timerFraction.ts'
+
+const ignoreConferenceVideoBinding = () => {}
 
 function ModelName(props: { modelId: string; onModel: (id: string) => void }) {
   const { modelId, onModel } = props
@@ -190,6 +192,11 @@ export function GameScreen(props: {
     conference?.selfClientId,
     context.chooserId,
     context.players,
+  )
+  const turnTitle = conferenceTurnTitle(
+    path,
+    Boolean(conference?.layout),
+    context,
   )
   const flashing = path === 'flashing' || (paused && context.resumePath === 'flashing')
   const showQuestion = Boolean(question) && !flashing
@@ -539,6 +546,7 @@ export function GameScreen(props: {
           <HostPresence
             path={path}
             link={link}
+            title={turnTitle}
             status={
               conference?.lobby
                 ? conference.waitingMaster
@@ -561,7 +569,7 @@ export function GameScreen(props: {
             onToggleMic={() => conference.onToggleMic?.()}
             onToggleCamera={() => conference.onToggleCamera?.()}
             onNextCamera={() => conference.onNextCamera?.()}
-            bindVideo={(id, el) => conference.bindVideo?.(id, el)}
+            bindVideo={conference.bindVideo ?? ignoreConferenceVideoBinding}
           />
         ) : null}
       </section>

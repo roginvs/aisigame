@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import type { Player } from '../game/types.ts'
-import { canBuzzPlayer, canPickCell } from './conferenceTurn.ts'
+import { canBuzzPlayer, canPickCell, conferenceTurnTitle } from './conferenceTurn.ts'
 
 const players: Player[] = [
   { id: 1, name: 'Аня', score: 0, clientId: 'client-a' },
@@ -42,5 +42,42 @@ describe('canBuzzPlayer', () => {
 
   it('fails closed without an online identity', () => {
     expect(canBuzzPlayer(true, undefined, players[0]!)).toBe(false)
+  })
+})
+
+describe('conferenceTurnTitle', () => {
+  const context = {
+    players,
+    chooserId: 1,
+    activePlayerId: 1,
+    finalists: [1, 2],
+    finalCursor: 0,
+    rounds: [
+      { index: 0, name: 'Раунд', kind: 'normal' as const },
+      { index: 1, name: 'Финал', kind: 'final' as const },
+    ],
+    roundIndex: 0,
+  }
+
+  it('показывает наблюдателю, кто выбирает вопрос, вместо общей команды', () => {
+    expect(conferenceTurnTitle('choosing.listening', true, context)).toBe('Аня выбирает вопрос')
+    expect(conferenceTurnTitle('choosing.clarifying', true, context)).toBe('Аня выбирает вопрос')
+  })
+
+  it('называет выбор темы финала', () => {
+    expect(
+      conferenceTurnTitle('choosing.listening', true, { ...context, roundIndex: 1 }),
+    ).toBe('Аня выбирает тему финала')
+  })
+
+  it('показывает чужой ответ и ставку', () => {
+    expect(conferenceTurnTitle('answering.waiting', true, context)).toBe('Аня отвечает')
+    expect(conferenceTurnTitle('answering.hearing', true, context)).toBe('Аня отвечает')
+    expect(conferenceTurnTitle('finalBets.hearing', true, context)).toBe('Аня делает ставку')
+  })
+
+  it('оставляет прежнюю подпись вне персонального хода или конференции', () => {
+    expect(conferenceTurnTitle('answering.waiting', false, context)).toBeNull()
+    expect(conferenceTurnTitle('judging', true, context)).toBeNull()
   })
 })

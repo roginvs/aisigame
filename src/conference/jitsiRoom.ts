@@ -47,6 +47,7 @@ type JitsiConnection = {
 type JitsiParticipant = {
   getId?: () => string
   getDisplayName?: () => string
+  getTracks?: () => JitsiTrack[]
   isHidden?: () => boolean
 }
 
@@ -60,6 +61,7 @@ type JitsiConference = {
   replaceTrack: (oldTrack: JitsiTrack, newTrack: JitsiTrack) => Promise<void>
   sendEndpointMessage: (to: string, payload: unknown) => void
   myUserId: () => string
+  participants?: Map<string, JitsiParticipant>
 }
 
 type JitsiTrack = {
@@ -194,6 +196,24 @@ function endpointSenderId(participant: unknown): string {
   return typeof id === 'string' ? id : ''
 }
 
+export function visibleJitsiParticipants<
+  T extends {
+    getId?: () => string
+    getDisplayName?: () => string
+    isHidden?: () => boolean
+  },
+>(participants: ReadonlyMap<string, T> | undefined): Array<{ id: string; name: string; participant: T }> {
+  if (!participants) return []
+  const visible: Array<{ id: string; name: string; participant: T }> = []
+  for (const [fallbackId, participant] of participants) {
+    if (participant.isHidden?.()) continue
+    const id = participant.getId?.() || fallbackId
+    if (!id) continue
+    visible.push({ id, name: participant.getDisplayName?.() || id, participant })
+  }
+  return visible
+}
+
 export async function connectJitsiConference(input: {
   jitsiBase: string
   roomName: string
@@ -288,8 +308,6 @@ export async function connectJitsiConference(input: {
   const videoBindings = new Map<string, HTMLVideoElement>()
   const conferenceAudio = createConferenceAudioOutput()
   let modelMixer: MicMixer | null = null
-  let modelInputParticipantIds: Set<string> | null = null
-  let modelInputParticipantSignature = '*'
   const tileListeners = new Set<(tiles: ConferenceTile[]) => void>()
   const localId = () => conference.myUserId() || 'local'
   let botHandle: ConferenceHandle | null = null
@@ -336,6 +354,19 @@ export async function connectJitsiConference(input: {
     syncModelMixer()
   }
 
+  function rememberRemoteTrack(jitsiTrack: JitsiTrack): void {
+    if (input.bot || jitsiTrack.isLocal()) return
+    const userId = jitsiTrack.getParticipantId?.()
+    if (!userId) return
+    if (jitsiTrack.getType() === 'video') {
+      remoteVideo.set(userId, jitsiTrack)
+      if (remoteNames.has(userId)) attachVideo(userId)
+    } else if (jitsiTrack.getType() === 'audio') {
+      remoteAudio.set(userId, jitsiTrack)
+      if (remoteNames.has(userId)) ensureRemoteAudio(userId, jitsiTrack)
+    }
+  }
+
   function dropRemoteAudio(id: string): void {
     conferenceAudio.remove(id)
     remoteAudio.delete(id)
@@ -345,11 +376,10 @@ export async function connectJitsiConference(input: {
 
   function syncModelMixer(): void {
     if (!modelMixer) return
-    const allows = (id: string) => modelInputParticipantIds === null || modelInputParticipantIds.has(id)
-    modelMixer.setLocalMic(allows(localId()) ? localMicMedia : null)
+    modelMixer.setLocalMic(localMicMedia)
     modelMixer.setRemoteStreams(
       [...remoteAudio.entries()]
-        .filter(([id]) => (!botHandle || id !== botHandle.localParticipantId()) && allows(id))
+        .filter(([id]) => !botHandle || id !== botHandle.localParticipantId())
         .map(([, track]) => track.getOriginalStream?.() ?? null)
         .filter((stream): stream is MediaStream => stream !== null),
     )
@@ -387,18 +417,7 @@ export async function connectJitsiConference(input: {
   })
 
   conference.on(confEvents.trackAdded, (track: unknown) => {
-    if (input.bot) return
-    const jitsiTrack = track as JitsiTrack
-    if (jitsiTrack.isLocal()) return
-    const userId = jitsiTrack.getParticipantId?.()
-    if (!userId) return
-    if (jitsiTrack.getType() === 'video') {
-      remoteVideo.set(userId, jitsiTrack)
-      if (remoteNames.has(userId)) attachVideo(userId)
-    } else if (jitsiTrack.getType() === 'audio') {
-      remoteAudio.set(userId, jitsiTrack)
-      if (remoteNames.has(userId)) ensureRemoteAudio(userId, jitsiTrack)
-    }
+    rememberRemoteTrack(track as JitsiTrack)
     emitTiles()
   })
 
@@ -431,6 +450,12 @@ export async function connectJitsiConference(input: {
     emitTiles()
   })
 
+  if (!input.bot) {
+    for (const current of visibleJitsiParticipants(conference.participants)) {
+      remoteNames.set(current.id, current.name)
+      for (const track of current.participant.getTracks?.() ?? []) rememberRemoteTrack(track)
+    }
+  }
   emitTiles()
 
   const handle: ConferenceHandle = {
@@ -477,13 +502,6 @@ export async function connectJitsiConference(input: {
         syncModelMixer()
       }
       return modelMixer.outputStream()
-    },
-    setModelInputParticipants(participantIds) {
-      const signature = participantIds === null ? '*' : [...new Set(participantIds)].sort().join('|')
-      if (signature === modelInputParticipantSignature) return
-      modelInputParticipantSignature = signature
-      modelInputParticipantIds = participantIds === null ? null : new Set(participantIds)
-      syncModelMixer()
     },
     localParticipantId: localId,
     async setCameraOn(on: boolean) {

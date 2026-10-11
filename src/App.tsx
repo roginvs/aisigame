@@ -25,7 +25,7 @@ import type { ConferenceHandle, ConferenceTile } from './conference/media.ts'
 import { createConferenceTransport } from './conference/transportFactory.ts'
 import { putPack, getPack } from './conference/packDb.ts'
 import { ownPackId, packCatalog } from './game/catalog.ts'
-import { attachController } from './game/controller.ts'
+import { attachController, type GameControllerActions } from './game/controller.ts'
 import { defaultPlayerNames, playersFromNames } from './game/players.ts'
 import { gameMachine, statePath } from './game/machine.ts'
 import {
@@ -63,6 +63,7 @@ import { GameScreen } from './ui/GameScreen.tsx'
 import { JoinConfirmScreen } from './ui/JoinConfirmScreen.tsx'
 import { StartScreen } from './ui/StartScreen.tsx'
 import type { GameVoice } from './realtime/client.ts'
+import { mutedAnswerReminderMs } from './options.ts'
 
 const initialLink: LinkStatus = { connection: 'idle', mic: 'idle', host: 'idle' }
 const pageParams = new URLSearchParams(window.location.search)
@@ -120,6 +121,7 @@ export default function App() {
   const [conferenceLobby, setConferenceLobby] = useState(false)
   const [masterRoster, setMasterRoster] = useState<RosterEntry[]>([])
   const [masterRosterAll, setMasterRosterAll] = useState<RosterEntry[]>([])
+  const [masterParticipantIds, setMasterParticipantIds] = useState<Record<string, string>>({})
   const [conferenceChat, setConferenceChat] = useState<{ name: string; text: string }[]>(() => readSavedGame()?.chat ?? [])
   const conferenceChatRef = useRef(conferenceChat)
   const [joinerSnapshot, setJoinerSnapshot] = useState<ConferenceSnapshot | null>(null)
@@ -149,6 +151,7 @@ export default function App() {
   const packHashRef = useRef('')
   const [loadedPackHash, setLoadedPackHash] = useState('')
   const voiceClientRef = useRef<GameVoice | null>(null)
+  const controllerActionsRef = useRef<GameControllerActions | null>(null)
   const voiceConnectedRef = useRef(false)
   const conferenceLobbyRef = useRef(false)
   const masterSessionRef = useRef<MasterSession | null>(null)
@@ -158,6 +161,11 @@ export default function App() {
   const tilesUnsubRef = useRef<(() => void) | null>(null)
   const tearingDownConferenceRef = useRef(false)
   const [conferenceTiles, setConferenceTiles] = useState<ConferenceTile[]>([])
+  const conferenceTilesRef = useRef<ConferenceTile[]>([])
+  const warnedMicAttemptRef = useRef('')
+  const bindConferenceVideo = useCallback((participantId: string, element: HTMLVideoElement | null) => {
+    conferenceHandleRef.current?.bindVideo(participantId, element)
+  }, [])
   const [mediaBusy, setMediaBusy] = useState(false)
   const [joiningStatus, setJoiningStatus] = useState<string | null>(null)
   const [masterClientId] = useState(readClientId)
@@ -246,6 +254,9 @@ export default function App() {
       setLink,
       keepVoiceSession: () => conferenceLobbyRef.current,
       voiceAlreadyConnected: () => voiceConnectedRef.current,
+      onActions: (actions) => {
+        controllerActionsRef.current = actions
+      },
     })
     return () => {
       delete window.__aisigame
@@ -263,28 +274,68 @@ export default function App() {
       ? ownFileName
       : (packCatalog.find((item) => item.id === packId)?.href.split('/').pop() ?? `${packId}.siq`)
   const packHash = packId === ownPackId ? ownFileHash : loadedPackHash
-  const chooserClientId = snapshot.context.players.find(
-    (player) => player.id === snapshot.context.chooserId,
-  )?.clientId
+  const answerer = snapshot.context.players.find(
+    (player) => player.id === snapshot.context.activePlayerId,
+  )
+  const answererParticipantId =
+    conferenceRole === 'master' && answerer?.clientId
+      ? masterParticipantIds[answerer.clientId] ?? null
+      : null
+  const answererTile = answererParticipantId
+    ? conferenceTiles.find((tile) => tile.id === answererParticipantId)
+    : undefined
+  const answererId = answerer?.id ?? null
+  const answererName = answerer?.name ?? ''
+  const answererMicLive = answererTile?.micLive
+  const answerAttemptKey = answerer
+    ? `${snapshot.context.activeQuestionId ?? ''}:${snapshot.context.attemptId}:${answerer.id}`
+    : ''
 
   useEffect(() => {
-    if (conferenceRole !== 'master') return
-    const handle = conferenceHandleRef.current
-    if (!handle) return
-    if (!path.startsWith('choosing')) {
-      handle.setModelInputParticipants(null)
+    conferenceTilesRef.current = conferenceTiles
+  }, [conferenceTiles])
+
+  useEffect(() => {
+    if (
+      conferenceRole !== 'master' ||
+      path !== 'answering.waiting' ||
+      answererId === null ||
+      !answererParticipantId ||
+      answererMicLive !== false ||
+      link.host === 'speaking' ||
+      warnedMicAttemptRef.current === answerAttemptKey
+    ) {
       return
     }
-    if (!chooserClientId) {
-      handle.setModelInputParticipants([])
-      return
-    }
-    const participantId =
-      chooserClientId === masterClientId
-        ? handle.localParticipantId()
-        : masterSessionRef.current?.endpointIdForClient(chooserClientId)
-    handle.setModelInputParticipants(participantId ? [participantId] : [])
-  }, [conferenceRole, path, chooserClientId, masterClientId, masterRoster])
+    const timer = window.setTimeout(() => {
+      const current = actor.getSnapshot()
+      if (
+        statePath(current.value) !== 'answering.waiting' ||
+        current.context.activePlayerId !== answererId ||
+        current.context.attemptId !== snapshot.context.attemptId
+      ) {
+        return
+      }
+      const liveTile = conferenceTilesRef.current.find((tile) => tile.id === answererParticipantId)
+      if (!liveTile || liveTile.micLive) return
+      const actions = controllerActionsRef.current
+      if (!actions) return
+      warnedMicAttemptRef.current = answerAttemptKey
+      actions.remindMutedAnswerer(answererName)
+    }, mutedAnswerReminderMs)
+    return () => window.clearTimeout(timer)
+  }, [
+    actor,
+    answerAttemptKey,
+    answererId,
+    answererMicLive,
+    answererName,
+    answererParticipantId,
+    conferenceRole,
+    link.host,
+    path,
+    snapshot.context.attemptId,
+  ])
 
   useEffect(() => {
     if (suppressSave.current) {
@@ -488,6 +539,7 @@ export default function App() {
       setConferenceTiles([])
       setMasterRoster([])
       setMasterRosterAll([])
+      setMasterParticipantIds({})
       setMediaBusy(false)
       setJoiningStatus(null)
       setConferenceRole(null)
@@ -663,8 +715,19 @@ export default function App() {
         onRoster: () => {
           const active = masterSessionRef.current
           if (!active) return
-          setMasterRoster(active.rosterList())
+          const roster = active.rosterList()
+          setMasterRoster(roster)
           setMasterRosterAll(active.rosterAll())
+          setMasterParticipantIds(
+            Object.fromEntries(
+              roster.flatMap((entry) => {
+                const participantId = entry.isMaster
+                  ? handle.localParticipantId()
+                  : active.endpointIdForClient(entry.clientId)
+                return participantId ? [[entry.clientId, participantId]] : []
+              }),
+            ),
+          )
         },
         getChat: () => conferenceChatRef.current,
         setChat: (chat) => {
@@ -674,8 +737,10 @@ export default function App() {
         resumePlayers: restoringGame ? resume?.saved.players : undefined,
       })
       masterSessionRef.current = session
-      setMasterRoster(session.rosterList())
+      const initialRoster = session.rosterList()
+      setMasterRoster(initialRoster)
       setMasterRosterAll(session.rosterAll())
+      setMasterParticipantIds({ [masterClientId]: handle.localParticipantId() })
       if (restoringGame && resume) {
         session.resumeGame(() => send({ type: 'CONTINUE_GAME', pack, saved: resume.saved }))
       } else {
@@ -1142,7 +1207,7 @@ export default function App() {
               onToggleMic: () => void toggleConferenceMic(),
               onToggleCamera: () => void toggleConferenceCamera(),
               onNextCamera: () => void nextConferenceCamera(),
-              bindVideo: (id, el) => conferenceHandleRef.current?.bindVideo(id, el),
+              bindVideo: bindConferenceVideo,
               onSendChat: (text) => {
                 if (conferenceRole === 'joiner') joinerSessionRef.current?.sendChat(text)
                 else masterSessionRef.current?.sendChat(conferenceName || 'Мастер', text)

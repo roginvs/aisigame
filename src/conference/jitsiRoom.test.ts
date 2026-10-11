@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import type { ConferenceMessage } from './messages.ts'
-import { JitsiMessageTransport } from './jitsiRoom.ts'
+import { JitsiMessageTransport, visibleJitsiParticipants } from './jitsiRoom.ts'
 
 describe('JitsiMessageTransport', () => {
   afterEach(() => {
@@ -85,5 +85,27 @@ describe('JitsiMessageTransport', () => {
     expect(sent[0]).toMatchObject({ type: 'hello', name: 'Новое имя' })
     expect(sent[1]).toMatchObject({ type: 'snapshot', phase: 'choosing.listening' })
     transport.close()
+  })
+})
+
+describe('visibleJitsiParticipants', () => {
+  it('восстанавливает уже находившихся в комнате участников и пропускает скрытых', () => {
+    const visible = {
+      getId: () => 'master-endpoint',
+      getDisplayName: () => 'Василий Петров',
+      isHidden: () => false,
+    }
+    const hidden = {
+      getId: () => 'focus',
+      getDisplayName: () => 'Focus',
+      isHidden: () => true,
+    }
+
+    expect(
+      visibleJitsiParticipants(new Map([
+        ['fallback-master', visible],
+        ['fallback-focus', hidden],
+      ])),
+    ).toEqual([{ id: 'master-endpoint', name: 'Василий Петров', participant: visible }])
   })
 })

@@ -14,17 +14,21 @@ export function HostPresence(props: {
   path: string
   link: Pick<LinkStatus, 'host' | 'mic'>
   status: string
+  /** Персональный статус хода в конференции, например «Вася выбирает вопрос». */
+  title?: string | null
   error?: string | null
 }) {
   const paused = props.path === 'paused'
   const stopped = props.path === 'stopped'
   const mood = paused || stopped ? 'think' : hostMood(props.path, props.link)
-  const copy = stopped
+  const copy = props.title
+    ? { title: props.title, hint: '' }
+    : stopped
     ? { title: 'Остановлена', hint: 'Сессия закрыта, ведущая не ждёт' }
     : paused
       ? { title: 'Пауза', hint: 'Микрофон выключен, ведущая не ждёт' }
       : hostCopy[mood]
-  const caption = hostCaption({ title: copy.title, hint: copy.hint, status: props.status })
+  const caption = hostCaption({ title: copy.title, hint: copy.hint, status: props.title ? '' : props.status })
   return (
     <figure className={stopped ? `host host-${mood} host-stopped` : `host host-${mood}`} role="status" aria-live="polite">
       <img src={portrait[mood]} alt="" />

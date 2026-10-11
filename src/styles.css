@@ -336,9 +336,13 @@ h1, h2, p { margin: 0; }
 
 .video-placeholder {
   color: #d7b15e;
-  font-size: 1.4rem;
+  max-width: 90%;
+  padding: 8px;
+  font-size: clamp(0.85rem, 1.4vw, 1.15rem);
   font-weight: 700;
-  letter-spacing: 0.04em;
+  line-height: 1.2;
+  text-align: center;
+  overflow-wrap: anywhere;
 }
 
 .video-meta {

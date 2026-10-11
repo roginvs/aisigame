@@ -73,6 +73,9 @@ test('приложение открывает Jitsi-лобби, передаёт
   await joiner.getByLabel('Ваше имя').fill('Live игрок')
   await joiner.getByRole('button', { name: 'Подключиться' }).click()
   await expect(joiner.getByRole('button', { name: 'Я готов' })).toBeEnabled({ timeout: 45_000 })
+  await expect(joiner.locator('.video-placeholder', { hasText: 'Live мастер' })).toBeVisible({ timeout: 30_000 })
+  await expect(joiner.locator('.video-placeholder', { hasText: 'Ведущая' })).toBeVisible({ timeout: 30_000 })
+  await expect(master.locator('.video-placeholder', { hasText: 'Live игрок' })).toBeVisible({ timeout: 30_000 })
   await joiner.getByRole('button', { name: 'Я готов' }).click()
   await expect(
     master
@@ -82,7 +85,7 @@ test('приложение открывает Jitsi-лобби, передаёт
   ).toBeVisible({ timeout: 30_000 })
   await master.getByRole('button', { name: 'Начать игру' }).click()
 
-  await expect(joiner.getByRole('status').filter({ hasText: 'назовите тему и стоимость' })).toBeVisible({
+  await expect(joiner.getByRole('status').filter({ hasText: 'Live игрок выбирает вопрос' })).toBeVisible({
     timeout: 30_000,
   })
   await context.close()
