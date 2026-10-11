@@ -14,11 +14,11 @@ export function commitStamp(): string {
 
 export function commitDate(): string {
   try {
-    const date = execSync('git log -1 --format=%cs', {
+    const timestamp = execSync('git log -1 --format=%cI', {
       encoding: 'utf8',
       stdio: ['ignore', 'pipe', 'ignore'],
     }).trim()
-    return date || 'unknown'
+    return timestamp ? timestamp.slice(0, 19).replace('T', ' ') : 'unknown'
   } catch {
     return 'unknown'
   }

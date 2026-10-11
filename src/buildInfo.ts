@@ -9,7 +9,7 @@ export function buildCommitDate(): string {
 }
 
 export function startBuildInfo(): string {
-  return import.meta.env.PROD ? `${buildCommitDate()} · ${buildCommit()}` : 'Режим разработки'
+  return import.meta.env.PROD ? `Версия ${buildCommitDate()} ${buildCommit()}` : 'Режим разработки'
 }
 
 export function pageOrigin(): string {
