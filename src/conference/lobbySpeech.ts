@@ -6,6 +6,10 @@ import type { RosterEntry } from './roster.ts'
 export const LOBBY_SPEECH_MIN_INTERVAL_MS = 10_000
 /** Даже без изменений ведущая иногда поддерживает живое ожидание. */
 export const LOBBY_IDLE_INTERVAL_MS = 15_000
+/** В лобби реплика стартует только после короткой тишины комнаты, чтобы не врезаться в разговор. */
+export const LOBBY_SILENCE_BEFORE_SPEECH_MS = 2_500
+/** Как часто проверяем тишину, пока ждём окно перед репликой лобби. */
+export const LOBBY_SILENCE_POLL_MS = 400
 
 export type LobbySpeechFacts = {
   kind: 'opened' | 'update' | 'idle'

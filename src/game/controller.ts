@@ -272,8 +272,9 @@ export function attachController(options: {
       )
       return
     }
-    if (path === 'welcoming') speak('welcome', welcomeInstructions(context))
-    if (path === 'bridging') speak('bridge', bridgeInstructions(context))
+    // Без conversation:none приветствие продолжает лобби и отвечает на «ты меня слышишь».
+    if (path === 'welcoming') speak('welcome', welcomeInstructions(context), undefined, true)
+    if (path === 'bridging') speak('bridge', bridgeInstructions(context), undefined, true)
     if (path === 'chooserHandoff') {
       const line = context.clarifyReason
       speak('chooserHandoff', verbatimSpeech(line), line)

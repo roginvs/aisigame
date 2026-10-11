@@ -3,7 +3,7 @@ import { fetchJitsiConfig, websocketUrlForBase } from './jitsiConfig.ts'
 import type { ConferenceMessage } from './messages.ts'
 import { isConferenceMessage } from './messages.ts'
 import type { ConferenceTransport } from './transport.ts'
-import { createMicMixer, type MicMixer } from './audioMix.ts'
+import { createMicMixer, streamsForModelHear, type MicMixer } from './audioMix.ts'
 import { nextCameraDeviceId } from './camera.ts'
 import { createSpeakerActivity } from './speakerActivity.ts'
 import { conferenceAudioStream, createConferenceAudioOutput } from './conferenceAudio.ts'
@@ -310,10 +310,26 @@ export async function connectJitsiConference(input: {
   const videoBindings = new Map<string, HTMLVideoElement>()
   const conferenceAudio = createConferenceAudioOutput()
   let modelMixer: MicMixer | null = null
+  /** `null` — модель слышит всех; иначе только этот Jitsi participant id. */
+  let modelHearOnlyId: string | null = null
   const tileListeners = new Set<(tiles: ConferenceTile[]) => void>()
   const localId = () => conference.myUserId() || 'local'
   let botHandle: ConferenceHandle | null = null
   const speakerActivity = createSpeakerActivity(() => emitTiles())
+
+  function botParticipantId(): string | null {
+    return botHandle?.localParticipantId() ?? null
+  }
+
+  function anyoneSpeaking(): boolean {
+    const botId = botParticipantId()
+    if (speakerActivity.has(localId())) return true
+    for (const id of remoteNames.keys()) {
+      if (botId && id === botId) continue
+      if (speakerActivity.has(id)) return true
+    }
+    return false
+  }
 
   function emitTiles(): void {
     const tiles: ConferenceTile[] = [
@@ -378,13 +394,24 @@ export async function connectJitsiConference(input: {
 
   function syncModelMixer(): void {
     if (!modelMixer) return
-    modelMixer.setLocalMic(localMicMedia)
-    modelMixer.setRemoteStreams(
-      [...remoteAudio.entries()]
-        .filter(([id]) => !botHandle || id !== botHandle.localParticipantId())
-        .map(([, track]) => track.getOriginalStream?.() ?? null)
-        .filter((stream): stream is MediaStream => stream !== null),
-    )
+    const botId = botParticipantId()
+    // В микс — только включённый микрофон: при mute клон раньше продолжал
+    // кормить модель, а оригинал без клона подчиняется Jitsi mute/unmute.
+    // Выбор/ответ сужают микс до одного участника; HTML playback людей не трогаем.
+    const remotes = [...remoteAudio.entries()]
+      .filter(([id]) => !botId || id !== botId)
+      .flatMap(([id, track]) => {
+        const stream = conferenceAudioStream(track)
+        return stream ? [{ id, stream }] : []
+      })
+    const selected = streamsForModelHear({
+      remotes,
+      localId: localId(),
+      localStream: micLive ? localMicMedia : null,
+      focusParticipantId: modelHearOnlyId,
+    })
+    modelMixer.setLocalMic(selected.local)
+    modelMixer.setRemoteStreams(selected.remotes)
   }
 
   conference.on(confEvents.userJoined, (id: unknown, participant: unknown) => {
@@ -474,8 +501,24 @@ export async function connectJitsiConference(input: {
       const tracks = await JitsiMeetJS.createLocalTracksFromMediaStreams([
         { stream: hostStream, mediaType: 'audio' },
       ])
-      hostTracks.push(...tracks)
-      for (const track of tracks) await conference.addTrack(track)
+      const next = tracks[0]
+      if (!next) throw new Error('Не удалось создать дорожку ведущей')
+      for (const extra of tracks.slice(1)) extra.dispose()
+      const previous = hostTracks[0] ?? null
+      try {
+        if (previous) {
+          // Повторный ontrack/attachHostOutput не должен копить вторую «Ведущую».
+          await conference.replaceTrack(previous, next)
+          previous.dispose()
+          hostTracks[0] = next
+        } else {
+          await conference.addTrack(next)
+          hostTracks.push(next)
+        }
+      } catch (error) {
+        next.dispose()
+        throw error
+      }
     },
     async setMicLive(live: boolean) {
       if (live) {
@@ -506,6 +549,11 @@ export async function connectJitsiConference(input: {
       }
       return modelMixer.outputStream()
     },
+    setModelHearOnly(participantId) {
+      modelHearOnlyId = participantId
+      syncModelMixer()
+    },
+    anyoneSpeaking,
     localParticipantId: localId,
     async setCameraOn(on: boolean) {
       if (on) {

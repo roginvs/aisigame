@@ -141,9 +141,13 @@ function createDomSink(): ConferenceAudioSink & { prime: () => void } {
       audio.srcObject = stream
       if (!stream) return
       for (const track of stream.getAudioTracks()) {
-        track.addEventListener?.('unmute', () => {
-          void audio.play().catch(() => undefined)
-        })
+        track.addEventListener?.(
+          'unmute',
+          () => {
+            void audio.play().catch(() => undefined)
+          },
+          { once: true },
+        )
       }
     },
     play() {

@@ -115,6 +115,8 @@ export class RealtimeClient {
     turn: number
     isolated: boolean
   } | null = null
+  /** Isolated tool calls use conversation:none — their call_id is not in the session. */
+  private lastToolIsolated = false
   private inputStartedAt: number | null = null
   private inputItemId: string | null = null
   private transcriptionPrompt = ''
@@ -471,11 +473,15 @@ export class RealtimeClient {
     this.pendingSpeak = null
     this.speech = null
     this.toolMode = 'text'
+    this.lastToolIsolated = isolated
     this.pendingTool = { purpose, turn, name, instructions, isolated }
     this.sendToolRequest('text')
   }
 
   sendToolOutput(callId: string, output: unknown): void {
+    // У isolated tool response conversation:none — call_id в сессии нет,
+    // conversation.item.create даёт invalid_tool_call_id и только шумит в лог.
+    if (this.lastToolIsolated) return
     this.send({
       type: 'conversation.item.create',
       item: {

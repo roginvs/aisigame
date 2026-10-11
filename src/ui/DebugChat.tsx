@@ -38,8 +38,8 @@ export function ConversationChat(props?: {
             <Bubble key={entry.id} entry={entry} />
           ))}
           {props?.chat?.map((line, index) => (
-            <p key={`${line.name}-${index}`} className="bubble from-player">
-              <span>{line.name}</span>
+            <p key={`${line.name}-${index}`} className="bubble from-player bubble-typed">
+              <span>Чат · {line.name}</span>
               {line.text}
             </p>
           ))}

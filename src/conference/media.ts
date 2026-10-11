@@ -17,6 +17,13 @@ export type ConferenceMedia = {
   localMicStream: () => MediaStream | null
   /** Общий поток локального микрофона и удалённых игроков для ведущей-модели. */
   modelInputStream: () => MediaStream | null
+  /**
+   * Ограничить микс модели одним участником Jitsi; `null` — снова все.
+   * HTML/Jitsi playback для людей не трогает.
+   */
+  setModelHearOnly: (participantId: string | null) => void
+  /** Есть ли речь людей в комнате (без дорожки «Ведущей»). */
+  anyoneSpeaking: () => boolean
   localParticipantId: () => string
   subscribeTiles: (handler: (tiles: ConferenceTile[]) => void) => () => void
   bindVideo: (participantId: string, element: HTMLVideoElement | null) => void
@@ -65,6 +72,8 @@ export function createBroadcastMedia(displayName: string): ConferenceMedia & { d
     cameraOn: () => camera,
     localMicStream: () => micStream,
     modelInputStream: () => micStream,
+    setModelHearOnly() {},
+    anyoneSpeaking: () => false,
     localParticipantId: () => 'local',
     subscribeTiles(handler) {
       listeners.add(handler)

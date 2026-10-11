@@ -597,6 +597,8 @@ export default function App() {
       setConferenceLobby(false)
       setJoinerSnapshot(null)
       setJoinerPack(null)
+      conferenceChatRef.current = []
+      setConferenceChat([])
     } finally {
       tearingDownConferenceRef.current = false
     }
@@ -751,6 +753,10 @@ export default function App() {
       if (resume?.saved.chat) {
         conferenceChatRef.current = resume.saved.chat
         setConferenceChat(resume.saved.chat)
+      } else {
+        // Новая комната не должна показывать текстовый чат прошлой партии.
+        conferenceChatRef.current = []
+        setConferenceChat([])
       }
       const session = new MasterSession({
         transport: handle.transport,
