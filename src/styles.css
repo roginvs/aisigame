@@ -526,6 +526,14 @@ button.ghost.stop:disabled {
   font-size: 0.875rem;
 }
 
+.build-info {
+  margin: 2px 0 0;
+  color: #9aaabd;
+  font-size: 0.72rem;
+  letter-spacing: 0.03em;
+  text-align: center;
+}
+
 .field textarea {
   min-height: 4.8rem;
   resize: vertical;

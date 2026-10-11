@@ -4,6 +4,7 @@ import { defaultPlayerNames } from '../game/players.ts'
 import type { MatchMode } from '../conference/prefs.ts'
 import type { LinkStatus } from '../realtime/client.ts'
 import { keyFieldLabel, voiceById, voiceModels } from '../realtime/models.ts'
+import { startBuildInfo } from '../buildInfo.ts'
 import { startupStatus } from './startupStatus.ts'
 
 const packFileAccept = '.siq,.zip,.xml,application/zip,text/xml'
@@ -281,6 +282,7 @@ export function StartScreen(props: {
         />
         {busy ? <p className="status-line">{busyStatus?.trim() || startupStatus(link)}</p> : null}
         {error ? <p className="error">{error}</p> : null}
+        <p className="build-info">{startBuildInfo()}</p>
       </section>
     </main>
   )
