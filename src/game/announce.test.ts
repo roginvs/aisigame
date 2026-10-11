@@ -93,9 +93,10 @@ describe('announceInstructions', () => {
 
   it('когда ошиблись все, сначала дословный эталон, потом что неверно', () => {
     const line = announceInstructions(context({ announceKind: 'incorrect' }))
-    expect(line).toBe(
-      'Сначала произнеси правильный ответ: «Боевой Буратино». Другой ответ не придумывай. Только после этого коротко скажи, что неверно. Сразу назови очки: минус 100.',
-    )
+    expect(line).toContain('Сначала произнеси правильный ответ: «Боевой Буратино»')
+    expect(line).toContain('Другой ответ не придумывай')
+    expect(line).toContain('что неверно')
+    expect(line).toContain('минус 100')
     expect(line).not.toContain('дословно')
     expect(line.indexOf('«Боевой Буратино»')).toBeLessThan(line.indexOf('неверно'))
     expect(line).not.toContain('без тем и номиналов')
@@ -103,9 +104,9 @@ describe('announceInstructions', () => {
 
   it('когда у последнего вышло время, сначала дословный эталон', () => {
     const line = announceInstructions(context({ announceKind: 'silence' }))
-    expect(line).toBe(
-      'Сначала произнеси правильный ответ: «Боевой Буратино». Другой ответ не придумывай. Только после этого коротко скажи, что время на ответ вышло. Сразу назови очки: минус 100.',
-    )
+    expect(line).toContain('Сначала произнеси правильный ответ: «Боевой Буратино»')
+    expect(line).toContain('время на ответ вышло')
+    expect(line).toContain('минус 100')
     expect(line).not.toContain('дословно')
     expect(line.indexOf('«Боевой Буратино»')).toBeLessThan(line.indexOf('время на ответ вышло'))
   })
@@ -114,9 +115,10 @@ describe('announceInstructions', () => {
     const line = announceInstructions(
       context({ announceKind: 'repeat', playedIds: [], judgmentStatus: 'near_miss' }),
     )
-    expect(line).toContain('Повторите, пожалуйста')
+    expect(line).toContain('Исход: повтор')
+    expect(line).toContain('попроси повторить')
     expect(line).not.toContain('Боевой Буратино')
-    expect(line).not.toContain('неверно')
+    expect(line).not.toContain('Исход: неверно')
   })
 
   it('не разобранный закрытый ответ называет только эталон', () => {
@@ -140,7 +142,7 @@ describe('announceInstructions', () => {
     })
     const line = announceInstructions(sample)
     expect(verbatimAnnouncement(sample)).toBeNull()
-    expect(line.startsWith('Сначала произнеси один самый очевидный ответ из списка:')).toBe(true)
+    expect(line).toContain('Сначала произнеси один самый очевидный ответ из списка:')
     expect(line).toContain('«Солнце»')
     expect(line).toContain('не засчитан')
     expect(line).not.toContain('обрывочная')
@@ -231,24 +233,16 @@ describe('announceInstructions', () => {
     })
     const line = announceInstructions(sample)
     expect(verbatimAnnouncement(sample)).toBeNull()
-    expect(line).toBe(
-      [
-        'Попытки после кнопки, коротко: «Братство кольца».',
-        'Если одна явно называет то же, что эталон, только соседним заголовком — часть цикла вместо всего произведения, узкое название той же истории, персонаж вместо произведения — начни ровно с одной короткой фразы, что это было близко, словами игрока.',
-        'Новое название не придумывай: верное имя только из эталона, следом.',
-        'Несколько попыток не перечисляй: хватит одной, самой близкой.',
-        'Созвучие и совсем другой ответ не упоминай: тогда этой фразы нет.',
-        'Затем, или сразу если фразы про близость нет, произнеси правильный ответ: «Властелин колец».',
-        'Другой ответ не придумывай.',
-        'После ответа больше ничего не добавляй.',
-        'Не говори, что кнопку не нажали, и не предлагай выбирать следующий.',
-        'Не пересказывай задание.',
-        'Не произноси названия тем и цены.',
-      ].join(' '),
-    )
+    expect(line).toContain('Попытки после кнопки, для контекста: «Братство кольца»')
+    expect(line).toContain('можешь коротко своими словами сказать, что было близко')
+    expect(line).toContain('самой близкой')
+    expect(line).toContain('произнеси правильный ответ: «Властелин колец»')
+    expect(line).toContain('После ответа больше ничего не добавляй')
+    expect(line).toContain('Не говори, что кнопку не нажали')
     expect(line.indexOf('«Братство кольца»')).toBeLessThan(line.indexOf('«Властелин колец»'))
     expect(line).not.toContain('никто не нажал')
     expect(line).not.toContain('выбирайте следующий')
+    expect(line).not.toContain('Одна короткая фраза: верно')
   })
 
   it('в реплику про близость кладёт услышанное как есть и не велит перечислять все попытки', () => {
@@ -360,8 +354,11 @@ describe('announceInstructions', () => {
       }),
     )
     expect(line).toContain('Вася')
-    expect(line).toContain('верно')
+    expect(line).toContain('Исход: верно')
+    expect(line).toContain('Ситуация:')
+    expect(line).toContain('Цель:')
     expect(line).not.toContain('Боевой Буратино')
+    expect(line).not.toContain('синоним вроде')
   })
 
   it('в словах похвалы нет смешка: звук только в пометке, как сыграть', () => {
@@ -388,15 +385,17 @@ describe('announceInstructions', () => {
       }),
     )
     const spoken = spokenPayload(line)
-    expect(spoken).toContain('верно')
+    expect(spoken).toContain('Исход: верно')
     expect(spoken).toContain('плюс 300')
     expect(spoken).toContain('Маша')
     expect(spoken).toContain('дальше')
+    expect(spoken).toContain('Ситуация:')
     expect(spoken).not.toContain('смешок')
     expect(spoken).not.toContain('хихикаем')
     expect(spoken).not.toContain('тёпл')
     expect(spoken).not.toContain('хи-хи')
     expect(spoken).not.toContain('Боевой Буратино')
+    expect(spoken).not.toContain('синоним вроде')
     const note = playNote(line)
     expect(line).toContain('Как сыграть, вслух не читать')
     expect(note).toContain('хи-хи')
@@ -408,12 +407,14 @@ describe('announceInstructions', () => {
   it('неверный ответ без смеха и без слова «сухая» в реплике', () => {
     const line = announceInstructions(context({ announceKind: 'incorrect', playedIds: [] }))
     const spoken = spokenPayload(line)
-    expect(spoken).toContain('неверно')
+    expect(spoken).toContain('Исход: неверно')
     expect(spoken).toContain('минус 100')
+    expect(spoken).toContain('Ситуация:')
     expect(spoken).not.toContain('смешок')
     expect(spoken).not.toContain('хихи')
     expect(spoken).not.toContain('сух')
     expect(spoken).not.toContain('тёпл')
+    expect(spoken).not.toContain('синоним вроде')
     const note = playNote(line)
     expect(note).not.toContain('хи-хи')
     expect(note).not.toContain('хихикаем')
@@ -444,6 +445,8 @@ describe('welcomeInstructions', () => {
     )
     expect(line).toContain('Мотя')
     expect(line).toContain('выбрать вопрос')
+    expect(line).toContain('Ситуация:')
+    expect(line).toContain('Цель:')
     expect(line.toLowerCase()).not.toContain('номинал')
     expect(line).not.toContain('Реки')
     for (const value of [100, 200, 300, 400, 500]) {
@@ -451,11 +454,12 @@ describe('welcomeInstructions', () => {
     }
     expect(hostInstructions).not.toContain('первом приветствии')
     expect(hostInstructions).toContain('Номиналы и цены вопросов не называй')
+    expect(hostInstructions).toContain('формулируй сама по ситуации')
     expect(hostInstructions).toContain('текст вопроса')
     expect(hostInstructions).toContain('ответ пакета')
     expect(hostInstructions).not.toContain('«ах»')
     const spoken = spokenPayload(line)
-    expect(spoken).toContain('поздоровайся')
+    expect(spoken).toContain('поприветствуй')
     expect(spoken).not.toContain('смешок')
     expect(spoken).not.toContain('хихикаем')
     expect(spoken).not.toContain('тёпл')
@@ -476,6 +480,7 @@ describe('finishedInstructions', () => {
     const spoken = spokenPayload(line)
     expect(spoken).toContain('Вася — 100')
     expect(spoken).toContain('Победил Вася')
+    expect(spoken).toContain('Ситуация:')
     expect(spoken).not.toContain('смешок')
     expect(spoken).not.toContain('хихикаем')
     expect(spoken).not.toContain('улыб')
@@ -540,7 +545,11 @@ describe('falseStartInstructions', () => {
         falseStarts: { 1: 1 },
       }),
     )
+    expect(one).toContain('Ситуация:')
+    expect(one).toContain('Вася')
+    expect(one).toContain('фальстарт')
     expect(one).toContain('«Вася, фальстарт»')
+    expect(one).toContain('не обязательно дословно')
     expect(one).not.toContain('Боевой Буратино')
     const two = falseStartInstructions(
       context({
@@ -551,6 +560,8 @@ describe('falseStartInstructions', () => {
         falseStarts: { 2: 2, 1: 1 },
       }),
     )
+    expect(two).toContain('Маша')
+    expect(two).toContain('Вася')
     expect(two).toContain('«Ого, Маша и Вася, фальстарт»')
     expect(two).not.toContain('Боевой Буратино')
   })

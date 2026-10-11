@@ -22,6 +22,7 @@ export type LobbySpeechFacts = {
 export function lobbySpeechInstructions(facts: LobbySpeechFacts): string {
   const lines: string[] = [
     'Ты ведущая в лобби онлайн-игры до старта партии. Тон тёплый, чуть кокетливый.',
+    'Ситуация ниже — контекст, не скрипт: сформулируй реплику сама, живо и по делу.',
     'Не читай проценты загрузки по одному. Не проси мастера нажать «Начать игру».',
     'Можно собрать несколько событий в одну фразу, если они пришли подряд.',
     'Ты слышишь недавний разговор игроков: можешь коротко и естественно его прокомментировать, ответить или поддержать беседу.',
@@ -37,7 +38,7 @@ export function lobbySpeechInstructions(facts: LobbySpeechFacts): string {
   }
   if (facts.kind === 'opened') {
     lines.push(`Игра создана. Пакет: «${facts.packName}». ${facts.packSummary}`)
-    lines.push('Скажи, что ждём игроков по ссылке.')
+    lines.push('Цель: дать понять, что комната открыта и ждём игроков по ссылке.')
   }
   lines.push('Состав и статусы:')
   for (const entry of facts.roster.filter((item) => !item.hidden)) {

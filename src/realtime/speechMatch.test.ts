@@ -56,8 +56,9 @@ describe('isolatedCue', () => {
       take: 1,
     })
     expect(response.conversation).toBe('none')
-    expect(response.instructions).toContain('не произноси его')
+    expect(response.instructions).toContain('не произноси правильный ответ')
     expect(response.instructions).toContain('без предисловия')
+    expect(response.instructions).toContain('своими словами')
     expect(response.input[0]?.content[0]?.text).toContain('плюс 100')
     expect(response.input[0]?.content[0]?.text).not.toContain('Вивальди')
   })
@@ -77,6 +78,7 @@ describe('isolatedCue', () => {
     expect(said).not.toContain('хихикаем')
     expect(said).not.toContain('хи-хи')
     expect(response.instructions).toContain('без предисловия')
+    expect(response.instructions).toContain('своими словами')
     expect(response.instructions).toContain('хи-хи')
     expect(response.instructions).toContain('смешок')
     expect(response.instructions).toContain('не читай')

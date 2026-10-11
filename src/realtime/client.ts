@@ -130,7 +130,7 @@ export class RealtimeClient {
   onLink: (patch: Partial<LinkStatus>) => void = () => {}
   onFailure: (message: string) => void = () => {}
   onAudioFinished: (info: { purpose: string; turn: number }) => void = () => {}
-  onToolCall: (call: ToolCall | null, purpose: string) => void = () => {}
+  onToolCall: (call: ToolCall | null, purpose: string, turn: number) => void = () => {}
   onSpeechStarted: () => void = () => {}
   onSpeechStopped: (info: { durationMs: number; itemId: string | null }) => void = () => {}
 
@@ -757,8 +757,15 @@ export class RealtimeClient {
       // Не трогаем speech: оценка может прийти уже после таймаута, когда
       // announce/read уже идёт. Раньше здесь обнуляли речь — stopped не
       // вызывал finishSpeech, и партия зависала в announcing.
-      this.pendingTool = null
-      this.onToolCall(call, call.name === 'selectQuestion' ? 'select' : 'judge')
+      const turn = Number(earlyMeta.turn)
+      const purpose = call.name === 'selectQuestion' ? 'select' : 'judge'
+      const pending = this.pendingTool
+      if (pending && !Number.isNaN(turn) && turn !== pending.turn) {
+        pushTrace('note', `поздний ${call.name} turn=${turn}, жду ${pending.turn}`)
+        return
+      }
+      if (pending && (Number.isNaN(turn) || turn === pending.turn)) this.pendingTool = null
+      this.onToolCall(call, purpose, Number.isNaN(turn) ? -1 : turn)
       return
     }
     if (!this.speech) return

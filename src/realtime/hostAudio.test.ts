@@ -312,6 +312,47 @@ describe('host audio completion', () => {
     expect(finished).toEqual(['announce'])
   })
 
+  it('поздний selectQuestion не сбрасывает новый pending tool', () => {
+    const { feed } = open()
+    const tools: Array<{ purpose: string; turn: number }> = []
+    client!.onToolCall = (_call, purpose, turn) => {
+      tools.push({ purpose, turn })
+    }
+    client!.requestTool('select', 2, 'selectQuestion', 'Вызови selectQuestion.', true)
+    feed({
+      type: 'response.done',
+      response: {
+        id: 'resp-select-stale',
+        metadata: { purpose: 'select', turn: '1' },
+        output: [
+          {
+            type: 'function_call',
+            name: 'selectQuestion',
+            call_id: 'call-stale',
+            arguments: JSON.stringify({ themeId: 'p', value: 400, confident: true }),
+          },
+        ],
+      },
+    })
+    expect(tools).toEqual([])
+    feed({
+      type: 'response.done',
+      response: {
+        id: 'resp-select-live',
+        metadata: { purpose: 'select', turn: '2' },
+        output: [
+          {
+            type: 'function_call',
+            name: 'selectQuestion',
+            call_id: 'call-live',
+            arguments: JSON.stringify({ themeId: 's', value: 400, confident: true }),
+          },
+        ],
+      },
+    })
+    expect(tools).toEqual([{ purpose: 'select', turn: 2 }])
+  })
+
   async function reachReading(feed: (event: object) => void, sent: string[]) {
     vi.spyOn(client!, 'connect').mockResolvedValue(undefined)
     const actor = createActor(gameMachine)

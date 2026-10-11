@@ -51,6 +51,8 @@ export function attachController(options: {
   let connectToken = 0
   let speechTurn = 0
   let toolTurn = 0
+  /** Пока ждём select/judge: поздний response.done с другим turn не принимаем. */
+  let expectingToolTurn: number | null = null
   let choiceToken = 0
   let choiceHeard = ''
   let answerItemId: string | null = null
@@ -149,7 +151,13 @@ export function attachController(options: {
       actor.send({ type: 'PLAYER_SPEECH_STARTED' })
       return
     }
-    if (path === 'answering.waiting' || path === 'answering.hearing') {
+    if (path === 'answering.waiting') {
+      // Подсказка про выключенный микрофон не должна звучать поверх ответа.
+      client.interruptSpeech()
+      actor.send({ type: 'PLAYER_SPEECH_STARTED' })
+      return
+    }
+    if (path === 'answering.hearing') {
       actor.send({ type: 'PLAYER_SPEECH_STARTED' })
     }
   }
@@ -179,18 +187,23 @@ export function attachController(options: {
     if (statePath(actor.getSnapshot().value) === 'choosing.listening') void considerChoice(durationMs, itemId)
     if (statePath(actor.getSnapshot().value).startsWith('buzzing')) void considerBlurt(durationMs, itemId)
   }
-  client.onToolCall = (call, purpose) => {
+  client.onToolCall = (call, purpose, turn) => {
     const path = statePath(actor.getSnapshot().value)
     if (path === 'stopped') return
+    if (expectingToolTurn === null || turn !== expectingToolTurn) {
+      if (call) client.sendToolOutput(call.callId, { accepted: false, reason: 'Вызов уже не актуален' })
+      return
+    }
     if (path === 'paused') {
       held.push(() => {
-        if (purpose === 'select') handleSelection(call)
-        if (purpose === 'judge') handleJudgment(call)
+        if (expectingToolTurn === null || turn !== expectingToolTurn) return
+        if (purpose === 'select') handleSelection(call, turn)
+        if (purpose === 'judge') handleJudgment(call, turn)
       })
       return
     }
-    if (purpose === 'select') handleSelection(call)
-    if (purpose === 'judge') handleJudgment(call)
+    if (purpose === 'select') handleSelection(call, turn)
+    if (purpose === 'judge') handleJudgment(call, turn)
   }
 
   let previousRound = actor.getSnapshot().context.roundIndex
@@ -240,6 +253,8 @@ export function attachController(options: {
         const pending = held.splice(0)
         if (pending.length) {
           for (const job of pending) job()
+          // Накопленное могло не сменить фазу (micWarning и т.п.) — микрофон всё равно вернуть.
+          if (statePath(actor.getSnapshot().value) === path) client.setMicEnabled(micOpen(path))
           return
         }
         client.setMicEnabled(micOpen(path))
@@ -279,12 +294,16 @@ export function attachController(options: {
       const line = context.clarifyReason
       speak('chooserHandoff', verbatimSpeech(line), line)
     }
+    if (path === 'choosing.listening' || path === 'choosing.clarifying' || path === 'chooserHandoff') {
+      expectingToolTurn = null
+    }
     if (path === 'choosing.listening') {
       client.setSpeechSpeed(gameConfig.speechSpeed)
       client.setTranscriptionPrompt(listeningPrompt(context))
       client.setMicEnabled(true)
     }
     if (path === 'choosing.resolving') {
+      client.interruptSpeech()
       client.setMicEnabled(false)
       requestSelection(context)
     }
@@ -292,7 +311,10 @@ export function attachController(options: {
       client.setTranscriptionPrompt(listeningPrompt(context))
       speakWhileListening('clarify', clarifyInstructions(context))
     }
-    if (path === 'flashing') client.setMicEnabled(false)
+    if (path === 'flashing') {
+      client.interruptSpeech()
+      client.setMicEnabled(false)
+    }
     if (path === 'reading.sealed') {
       const question = questionById(context.questions, context.activeQuestionId)
       const text = question ? questionSpeech(question) : ''
@@ -304,7 +326,11 @@ export function attachController(options: {
       client.setMicEnabled(true)
       armBuzzerWarning(context.phaseDurationMs ?? gameConfig.buzzerMs)
     }
-    if (path === 'falseStartCue') speak('falseStart', falseStartInstructions(context))
+    if (path === 'falseStartCue') {
+      speak('falseStart', falseStartInstructions(context))
+      // Как на чтении: микрофон открыт, чтобы запомнить перебивание для лекции про кнопку.
+      client.setMicEnabled(true)
+    }
     if ((from.startsWith('reading') || from === 'falseStartCue') && path.startsWith('answering')) client.interruptSpeech()
     if (path === 'buzzing.open') {
       openBuzzerEar()
@@ -315,6 +341,7 @@ export function attachController(options: {
       client.setTranscriptionPrompt(answerListeningPrompt(questionById(context.questions, context.activeQuestionId)?.answers ?? []))
     }
     if (path === 'answering.waiting') client.setMicEnabled(true)
+    if (path === 'announcing' || path.startsWith('answering')) expectingToolTurn = null
     if (path === 'judging') {
       client.setMicEnabled(false)
       void requestJudgment(context)
@@ -347,7 +374,8 @@ export function attachController(options: {
 
   function speakWhileListening(purpose: SpeechPurpose, instructions: string, expect?: string): void {
     speechTurn += 1
-    client.requestSpeech(purpose, speechTurn, instructions, expect, Boolean(expect))
+    // conversation:none — подсказка про микрофон и уточнение выбора не продолжают лобби/партию.
+    client.requestSpeech(purpose, speechTurn, instructions, expect, true)
     client.setMicEnabled(true)
   }
 
@@ -365,6 +393,7 @@ export function attachController(options: {
 
   function requestSelection(context: GameContext): void {
     toolTurn += 1
+    expectingToolTurn = toolTurn
     client.requestTool('select', toolTurn, 'selectQuestion', selectionInstructions(context, choiceHeard), true)
   }
 
@@ -480,6 +509,7 @@ export function attachController(options: {
     answerConfidence = heard.confidence
     if (!heard.arrived) pushPlayerLine('речь не распознана')
     toolTurn += 1
+    expectingToolTurn = toolTurn
     client.requestTool(
       'judge',
       toolTurn,
@@ -489,7 +519,12 @@ export function attachController(options: {
     )
   }
 
-  function handleSelection(call: ToolCall | null): void {
+  function handleSelection(call: ToolCall | null, turn: number): void {
+    if (expectingToolTurn === null || turn !== expectingToolTurn) {
+      if (call) client.sendToolOutput(call.callId, { accepted: false, reason: 'Выбор уже не актуален' })
+      return
+    }
+    expectingToolTurn = null
     const path = statePath(actor.getSnapshot().value)
     if (!path.startsWith('choosing')) {
       if (call) client.sendToolOutput(call.callId, { accepted: false, reason: 'Выбор уже не актуален' })
@@ -553,7 +588,12 @@ export function attachController(options: {
     actor.send({ type: 'QUESTION_SELECTED', themeId: picked.themeId, value: picked.value })
   }
 
-  function handleJudgment(call: ToolCall | null): void {
+  function handleJudgment(call: ToolCall | null, turn: number): void {
+    if (expectingToolTurn === null || turn !== expectingToolTurn) {
+      if (call) client.sendToolOutput(call.callId, { accepted: false, reason: 'Попытка уже закрыта' })
+      return
+    }
+    expectingToolTurn = null
     const snapshot = actor.getSnapshot()
     if (statePath(snapshot.value) !== 'judging') {
       if (call) client.sendToolOutput(call.callId, { accepted: false, reason: 'Попытка уже закрыта' })
@@ -722,56 +762,87 @@ const giggleNote =
 /** Ошибка без смеха. В слова реплики не входит. */
 const dryNote = 'Ровно и коротко, без смеха. Не произноси «сухая фраза» и не читай ремарку в скобках.'
 
+/** Свободная реплика: ситуация, цель и жёсткие рамки — без готового скрипта. */
+function hostCue(parts: { situation: string; goal: string; constraints?: string[] }): string {
+  const limits = (parts.constraints ?? []).filter(Boolean)
+  return [
+    `Ситуация: ${parts.situation}`,
+    `Цель: ${parts.goal}`,
+    limits.length ? `Ограничения: ${limits.join(' ')}` : '',
+  ]
+    .filter(Boolean)
+    .join('\n')
+}
+
+function scoreRoster(context: GameContext): string {
+  return context.players.map((player) => `${player.name} — ${player.score}`).join(', ')
+}
+
+const boardSecrets =
+  'Темы и цены вопросов не называй и не перечисляй: они на табло. Ответ пакета не выдумывай и не раскрывай, пока задание прямо не попросит произнести эталон. Говори по-русски, живо, обычно одна-две короткие фразы, без предисловия.'
+
 /** Подсказка на выборе: модель придумывает фразу, дословного текста нет. */
 export function mutedMicCue(playerName: string): string {
   const name = playerName.trim() || 'Игрок'
-  return `
-Имя игрока: ${name}.
-Сейчас ${name} выбирает вопрос, но микрофон выключен, и ведущая ничего не слышит.
-Скажи одно новое короткое предложение: обратись по имени и скажи, что микрофон не включён.
-Каждый раз другими словами. Смысл можно сказать так: «${name}, у тебя мик не включен» или «${name}, включи микрофон», но не повторяй прошлую реплику и не читай примеры подряд.
-Не называй темы и цены. Не выбирай ячейку. Не произноси правильный ответ. Без предисловия.
-`.trim()
-}
-
-function sayLine(parts: string[]): string {
-  return parts.filter(Boolean).join(' ').replace(/\s+/g, ' ').trim()
+  return hostCue({
+    situation: `${name} сейчас выбирает вопрос, но микрофон выключен — ведущая комнату не слышит.`,
+    goal: `Коротко обратись к ${name} по имени и дай понять, что микрофон не включён. Каждый раз новыми словами; не повторяй прошлую реплику.`,
+    constraints: [
+      boardSecrets,
+      'Ячейку не выбирай. Правильный ответ не произноси.',
+    ],
+  })
 }
 
 export function welcomeInstructions(context: GameContext): string {
   const round = currentRound(context, context.roundIndex)
   const chooser = playerName(context.players, context.chooserId) || 'игрока'
-  const spoken = `
-Одной короткой фразой поздоровайся и сразу позови выбрать вопрос.
-Сейчас вопрос выбирает ${chooser}. Можно обратиться по имени.
-Пакет «${context.packName}», сейчас «${round?.name ?? 'раунд'}».
-Темы не называй: они на табло.
-Цены вопросов не называй и не перечисляй: они тоже на табло.
-Больше ничего не добавляй. Не задавай вопрос викторины и не называй ответы.
-`.trim()
+  const spoken = hostCue({
+    situation: `Партия только началась. Пакет «${context.packName}», сейчас «${round?.name ?? 'раунд'}». Вопрос выбирает ${chooser}.`,
+    goal: `Коротко поприветствуй и сразу позови выбрать вопрос. Можно обратиться к ${chooser} по имени.`,
+    constraints: [boardSecrets, 'Вопрос викторины не задавай. Ничего лишнего после приглашения выбрать.'],
+  })
   return withPlayNote(spoken, giggleNote)
 }
 
 export function bridgeInstructions(context: GameContext): string {
   const round = currentRound(context, context.roundIndex)
-  const scores = context.players.map((player) => `${player.name} — ${player.score}`).join(', ')
+  const scores = scoreRoster(context)
   const chooser = playerName(context.players, context.chooserId) || 'игрока'
-  const scoreLine = `Сначала коротко назови счёт каждого: ${scores}.`
   if (round?.kind === 'final') {
-    return `${scoreLine} Затем одной фразой объяви финал и попроси выбрать одну тему. Можно обратиться по имени к тому, кто выбирает: ${chooser}. Названия тем не перечисляй.`
+    return hostCue({
+      situation: `Обычный раунд закончился. Счёт: ${scores}. Дальше финал; тему выбирает ${chooser}.`,
+      goal: `Коротко назови счёт каждого, объяви финал и попроси выбрать одну тему. Можно обратиться к ${chooser} по имени.`,
+      constraints: [boardSecrets, 'Названия тем финала не перечисляй.'],
+    })
   }
-  return `${scoreLine} Затем одной фразой объяви раунд «${round?.name ?? 'следующий'}» и попроси выбрать вопрос. Можно обратиться по имени к тому, кто выбирает: ${chooser}. Темы и номиналы не перечисляй.`
+  return hostCue({
+    situation: `Раунд закончился. Счёт: ${scores}. Дальше «${round?.name ?? 'следующий раунд'}»; вопрос выбирает ${chooser}.`,
+    goal: `Коротко назови счёт каждого, объяви следующий раунд и попроси выбрать вопрос. Можно обратиться к ${chooser} по имени.`,
+    constraints: [boardSecrets],
+  })
 }
 
 function betInstructions(context: GameContext): string {
   const playerId = context.finalists[context.finalCursor]
   const player = context.players.find((item) => item.id === playerId)
-  return `Одной фразой попроси ${player?.name ?? 'игрока'} назвать ставку от 1 до ${player?.score ?? 0}. Не называй вопрос и не спрашивай остальных.`
+  const name = player?.name ?? 'игрока'
+  const max = player?.score ?? 0
+  return hostCue({
+    situation: `Финал: ${name} называет ставку. На счету ${max}.`,
+    goal: `Коротко попроси ${name} назвать ставку от 1 до ${max}. Можно по имени; формулировку выбери сам.`,
+    constraints: ['Вопрос не называй и не подсказывай. Остальных пока не спрашивай. Одна короткая фраза.'],
+  })
 }
 
 function turnInstructions(context: GameContext): string {
   const player = context.players.find((item) => item.id === context.activePlayerId)
-  return `Одной короткой фразой скажи, что отвечает ${player?.name ?? 'игрок'}. Вопрос заново не читай и ответ не подсказывай.`
+  const name = player?.name ?? 'игрок'
+  return hostCue({
+    situation: `В финале отвечает ${name}.`,
+    goal: `Коротко передай ход: сейчас отвечает ${name}. Можно по имени, своими словами.`,
+    constraints: ['Вопрос заново не читай. Ответ не подсказывай и не намекай. Одна короткая фраза.'],
+  })
 }
 
 function selectionInstructions(context: GameContext, heard: string): string {
@@ -807,13 +878,12 @@ confident=true только если в реплике ясно есть и те
 
 function clarifyInstructions(context: GameContext): string {
   const chooser = playerName(context.players, context.chooserId) || 'игрока'
-  return `
-Одной короткой фразой попроси выбрать вопрос ещё раз.
-Можно обратиться по имени к тому, кто выбирает: ${chooser}.
-Причина: ${context.clarifyReason || 'выбор неясен'}.
-Темы и номиналы не перечисляй.
-Не открывай вопрос сама и не называй ответ.
-`.trim()
+  const reason = context.clarifyReason || 'выбор неясен'
+  return hostCue({
+    situation: `${chooser} выбирает вопрос, но последняя реплика не открыла ячейку. Причина: ${reason}.`,
+    goal: `Коротко и по-человечески попроси выбрать ещё раз. Можно обратиться к ${chooser} по имени; можно мягко опереться на причину, не читая её дословно.`,
+    constraints: [boardSecrets, 'Ячейку сама не открывай. Ответ пакета не называй.'],
+  })
 }
 
 function readInstructions(text: string): string {
@@ -864,8 +934,13 @@ export function falseStartInstructions(context: GameContext): string {
   const names = context.players
     .filter((player) => context.falseStarts[player.id] !== undefined)
     .map((player) => player.name)
-  const line = falseStartLine(names)
-  return `Одной короткой фразой скажи только: «${line}». Правильный ответ не называй. Вопрос не читай.`
+  const listed = names.length ? names.join(', ') : 'игрок'
+  const example = falseStartLine(names)
+  return hostCue({
+    situation: `На этом вопросе фальстарт: ${listed}. Окно кнопки ещё не началось.`,
+    goal: `Одной короткой живой фразой назови этих игроков и скажи, что был фальстарт. Пример тона: «${example}» — можно близко своими словами, не обязательно дословно.`,
+    constraints: ['Правильный ответ не называй. Вопрос не читай. Ничего про счёт и темы.'],
+  })
 }
 
 /** Через сколько мс пищать на окне кнопки. Только полные десять секунд, за две до конца. */
@@ -884,11 +959,11 @@ function closeGuessPreface(heard: readonly string[]): string {
   if (!lines.length) return ''
   const quoted = lines.map((item) => `«${item}»`).join('; ')
   return [
-    `Попытки после кнопки, коротко: ${quoted}.`,
-    'Если одна явно называет то же, что эталон, только соседним заголовком — часть цикла вместо всего произведения, узкое название той же истории, персонаж вместо произведения — начни ровно с одной короткой фразы, что это было близко, словами игрока.',
+    `Попытки после кнопки, для контекста: ${quoted}.`,
+    'Если одна явно называет то же, что эталон, только соседним заголовком — часть цикла вместо всего произведения, узкое название той же истории, персонаж вместо произведения — можешь коротко своими словами сказать, что было близко, опираясь на слова игрока.',
     'Новое название не придумывай: верное имя только из эталона, следом.',
     'Несколько попыток не перечисляй: хватит одной, самой близкой.',
-    'Созвучие и совсем другой ответ не упоминай: тогда этой фразы нет.',
+    'Созвучие и совсем другой ответ не упоминай: тогда фразы про близость нет.',
   ].join(' ')
 }
 
@@ -918,7 +993,8 @@ export function verbatimAnnouncement(context: GameContext): string | null {
 export function announceInstructions(context: GameContext): string {
   const question = questionById(context.questions, context.activeQuestionId)
   const player = context.players.find((item) => item.id === context.activePlayerId)
-  const named = mayName(player?.name ?? '')
+  const playerNameLine = player?.name ?? ''
+  const named = mayName(playerNameLine)
   const kind: AnnounceKind | null = context.announceKind
   const finalRound = currentRound(context, context.roundIndex)?.kind === 'final'
   const finalNote = finalRound ? 'Не предлагай выбирать следующий вопрос.' : ''
@@ -930,54 +1006,69 @@ export function announceInstructions(context: GameContext): string {
   const minus = delta > 0 ? `Сразу назови очки: минус ${delta}.` : ''
   if (kind === 'correct' && hidden) {
     return withPlayNote(
-      sayLine([
-        'Одна короткая фраза: верно, или синоним вроде «правильно», «отлично».',
-        plus,
-        named,
-        'Правильный ответ не произноси.',
-        finalNote,
-      ]),
+      hostCue({
+        situation: `Исход: верно. Отвечал ${playerNameLine || 'игрок'}; эталон пакета вслух не называют.`,
+        goal: `Коротко подтверди, что ответ верный, и сразу назови плюс очков. ${plus} ${named} Формулировку выбери сам.`,
+        constraints: [
+          'Правильный ответ пакета не произноси и не намекай.',
+          finalNote,
+          'Одна-две короткие фразы, без предисловия.',
+        ],
+      }),
       giggleNote,
     )
   }
   if (kind === 'correct') {
     return withPlayNote(
-      sayLine([
-        'Одна короткая фраза: верно, или синоним вроде «правильно», «отлично».',
-        plus,
-        named,
-        'Можно добавить «дальше».',
-        'Правильный ответ не произноси. Не повторяй вопрос.',
-        finalNote,
-      ]),
+      hostCue({
+        situation: `Исход: верно. Отвечал ${playerNameLine || 'игрок'}; эталон пакета вслух не называют.`,
+        goal: `Коротко подтверди, что ответ верный, сразу назови плюс очков и при желании мягко позови дальше. ${plus} ${named}`,
+        constraints: [
+          'Правильный ответ пакета не произноси. Вопрос не повторяй.',
+          finalNote,
+          'Одна-две короткие фразы, без предисловия.',
+        ],
+      }),
       giggleNote,
     )
   }
   if (kind === 'incorrect' && !publish) {
     return withPlayNote(
-      sayLine([
-        'Одна короткая фраза: неверно, или синоним вроде «нет», «мимо».',
-        minus,
-        named,
-        'Правильный ответ не называй и не намекай. Не зови нажимать кнопку.',
-        finalNote,
-      ]),
+      hostCue({
+        situation: `Исход: неверно. Отвечал ${playerNameLine || 'игрок'}; ячейку ещё можно перехватить.`,
+        goal: `Коротко отметь, что ответ неверный, и сразу назови минус очков. ${minus} ${named}`,
+        constraints: [
+          'Правильный ответ не называй и не намекай. Не зови нажимать кнопку.',
+          finalNote,
+          'Без утешений и без длинных комментариев.',
+        ],
+      }),
       dryNote,
     )
   }
   if (kind === 'incorrect') {
     const rest = [named, minus, finalNote].filter(Boolean).join(' ')
-    return `${withCloseGuess(cue, context)} Только после этого коротко скажи, что неверно.${rest ? ` ${rest}` : ''}`
+    return `${withCloseGuess(cue, context)} Только после эталона коротко скажи, что неверно.${rest ? ` ${rest}` : ''}`
   }
   if (kind === 'silence' && !publish) {
-    return `Одна короткая фраза: игрок не ответил. ${minus} ${named} Правильный ответ не называй. Не зови нажимать кнопку. ${finalNote}`.replace(/\s+/g, ' ').trim()
+    return hostCue({
+      situation: `Исход: молчание. ${playerNameLine || 'Игрок'} нажал кнопку, но не ответил; ячейку ещё можно перехватить.`,
+      goal: `Коротко скажи, что ответа не было, и сразу назови минус очков. ${minus} ${named}`,
+      constraints: ['Правильный ответ не называй. Не зови нажимать кнопку.', finalNote],
+    })
   }
   if (kind === 'silence') {
     const rest = [named, minus, finalNote].filter(Boolean).join(' ')
-    return `${withCloseGuess(cue, context)} Только после этого коротко скажи, что время на ответ вышло.${rest ? ` ${rest}` : ''}`
+    return `${withCloseGuess(cue, context)} Только после эталона коротко скажи, что время на ответ вышло.${rest ? ` ${rest}` : ''}`
   }
   if (kind === 'repeat') {
-    return 'Одной короткой фразой скажи только: «Повторите, пожалуйста». Правильный ответ не называй и не намекай. Не говори, верно это или нет, и не зови нажимать кнопку.'
+    return hostCue({
+      situation: `Исход: повтор. Реплика похожа на эталон созвучием, очки пока не меняются; отвечает тот же игрок.`,
+      goal: 'Коротко и ясно попроси повторить ответ, без оценки верности.',
+      constraints: [
+        'Правильный ответ не называй и не намекай. Не говори, верно это или нет. Не зови нажимать кнопку. Одна короткая фраза.',
+      ],
+    })
   }
   if (kind === 'nobody') {
     const exact = verbatimAnnouncement(context)
@@ -988,7 +1079,7 @@ export function announceInstructions(context: GameContext): string {
     const extra = [
       finalRound ? 'Не предлагай выбирать следующий вопрос.' : '',
       remind
-        ? 'Затем одной короткой фразой скажи, что ответ называют только после кнопки.'
+        ? 'Затем коротко своими словами напомни, что ответ засчитывают только после кнопки.'
         : close
           ? 'После ответа больше ничего не добавляй.'
           : 'Больше ничего не добавляй.',
@@ -1001,21 +1092,40 @@ export function announceInstructions(context: GameContext): string {
   if (kind === 'unclear' && publish) {
     const exact = verbatimAnnouncement(context)
     if (exact) return exact
-    return `${cue} Затем одной короткой фразой скажи, что ответ не засчитан и очки не изменились, и предложи выбрать следующий вопрос. Темы и номиналы не перечисляй. ${finalNote}`.trim()
+    return hostCue({
+      situation: 'Исход: неясный ответ; ячейка закрыта, эталон можно назвать.',
+      goal: `${cue} Затем коротко скажи, что ответ не засчитан и очки не изменились, и предложи выбрать следующий вопрос.`,
+      constraints: [boardSecrets, finalNote],
+    })
   }
   if (context.judgmentStatus === 'needs_clarification') {
-    return `Одной фразой скажи, что ответ близок, но сейчас очки не меняются. Предложи выбрать следующий вопрос. Темы и номиналы не перечисляй. ${finalNote}`
+    return hostCue({
+      situation: 'Ответ был близок, но очки сейчас не меняются; ячейка закрывается.',
+      goal: 'Коротко скажи, что было близко, очки не меняются, и предложи выбрать следующий вопрос.',
+      constraints: [boardSecrets, finalNote],
+    })
   }
-  return `Одной фразой скажи, что ответ не удалось засчитать и очки не изменились. Затем предложи выбрать следующий вопрос. Темы и номиналы не перечисляй. ${finalNote}`
+  return hostCue({
+    situation: 'Ответ не удалось уверенно засчитать; очки не изменились.',
+    goal: 'Коротко скажи, что ответ не засчитан и очки не изменились, затем предложи выбрать следующий вопрос.',
+    constraints: [boardSecrets, finalNote],
+  })
 }
 
 export function finishedInstructions(context: GameContext): string {
-  const scores = context.players.map((player) => `${player.name} — ${player.score}`).join(', ')
+  const scores = scoreRoster(context)
   const best = Math.max(...context.players.map((player) => player.score))
   const leaders = context.players.filter((player) => player.score === best)
   const outcome =
     leaders.length === 1
       ? `Победил ${leaders[0]?.name ?? 'игрок'} со счётом ${best}.`
       : `Ничья: ${leaders.map((player) => player.name).join(' и ')}, по ${best}.`
-  return withPlayNote(`Подведи итог двумя короткими фразами. Счёт: ${scores}. ${outcome}`, giggleNote)
+  return withPlayNote(
+    hostCue({
+      situation: `Партия окончена. Счёт: ${scores}. ${outcome}`,
+      goal: 'Подведи итог двумя короткими живыми фразами: назови счёт и победителя или ничью.',
+      constraints: ['Не начинай новую игру. Тем и цен не перечисляй. Без предисловия.'],
+    }),
+    giggleNote,
+  )
 }

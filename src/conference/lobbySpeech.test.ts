@@ -13,6 +13,7 @@ describe('lobbySpeechInstructions', () => {
     expect(instructions).toContain('можешь коротко и естественно его прокомментировать, ответить или поддержать беседу')
     expect(instructions).toContain('не больше двух коротких предложений')
     expect(instructions).toContain('лучше коротко подхвати их разговор')
+    expect(instructions).toContain('контекст, не скрипт')
     expect(instructions).not.toContain('Не отвечай на разговоры игроков')
   })
 })

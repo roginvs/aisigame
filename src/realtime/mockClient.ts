@@ -30,7 +30,7 @@ export class MockRealtimeClient implements GameVoice {
   onLink: (patch: Partial<LinkStatus>) => void = () => {}
   onFailure: (message: string) => void = () => {}
   onAudioFinished: (info: { purpose: string; turn: number }) => void = () => {}
-  onToolCall: (call: ToolCall | null, purpose: string) => void = () => {}
+  onToolCall: (call: ToolCall | null, purpose: string, turn: number) => void = () => {}
   onSpeechStarted: () => void = () => {}
   onSpeechStopped: (info: { durationMs: number; itemId: string | null }) => void = () => {}
 
@@ -121,13 +121,13 @@ export class MockRealtimeClient implements GameVoice {
     }, wait)
   }
 
-  requestTool(purpose: string, _turn: number, name: string, instructions: string, _isolated = false): void {
+  requestTool(purpose: string, turn: number, name: string, instructions: string, _isolated = false): void {
     const call: ToolCall = {
       name,
       callId: `mock-call-${++this.callSeq}`,
       arguments: name === 'submitAnswerJudgment' ? judgeArguments(instructions) : selectArguments(instructions),
     }
-    window.setTimeout(() => this.onToolCall(call, purpose), speechPauseMs)
+    window.setTimeout(() => this.onToolCall(call, purpose, turn), speechPauseMs)
   }
 
   sendToolOutput(_callId: string, _output: unknown): void {}
@@ -169,7 +169,10 @@ function hostLine(purpose: string, instructions = ''): string {
   if (purpose === 'bet') return 'Назовите ставку.'
   if (purpose === 'turn') return 'Ваш ответ.'
   if (purpose === 'micWarning') {
-    const name = /Имя игрока:\s*(.+)/.exec(instructions)?.[1]?.split('\n')[0]?.trim()
+    const name =
+      /Имя игрока:\s*(.+)/.exec(instructions)?.[1]?.split('\n')[0]?.trim() ||
+      /обратись к\s+(.+?)\s+по имени/i.exec(instructions)?.[1]?.trim() ||
+      /выбирает вопрос[\s\S]*?([А-ЯA-Z][^\s,]+)/.exec(instructions)?.[1]?.trim()
     return name ? `${name}, включи микрофон.` : 'Микрофон выключен.'
   }
   if (purpose === 'falseStart') {
@@ -181,12 +184,16 @@ function hostLine(purpose: string, instructions = ''): string {
 
 function announceLine(instructions: string): string {
   const folded = instructions.toLowerCase().replaceAll('ё', 'е')
-  if (folded.includes('повторите, пожалуйста') && folded.includes('скажи только')) return 'Повторите, пожалуйста.'
-  if (folded.includes('фраза: верно')) return 'Верно.'
-  if (folded.includes('фраза: неверно') || folded.includes('скажи, что неверно')) return 'Неверно.'
-  if (folded.includes('игрок не ответил') || folded.includes('время на ответ вышло')) return 'Время вышло.'
   const quoted = [...instructions.matchAll(/«([^»]+)»/g)].map((match) => match[1]?.trim() ?? '').filter(Boolean)
   if (folded.includes('произнеси') && quoted[0]) return quoted[0]
+  if (folded.includes('исход: повтор') || folded.includes('попроси повторить')) return 'Повторите, пожалуйста.'
+  if (folded.includes('исход: верно') || folded.includes('ответ верный')) return 'Верно.'
+  if (folded.includes('исход: неверно') || folded.includes('что неверно') || folded.includes('ответ неверный')) {
+    return 'Неверно.'
+  }
+  if (folded.includes('исход: молчание') || folded.includes('время на ответ вышло') || folded.includes('ответа не было')) {
+    return 'Время вышло.'
+  }
   return 'Дальше.'
 }
 

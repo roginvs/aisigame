@@ -41,7 +41,7 @@ class RewritingClient extends MockRealtimeClient {
     isolated = false,
   ): void {
     const forward = this.onToolCall
-    this.onToolCall = (call, toolPurpose) => {
+    this.onToolCall = (call, toolPurpose, turn) => {
       this.onToolCall = forward
       const rewritten: ToolCall | null = call
         ? {
@@ -55,7 +55,7 @@ class RewritingClient extends MockRealtimeClient {
             },
           }
         : null
-      forward(rewritten, toolPurpose)
+      forward(rewritten, toolPurpose, turn)
     }
     super.requestTool(purpose, turn, name, instructions, isolated)
   }
@@ -226,12 +226,88 @@ describe('attachController answer listening', () => {
 
     actions().remindMutedChooser('Маша')
     const cue = String(requestSpeech.mock.calls.at(-1)?.[2] ?? '')
-    expect(requestSpeech).toHaveBeenLastCalledWith('micWarning', expect.any(Number), cue, undefined, false)
-    expect(cue).toContain('Имя игрока: Маша')
-    expect(cue).toContain('другими словами')
+    expect(requestSpeech).toHaveBeenLastCalledWith('micWarning', expect.any(Number), cue, undefined, true)
+    expect(cue).toContain('Маша')
+    expect(cue).toContain('Ситуация:')
+    expect(cue).toContain('новыми словами')
     expect(cue).not.toContain('микрофон-то выключен')
     await vi.advanceTimersByTimeAsync(80)
     expect(statePath(actor.getSnapshot().value)).toBe('choosing.listening')
+
+    stop()
+    actor.stop()
+  })
+
+  it('после паузы с завершённой подсказкой про микрофон снова открывает микрофон', async () => {
+    const client = new MockRealtimeClient()
+    const setMic = vi.spyOn(client, 'setMicEnabled')
+    const { actor, stop, actions } = await boot(client)
+    expect(statePath(actor.getSnapshot().value)).toBe('choosing.listening')
+
+    actions().remindMutedChooser('Маша')
+    actor.send({ type: 'PAUSE', path: 'choosing.listening' })
+    expect(statePath(actor.getSnapshot().value)).toBe('paused')
+    await vi.advanceTimersByTimeAsync(80)
+    setMic.mockClear()
+    actor.send({ type: 'RESUME' })
+    expect(statePath(actor.getSnapshot().value)).toBe('choosing.listening')
+    expect(setMic).toHaveBeenCalledWith(true)
+
+    stop()
+    actor.stop()
+  })
+
+  it('не принимает поздний selectQuestion после таймаута разбора выбора', async () => {
+    class SilentToolClient extends MockRealtimeClient {
+      lastToolTurn = 0
+      override requestTool(_purpose: string, turn: number, _name: string, _instructions: string, _isolated = false): void {
+        this.lastToolTurn = turn
+      }
+    }
+    const client = new SilentToolClient()
+    const { actor, stop } = await boot(client)
+    expect(statePath(actor.getSnapshot().value)).toBe('choosing.listening')
+
+    // Длинная фраза без ячейки → resolving и selectQuestion, ответ инструмента не шлём.
+    client.hear('назовите пожалуйста какую-нибудь открытую тему', 1200)
+    await vi.advanceTimersByTimeAsync(80)
+    expect(statePath(actor.getSnapshot().value)).toBe('choosing.resolving')
+    expect(client.lastToolTurn).toBeGreaterThan(0)
+    const staleTurn = client.lastToolTurn
+
+    await vi.advanceTimersByTimeAsync(gameConfig.judgeMs)
+    expect(statePath(actor.getSnapshot().value)).toBe('choosing.listening')
+
+    client.onToolCall(
+      {
+        name: 'selectQuestion',
+        callId: 'late-select',
+        arguments: { themeId: 'p', value: 400, confident: true, heard: 'ПЦ 400' },
+      },
+      'select',
+      staleTurn,
+    )
+    expect(statePath(actor.getSnapshot().value)).toBe('choosing.listening')
+    expect(actor.getSnapshot().context.activeQuestionId).toBeNull()
+
+    stop()
+    actor.stop()
+  })
+
+  it('обрывает подсказку про микрофон, когда игрок начал отвечать', async () => {
+    const client = new MockRealtimeClient()
+    const interrupt = vi.spyOn(client, 'interruptSpeech')
+    const { actor, stop, actions } = await boot(client)
+    actor.send({ type: 'QUESTION_SELECTED', themeId: 'p', value: 400 })
+    await vi.advanceTimersByTimeAsync(gameConfig.cellFlashMs + 80)
+    actor.send({ type: 'BUZZER_PRESSED', playerId: 1 })
+    expect(statePath(actor.getSnapshot().value)).toBe('answering.waiting')
+
+    actions().remindMutedAnswerer('Игрок 1')
+    interrupt.mockClear()
+    client.hear('ответ', 800)
+    expect(interrupt).toHaveBeenCalled()
+    expect(statePath(actor.getSnapshot().value)).toBe('answering.hearing')
 
     stop()
     actor.stop()
