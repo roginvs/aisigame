@@ -22,6 +22,8 @@ type GameActor = Actor<typeof gameMachine>
 
 export type GameControllerActions = {
   remindMutedAnswerer: (playerName: string) => void
+  /** Выбор вопроса: модель сама формулирует короткую фразу, каждый раз новую. */
+  remindMutedChooser: (playerName: string) => void
 }
 
 const judgmentStatuses: JudgmentStatus[] = [
@@ -598,6 +600,10 @@ export function attachController(options: {
       const line = `${playerName}, микрофон-то выключен.`
       speakWhileListening('micWarning', verbatimSpeech(line), line)
     },
+    remindMutedChooser(playerName) {
+      if (statePath(actor.getSnapshot().value) !== 'choosing.listening') return
+      speakWhileListening('micWarning', mutedMicCue(playerName))
+    },
   })
 
   return () => {
@@ -714,6 +720,18 @@ const giggleNote =
 
 /** Ошибка без смеха. В слова реплики не входит. */
 const dryNote = 'Ровно и коротко, без смеха. Не произноси «сухая фраза» и не читай ремарку в скобках.'
+
+/** Подсказка на выборе: модель придумывает фразу, дословного текста нет. */
+export function mutedMicCue(playerName: string): string {
+  const name = playerName.trim() || 'Игрок'
+  return `
+Имя игрока: ${name}.
+Сейчас ${name} выбирает вопрос, но микрофон выключен, и ведущая ничего не слышит.
+Скажи одно новое короткое предложение: обратись по имени и скажи, что микрофон не включён.
+Каждый раз другими словами. Смысл можно сказать так: «${name}, у тебя мик не включен» или «${name}, включи микрофон», но не повторяй прошлую реплику и не читай примеры подряд.
+Не называй темы и цены. Не выбирай ячейку. Не произноси правильный ответ. Без предисловия.
+`.trim()
+}
 
 function sayLine(parts: string[]): string {
   return parts.filter(Boolean).join(' ').replace(/\s+/g, ' ').trim()

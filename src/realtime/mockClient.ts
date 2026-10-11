@@ -168,6 +168,10 @@ function hostLine(purpose: string, instructions = ''): string {
   if (purpose === 'finished') return 'Игра окончена.'
   if (purpose === 'bet') return 'Назовите ставку.'
   if (purpose === 'turn') return 'Ваш ответ.'
+  if (purpose === 'micWarning') {
+    const name = /Имя игрока:\s*(.+)/.exec(instructions)?.[1]?.split('\n')[0]?.trim()
+    return name ? `${name}, включи микрофон.` : 'Микрофон выключен.'
+  }
   if (purpose === 'falseStart') {
     const line = [...instructions.matchAll(/«([^»]+)»/g)].map((match) => match[1]?.trim() ?? '').find(Boolean)
     return line || 'Фальстарт.'

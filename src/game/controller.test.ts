@@ -200,6 +200,9 @@ describe('attachController answer listening', () => {
     actor.send({ type: 'BUZZER_PRESSED', playerId: 1 })
     expect(statePath(actor.getSnapshot().value)).toBe('answering.waiting')
 
+    actions().remindMutedChooser('Маша')
+    expect(statePath(actor.getSnapshot().value)).toBe('answering.waiting')
+
     actions().remindMutedAnswerer('Игрок 1')
     expect(requestSpeech).toHaveBeenLastCalledWith(
       'micWarning',
@@ -210,6 +213,25 @@ describe('attachController answer listening', () => {
     )
     await vi.advanceTimersByTimeAsync(80)
     expect(statePath(actor.getSnapshot().value)).toBe('answering.waiting')
+
+    stop()
+    actor.stop()
+  })
+
+  it('на выборе вопроса просит модель самой сказать про микрофон и не уходит из выбора', async () => {
+    const client = new MockRealtimeClient()
+    const requestSpeech = vi.spyOn(client, 'requestSpeech')
+    const { actor, stop, actions } = await boot(client)
+    expect(statePath(actor.getSnapshot().value)).toBe('choosing.listening')
+
+    actions().remindMutedChooser('Маша')
+    const cue = String(requestSpeech.mock.calls.at(-1)?.[2] ?? '')
+    expect(requestSpeech).toHaveBeenLastCalledWith('micWarning', expect.any(Number), cue, undefined, false)
+    expect(cue).toContain('Имя игрока: Маша')
+    expect(cue).toContain('другими словами')
+    expect(cue).not.toContain('микрофон-то выключен')
+    await vi.advanceTimersByTimeAsync(80)
+    expect(statePath(actor.getSnapshot().value)).toBe('choosing.listening')
 
     stop()
     actor.stop()

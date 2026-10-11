@@ -4,8 +4,10 @@ export const matchTimings = {
   /** Окно кнопки после чужой ошибки или молчания, если ответить ещё могут другие. */
   stealBuzzerMs: 5_000,
   answerMs: 10_000,
-  /** В конференции столько ждём перед подсказкой отвечающему о выключенном микрофоне. */
+  /** В конференции столько ждём перед подсказкой о выключенном микрофоне. */
   mutedAnswerReminderMs: 3_000,
+  /** Пока выбирают вопрос, ту же подсказку повторяем с этим интервалом. */
+  mutedChooserRepeatMs: 5_000,
   clarifyMs: 10_000,
   judgeMs: 20_000,
   cellFlashMs: 1080,
@@ -38,6 +40,7 @@ export const {
   stealBuzzerMs,
   answerMs,
   mutedAnswerReminderMs,
+  mutedChooserRepeatMs,
   clarifyMs,
   judgeMs,
   cellFlashMs,

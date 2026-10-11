@@ -63,7 +63,7 @@ import { GameScreen } from './ui/GameScreen.tsx'
 import { JoinConfirmScreen } from './ui/JoinConfirmScreen.tsx'
 import { StartScreen } from './ui/StartScreen.tsx'
 import type { GameVoice } from './realtime/client.ts'
-import { mutedAnswerReminderMs } from './options.ts'
+import { mutedAnswerReminderMs, mutedChooserRepeatMs } from './options.ts'
 
 const initialLink: LinkStatus = { connection: 'idle', mic: 'idle', host: 'idle' }
 const pageParams = new URLSearchParams(window.location.search)
@@ -163,6 +163,7 @@ export default function App() {
   const [conferenceTiles, setConferenceTiles] = useState<ConferenceTile[]>([])
   const conferenceTilesRef = useRef<ConferenceTile[]>([])
   const warnedMicAttemptRef = useRef('')
+  const hostSpeakingRef = useRef(link.host)
   const bindConferenceVideo = useCallback((participantId: string, element: HTMLVideoElement | null) => {
     conferenceHandleRef.current?.bindVideo(participantId, element)
   }, [])
@@ -287,6 +288,18 @@ export default function App() {
   const answererId = answerer?.id ?? null
   const answererName = answerer?.name ?? ''
   const answererMicLive = answererTile?.micLive
+  const chooser = snapshot.context.players.find((player) => player.id === snapshot.context.chooserId)
+  const chooserParticipantId =
+    conferenceRole === 'master' && chooser?.clientId
+      ? masterParticipantIds[chooser.clientId] ?? null
+      : null
+  const chooserTile = chooserParticipantId
+    ? conferenceTiles.find((tile) => tile.id === chooserParticipantId)
+    : undefined
+  const chooserMicLive = chooserTile?.micLive
+  const chooserId = chooser?.id ?? null
+  const chooserName = chooser?.name ?? ''
+  hostSpeakingRef.current = link.host
   const answerAttemptKey = answerer
     ? `${snapshot.context.activeQuestionId ?? ''}:${snapshot.context.attemptId}:${answerer.id}`
     : ''
@@ -336,6 +349,43 @@ export default function App() {
     path,
     snapshot.context.attemptId,
   ])
+
+  useEffect(() => {
+    if (
+      conferenceRole !== 'master' ||
+      path !== 'choosing.listening' ||
+      chooserId === null ||
+      !chooserParticipantId ||
+      chooserMicLive !== false
+    ) {
+      return
+    }
+    let stopped = false
+    let timer = 0
+    const tick = () => {
+      if (stopped) return
+      const current = actor.getSnapshot()
+      if (statePath(current.value) !== 'choosing.listening' || current.context.chooserId !== chooserId) return
+      const liveTile = conferenceTilesRef.current.find((tile) => tile.id === chooserParticipantId)
+      if (!liveTile || liveTile.micLive) return
+      if (hostSpeakingRef.current === 'speaking') {
+        timer = window.setTimeout(tick, 400)
+        return
+      }
+      const actions = controllerActionsRef.current
+      if (!actions) {
+        timer = window.setTimeout(tick, 400)
+        return
+      }
+      actions.remindMutedChooser(chooserName)
+      timer = window.setTimeout(tick, mutedChooserRepeatMs)
+    }
+    timer = window.setTimeout(tick, mutedAnswerReminderMs)
+    return () => {
+      stopped = true
+      window.clearTimeout(timer)
+    }
+  }, [actor, chooserId, chooserMicLive, chooserName, chooserParticipantId, conferenceRole, path])
 
   useEffect(() => {
     if (suppressSave.current) {
