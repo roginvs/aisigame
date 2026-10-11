@@ -124,6 +124,28 @@ describe('attachController choice', () => {
     actor.stop()
   })
 
+  it('дословно объявляет передачу выбора после отключения', async () => {
+    const client = new MockRealtimeClient()
+    const requestSpeech = vi.spyOn(client, 'requestSpeech')
+    const { actor, stop } = await boot(client)
+
+    actor.send({ type: 'CHOOSER_OFFLINE', fromPlayerId: 2, toPlayerId: 1 })
+    expect(requestSpeech).toHaveBeenLastCalledWith(
+      'chooserHandoff',
+      expect.any(Number),
+      expect.any(String),
+      'Игрок 2 отключился. Игрок 1, выбирайте вопрос.',
+      false,
+      undefined,
+    )
+    await vi.advanceTimersByTimeAsync(80)
+    expect(statePath(actor.getSnapshot().value)).toBe('choosing.listening')
+    expect(actor.getSnapshot().context.chooserId).toBe(1)
+
+    stop()
+    actor.stop()
+  })
+
   it('перебивает уточнение и не подменяет услышанное пересказом модели', async () => {
     const client = new RewritingClient()
     const { actor, stop } = await boot(client)

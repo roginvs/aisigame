@@ -33,8 +33,12 @@ export function attachController(options: {
   client: GameVoice
   getApiKey: () => string
   setLink: (update: (current: LinkStatus) => LinkStatus) => void
+  /** Конференция: лобби на startMenu — сессию голоса не рвём. */
+  keepVoiceSession?: () => boolean
+  /** Конференция: модель уже подключена до START_GAME. */
+  voiceAlreadyConnected?: () => boolean
 }): () => void {
-  const { actor, client, getApiKey, setLink } = options
+  const { actor, client, getApiKey, setLink, keepVoiceSession, voiceAlreadyConnected } = options
   let previousPath = statePath(actor.getSnapshot().value)
   let connectToken = 0
   let speechTurn = 0
@@ -205,8 +209,10 @@ export function attachController(options: {
       dropAnnounceWait()
       clearBuzzerWarning()
       held.length = 0
-      connectToken += 1
-      client.stopSession()
+      if (!(path === 'startMenu' && keepVoiceSession?.())) {
+        connectToken += 1
+        client.stopSession()
+      }
       return
     }
     if (path === 'paused') {
@@ -241,6 +247,10 @@ export function attachController(options: {
         actor.send({ type: 'CONNECTION_FAILED', message: 'Введите ключ' })
         return
       }
+      if (voiceAlreadyConnected?.()) {
+        actor.send({ type: 'CONNECTED' })
+        return
+      }
       void client.connect(apiKey).then(
         () => {
           if (token !== connectToken) return
@@ -256,6 +266,10 @@ export function attachController(options: {
     }
     if (path === 'welcoming') speak('welcome', welcomeInstructions(context))
     if (path === 'bridging') speak('bridge', bridgeInstructions(context))
+    if (path === 'chooserHandoff') {
+      const line = context.clarifyReason
+      speak('chooserHandoff', verbatimSpeech(line), line)
+    }
     if (path === 'choosing.listening') {
       client.setSpeechSpeed(gameConfig.speechSpeed)
       client.setTranscriptionPrompt(listeningPrompt(context))
@@ -646,6 +660,7 @@ function isSpeechPurpose(purpose: string): purpose is SpeechPurpose {
     purpose === 'bridge' ||
     purpose === 'bet' ||
     purpose === 'turn' ||
+    purpose === 'chooserHandoff' ||
     purpose === 'falseStart'
   )
 }

@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react'
+import { useEffect, useRef, useState, useSyncExternalStore } from 'react'
 import { flushSync } from 'react-dom'
 import type { SnapshotFrom } from 'xstate'
 import { buttonsLive, falseStartCooling, falseStartOpen, gameMachine, statePath } from '../game/machine.ts'
@@ -9,12 +9,19 @@ import { answerIsPublic, stageMedia } from '../game/reveal.ts'
 import type { LinkStatus } from '../realtime/client.ts'
 import { voiceById, voiceModels } from '../realtime/models.ts'
 import { billedTokens, formatTokens, getUsageSnapshot, subscribeUsage, type UsageTotals } from '../realtime/usage.ts'
-import type { PlayerId } from '../game/types.ts'
-import { copyDebugDump } from '../debug/trace.ts'
+import type { GameContext, PlayerId } from '../game/types.ts'
+import type { ConferenceSnapshot } from '../conference/messages.ts'
+import type { RosterEntry } from '../conference/roster.ts'
+import { copyDebugDump, formatDebugSize } from '../debug/trace.ts'
+import type { ConferenceTile } from '../conference/media.ts'
+import { ConferenceRosterPanel } from './ConferenceRosterPanel.tsx'
+import { ConferenceVideoStrip } from './ConferenceVideoStrip.tsx'
 import { AirStatus } from './airStatus.tsx'
 import { buzzKeyLabel, isKeyboardPlayer, playerFromBuzzKey } from './buzzKeys.ts'
 import { ConversationChat } from './DebugChat.tsx'
+import { canBuzzPlayer, canPickCell } from './conferenceTurn.ts'
 import { HostPresence } from './HostPresence.tsx'
+import { InviteDialog } from './InviteDialog.tsx'
 import { QuestionClip, QuestionMedia } from './QuestionMedia.tsx'
 import { questionClipPlaying } from './questionClip.ts'
 import { remainingFraction, remainingSeconds } from './timerFraction.ts'
@@ -103,16 +110,51 @@ export function GameScreen(props: {
   onNextRound: () => void
   modelId: string
   onModel: (id: string) => void
-}) {
-  const { snapshot, link, onBuzz, onPick, onPause, onReset, onNextRound, modelId, onModel } = props
-  const [copyLabel, setCopyLabel] = useState('Скопировать дебаг')
-  const path = statePath(snapshot.value)
-  const context = snapshot.context
-  async function copyDebug() {
-    const ok = await copyDebugDump({ path, context })
-    setCopyLabel(ok ? 'Скопировано' : 'Не скопировалось')
-    window.setTimeout(() => setCopyLabel('Скопировать дебаг'), 1600)
+  conference?: {
+    layout: boolean
+    lobby: boolean
+    roster: RosterEntry[]
+    isMaster: boolean
+    masterOffline: boolean
+    waitingMaster: boolean
+    onLobbyStart?: () => void
+    onReady?: () => void
+    readyDisabled: boolean
+    inviteUrl?: string
+    onCopyInvite?: () => Promise<boolean>
+    selfClientId?: string
+    remoteSnapshot?: ConferenceSnapshot | null
+    remoteContext?: GameContext | null
+    remotePath?: string
+    tiles?: ConferenceTile[]
+    mediaBusy?: boolean
+    onToggleMic?: () => void
+    onToggleCamera?: () => void
+    onNextCamera?: () => void
+    bindVideo?: (participantId: string, element: HTMLVideoElement | null) => void
+    mediaError?: string | null
+    onSendChat?: (text: string) => void
+    chatLines?: { name: string; text: string }[]
+    onConferenceExit?: () => void
+    hiddenClientIds?: ReadonlySet<string>
   }
+}) {
+  const { snapshot, link, onBuzz, onPick, onPause, onReset, onNextRound, modelId, onModel, conference } = props
+  const liveSnapshot = conference?.remoteContext
+    ? { ...snapshot, context: conference.remoteContext, value: conference.remotePath ?? snapshot.value }
+    : snapshot
+  const [copyFeedback, setCopyFeedback] = useState<string | null>(null)
+  const copyResetRef = useRef(0)
+  const [inviteOpen, setInviteOpen] = useState(false)
+  const path = conference?.remotePath ?? statePath(liveSnapshot.value)
+  const context = liveSnapshot.context
+  async function copyDebug() {
+    const result = await copyDebugDump({ path, context })
+    setCopyFeedback(result.ok ? `Скопировано ${formatDebugSize(result.bytes)}` : 'Не скопировалось')
+    window.clearTimeout(copyResetRef.current)
+    copyResetRef.current = window.setTimeout(() => setCopyFeedback(null), 2_000)
+  }
+  useEffect(() => () => window.clearTimeout(copyResetRef.current), [])
   const question = questionById(context.questions, context.activeQuestionId)
   const round = currentRound(context, context.roundIndex)
   const prices = roundPrices(context.questions, context.roundIndex)
@@ -142,7 +184,13 @@ export function GameScreen(props: {
   const buttonsOpen = buttonsLive(path)
   const earlyLive = path === 'reading.armed'
   const canFalseStart = falseStartOpen(path, finalRound)
-  const canPick = path === 'choosing.listening'
+  const canPick = canPickCell(
+    path,
+    Boolean(conference?.layout),
+    conference?.selfClientId,
+    context.chooserId,
+    context.players,
+  )
   const flashing = path === 'flashing' || (paused && context.resumePath === 'flashing')
   const showQuestion = Boolean(question) && !flashing
   const showTimer = context.phaseStartedAt !== null && context.phaseDurationMs !== null
@@ -157,10 +205,7 @@ export function GameScreen(props: {
   )
   const questionMedia = question?.media
   const answerMedia = question?.answerMedia
-  const staged = useMemo(
-    () => stageMedia(questionMedia ?? [], answerMedia ?? [], showAnswer),
-    [questionMedia, answerMedia, showAnswer],
-  )
+  const staged = stageMedia(questionMedia ?? [], answerMedia ?? [], showAnswer)
   const held = paused || stopped
   const questionLive = questionClipPlaying({
     path,
@@ -176,8 +221,25 @@ export function GameScreen(props: {
           .map((item) => item.url),
       )
     : undefined
+  const visiblePlayers = context.players.filter(
+    (player) => !player.clientId || !conference?.hiddenClientIds?.has(player.clientId),
+  )
 
   useEffect(() => {
+    if (conference?.layout) {
+      const self = context.players.find((player) => canBuzzPlayer(true, conference.selfClientId, player))
+      if (!self || conference.lobby) return
+      const selfPlayerId = self.id
+      function onKeyDown(event: KeyboardEvent) {
+        if (event.code !== 'Space' || event.repeat) return
+        const target = event.target
+        if (target instanceof HTMLElement && target.closest('input, textarea, select, .model-name, [contenteditable="true"]')) return
+        event.preventDefault()
+        onBuzz(selfPlayerId)
+      }
+      window.addEventListener('keydown', onKeyDown)
+      return () => window.removeEventListener('keydown', onKeyDown)
+    }
     function onKeyDown(event: KeyboardEvent) {
       if (event.repeat) return
       const target = event.target
@@ -194,44 +256,96 @@ export function GameScreen(props: {
     }
     window.addEventListener('keydown', onKeyDown)
     return () => window.removeEventListener('keydown', onKeyDown)
-  }, [onBuzz])
+  }, [onBuzz, conference?.layout, conference?.lobby, conference?.selfClientId, context.players])
+
+  const mainClass = [
+    'table',
+    conference?.layout ? 'conference-layout' : '',
+    conference && !conference.isMaster ? 'joiner-view' : '',
+  ]
+    .filter(Boolean)
+    .join(' ')
 
   return (
-    <main className="table">
+    <main className={mainClass}>
       <p className="visually-hidden" role="status" aria-live="assertive">
         {beepCue}
       </p>
       <header className="topbar">
         <div>
           <p className="eyebrow model-line">
-            <span>{[context.packName, round?.name].filter(Boolean).join(' · ') || 'Раунд'} ·</span>
-            <ModelName modelId={modelId} onModel={onModel} />
+            <span>
+              {conference?.lobby
+                ? [context.packName, 'Лобби'].filter(Boolean).join(' · ')
+                : [context.packName, round?.name].filter(Boolean).join(' · ') || 'Раунд'}
+            </span>
+            {conference && !conference.isMaster ? null : (
+              <>
+                {' · '}
+                <ModelName modelId={modelId} onModel={onModel} />
+              </>
+            )}
           </p>
           <h1>Своя игра</h1>
         </div>
         <div className="pills">
-          <span className="cost" title={usageHint(usage.totals)}>
-            {formatTokens(billedTokens(usage.totals))}
-          </span>
-          <AirStatus link={link} />
-          <button type="button" className={paused ? 'ghost pause-on' : 'ghost'} onClick={onPause} disabled={stopped}>
-            {paused ? '▶ Дальше' : '⏸ Пауза'}
-          </button>
-          <button type="button" className="ghost" onClick={onReset}>
-            🚪 Выход
-          </button>
-          <button type="button" className="ghost" onClick={() => void copyDebug()}>
-            🔧 {copyLabel}
-          </button>
+          {conference && !conference.isMaster ? null : (
+            <>
+              <span className="cost" title={usageHint(usage.totals)}>
+                {formatTokens(billedTokens(usage.totals))}
+              </span>
+              <AirStatus link={link} />
+            </>
+          )}
+          {conference && !conference.isMaster ? null : (
+            <button type="button" className={paused ? 'ghost pause-on' : 'ghost'} onClick={onPause} disabled={stopped}>
+              {paused ? '▶ Дальше' : '⏸ Пауза'}
+            </button>
+          )}
+          {conference?.onCopyInvite ? (
+            <button
+              type="button"
+              className="ghost invite-link"
+              aria-haspopup="dialog"
+              onClick={() => setInviteOpen(true)}
+            >
+              <span aria-hidden="true">🔗</span>
+              <span>Ссылка для игры</span>
+            </button>
+          ) : null}
           <button
             type="button"
             className="ghost"
-            title="Для проверки: закончить раунд с тем же счётом"
-            onClick={onNextRound}
-            disabled={!snapshot.can({ type: 'NEXT_ROUND' })}
+            onClick={conference?.onConferenceExit ?? onReset}
           >
-            ⏭ Пропустить раунд
+            🚪 Выход
           </button>
+          <button
+            type="button"
+            className="ghost debug-copy"
+            aria-label={copyFeedback ?? 'Скопировать дебаг'}
+            onClick={() => void copyDebug()}
+          >
+            <span aria-hidden="true">🔧</span>
+            <span className="debug-copy-label" aria-hidden="true">
+              <span className={copyFeedback ? 'debug-copy-hidden' : undefined}>Скопировать дебаг</span>
+              <span className={copyFeedback ? undefined : 'debug-copy-hidden'}>
+                {copyFeedback ?? 'Скопировано ~0 КБ'}
+              </span>
+              <span className="debug-copy-reserve">Скопировано ~999 МБ</span>
+            </span>
+          </button>
+          {conference && !conference.isMaster ? null : (
+            <button
+              type="button"
+              className="ghost"
+              title="Для проверки: закончить раунд с тем же счётом"
+              onClick={onNextRound}
+              disabled={!snapshot.can({ type: 'NEXT_ROUND' })}
+            >
+              ⏭ Пропустить раунд
+            </button>
+          )}
         </div>
       </header>
 
@@ -290,6 +404,16 @@ export function GameScreen(props: {
               </>
             ) : null}
           </article>
+        ) : conference?.lobby ? (
+          <ConferenceRosterPanel
+            roster={conference.roster}
+            masterOffline={conference.masterOffline}
+            isMaster={conference.isMaster}
+            onStart={conference.onLobbyStart}
+            onReady={conference.onReady}
+            readyDisabled={conference.readyDisabled}
+            waitingMaster={conference.waitingMaster}
+          />
         ) : (
         <div className="board" role="grid" aria-label="Игровое поле">
           {finalRound ? (
@@ -313,7 +437,10 @@ export function GameScreen(props: {
             </div>
           ) : (
             <>
-              <div className="theme-row" style={{ gridTemplateColumns: `120px repeat(${prices.length}, minmax(0, 1fr))` }}>
+              <div
+                className="theme-row"
+                style={{ gridTemplateColumns: `var(--theme-column-width, 120px) repeat(${prices.length}, minmax(0, 1fr))` }}
+              >
                 <div className="corner" />
                 {prices.map((value) => (
                   <div key={value} className="head">
@@ -325,7 +452,7 @@ export function GameScreen(props: {
                 <div
                   key={theme.id}
                   className="theme-row"
-                  style={{ gridTemplateColumns: `120px repeat(${prices.length}, minmax(0, 1fr))` }}
+                  style={{ gridTemplateColumns: `var(--theme-column-width, 120px) repeat(${prices.length}, minmax(0, 1fr))` }}
                 >
                   <div className="theme-name">{theme.name}</div>
                   {prices.map((value) => {
@@ -359,17 +486,29 @@ export function GameScreen(props: {
         )}
         </div>
 
+      {conference?.lobby ? null : (
       <section className="players">
-        {context.players.map((player) => {
+        {visiblePlayers.map((player) => {
           const playerId = player.id
           const active = context.activePlayerId === playerId
           const missed = context.missedIds.includes(playerId)
           const chooses = path.startsWith('choosing') && context.chooserId === playerId
           const flareAt = context.falseStarts[playerId]
           const cooling = falseStartCooling(flareAt, penaltyClock)
-          const key = isKeyboardPlayer(playerId) ? buzzKeyLabel[playerId] : ''
+          const conferenceButton = Boolean(conference?.layout)
+          const canControl = canBuzzPlayer(conferenceButton, conference?.selfClientId, player)
+          const isSelf = conferenceButton && canControl
+          const displayOnly = conferenceButton && !canControl
+          const key = conferenceButton ? '' : isKeyboardPlayer(playerId) ? buzzKeyLabel[playerId] : ''
           return (
-            <div key={playerId} className={active ? 'player active' : 'player'} role="group" aria-label={`${player.name}: ${player.score}`}>
+            <div
+              key={playerId}
+              className={['player', active ? 'active' : '', isSelf ? 'self' : '', displayOnly ? 'display-only' : '']
+                .filter(Boolean)
+                .join(' ')}
+              role="group"
+              aria-label={`${player.name}: ${player.score}`}
+            >
               <div className="player-meta">
                 <strong>{player.name}</strong>
                 <span>{player.score}</span>
@@ -383,23 +522,56 @@ export function GameScreen(props: {
                     ? { animationDuration: `${falseStartMs}ms`, animationPlayState: paused ? 'paused' : 'running' }
                     : undefined
                 }
-                disabled={cooling || ((missed || !buttonsOpen) && !canFalseStart)}
+                disabled={displayOnly || cooling || ((missed || !buttonsOpen) && !canFalseStart)}
                 onClick={() => onBuzz(playerId)}
               >
                 {chooses ? 'выбирайте вопрос' : missed ? 'Уже отвечал' : player.name}
                 {earlyLive ? <span className="visually-hidden">, вопрос ещё читается</span> : null}
               </button>
-              <p className="key-hint">{key ? (earlyLive ? `${key} · уже можно` : key) : ''}</p>
+              <p className="key-hint">{key ? (earlyLive ? `${key} · уже можно` : key) : isSelf ? 'Пробел' : ''}</p>
             </div>
           )
         })}
       </section>
+      )}
         </div>
         <aside className="talk">
-          <HostPresence path={path} link={link} status={context.statusLine} error={context.error} />
-          <ConversationChat />
+          <HostPresence
+            path={path}
+            link={link}
+            status={
+              conference?.lobby
+                ? conference.waitingMaster
+                  ? 'Ждём мастер-игрока'
+                  : 'Ждём начала игры'
+                : context.statusLine
+            }
+            error={conference?.mediaError ?? context.error}
+          />
+          <ConversationChat
+            conversation={conference?.remoteSnapshot?.conversation}
+            chat={conference?.chatLines ?? conference?.remoteSnapshot?.chat}
+            onSendChat={conference?.onSendChat}
+          />
         </aside>
+        {conference?.layout ? (
+          <ConferenceVideoStrip
+            tiles={conference.tiles ?? []}
+            mediaBusy={conference.mediaBusy}
+            onToggleMic={() => conference.onToggleMic?.()}
+            onToggleCamera={() => conference.onToggleCamera?.()}
+            onNextCamera={() => conference.onNextCamera?.()}
+            bindVideo={(id, el) => conference.bindVideo?.(id, el)}
+          />
+        ) : null}
       </section>
+      {inviteOpen && conference?.inviteUrl && conference.onCopyInvite ? (
+        <InviteDialog
+          url={conference.inviteUrl}
+          onCopy={conference.onCopyInvite}
+          onClose={() => setInviteOpen(false)}
+        />
+      ) : null}
     </main>
   )
 }

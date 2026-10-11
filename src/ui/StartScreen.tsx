@@ -1,6 +1,7 @@
 import { useRef } from 'react'
 import { ownPackId, packCatalog } from '../game/catalog.ts'
 import { defaultPlayerNames } from '../game/players.ts'
+import type { MatchMode } from '../conference/prefs.ts'
 import type { LinkStatus } from '../realtime/client.ts'
 import { keyFieldLabel, voiceById, voiceModels } from '../realtime/models.ts'
 import { startupStatus } from './startupStatus.ts'
@@ -13,6 +14,7 @@ export function StartScreen(props: {
   link: LinkStatus
   error: string | null
   busy: boolean
+  busyStatus?: string | null
   loadingPack: boolean
   packId: string
   modelId: string
@@ -32,11 +34,17 @@ export function StartScreen(props: {
   canContinue: boolean
   resumeFromDisk: boolean
   resumePackName: string
-  resumeFileName: string
+  resumeMode: MatchMode | null
   readingResume: boolean
   onContinue: () => void
   onResumeFile: (file: File) => void
   modelSwitched: boolean
+  matchMode: MatchMode
+  onMatchMode: (mode: MatchMode) => void
+  conferenceName: string
+  onConferenceName: (value: string) => void
+  jitsiUrl: string
+  onJitsiUrl: (value: string) => void
 }) {
   const {
     apiKey,
@@ -44,6 +52,7 @@ export function StartScreen(props: {
     link,
     error,
     busy,
+    busyStatus,
     loadingPack,
     packId,
     modelId,
@@ -63,11 +72,17 @@ export function StartScreen(props: {
     canContinue,
     resumeFromDisk,
     resumePackName,
-    resumeFileName,
+    resumeMode,
     readingResume,
     onContinue,
     onResumeFile,
     modelSwitched,
+    matchMode,
+    onMatchMode,
+    conferenceName,
+    onConferenceName,
+    jitsiUrl,
+    onJitsiUrl,
   } = props
   const fileRef = useRef<HTMLInputElement>(null)
   const resumeFileRef = useRef<HTMLInputElement>(null)
@@ -80,96 +95,151 @@ export function StartScreen(props: {
           Игроки за одним планшетом. Ведущая слушает и говорит сама. Ключ выбранной модели остаётся в этом
           браузере.
         </p>
-        <label className="field">
-          <span>Пакет вопросов</span>
-          <select
-            value={packId}
-            onChange={(event) => {
-              const next = event.target.value
-              if (next === ownPackId) {
-                fileRef.current?.click()
-                return
-              }
-              onPack(next)
-            }}
-          >
-            {packCatalog.map((item) => (
-              <option key={item.id} value={item.id}>
-                {item.title}
-              </option>
-            ))}
-            <option value={ownPackId}>Выбрать свой…</option>
-          </select>
-          <input
-            ref={fileRef}
-            type="file"
-            accept={packFileAccept}
-            hidden
-            onChange={(event) => {
-              const file = event.target.files?.[0]
-              event.target.value = ''
-              if (file) onFile(file)
-            }}
-          />
-        </label>
-        {packSummary ? <p className="status-line">{packSummary}</p> : null}
-        {packWarnings.length > 0 ? (
-          <ul className="warnings">
-            {packWarnings.map((warning) => (
-              <li key={warning}>{warning}</li>
-            ))}
-          </ul>
-        ) : null}
-        <label className="field">
-          <span>Имена игроков</span>
-          <textarea
-            rows={3}
-            value={playerNames}
-            placeholder={defaultPlayerNames}
-            spellCheck={false}
-            onChange={(event) => onPlayerNames(event.target.value)}
-          />
-        </label>
-        <p className="status-line">Имя с новой строки или через точку с запятой. Пустое поле — Игрок 1, Игрок 2 и Игрок 3.</p>
-        <label className="field">
-          <span>Модель</span>
-          <select value={modelId} onChange={(event) => onModel(event.target.value)}>
-            {voiceModels.map((item) => (
-              <option key={item.id} value={item.id}>
-                {item.label}
-              </option>
-            ))}
-          </select>
-        </label>
-        {needsKey ? null : (
-          <p className="status-line">Заглушка ведущей: ключ не нужен, ответы подставляет игра.</p>
-        )}
-        {needsKey ? (
-          <>
+        <div className="start-grid">
+          <div className="start-col">
             <label className="field">
-              <span>{keyFieldLabel(voiceById(modelId).provider)}</span>
+              <span>Пакет вопросов</span>
+              <select
+                value={packId}
+                onChange={(event) => {
+                  const next = event.target.value
+                  if (next === ownPackId) {
+                    fileRef.current?.click()
+                    return
+                  }
+                  onPack(next)
+                }}
+              >
+                {packCatalog.map((item) => (
+                  <option key={item.id} value={item.id}>
+                    {item.title}
+                  </option>
+                ))}
+                <option value={ownPackId}>Выбрать свой…</option>
+              </select>
               <input
-                type={showKey ? 'text' : 'password'}
-                value={apiKey}
-                autoComplete="off"
-                spellCheck={false}
-                onChange={(event) => onApiKey(event.target.value)}
+                ref={fileRef}
+                type="file"
+                accept={packFileAccept}
+                hidden
+                onChange={(event) => {
+                  const file = event.target.files?.[0]
+                  event.target.value = ''
+                  if (file) onFile(file)
+                }}
               />
             </label>
-            <div className="row">
-              <button type="button" className="ghost" onClick={onToggleKey}>
-                {showKey ? 'Скрыть ключ' : 'Показать ключ'}
-              </button>
-              <button type="button" className="ghost" onClick={onClearKey}>
-                Удалить ключ
-              </button>
-            </div>
-          </>
-        ) : null}
+            {packSummary ? <p className="status-line">{packSummary}</p> : null}
+            {packWarnings.length > 0 ? (
+              <ul className="warnings">
+                {packWarnings.map((warning) => (
+                  <li key={warning}>{warning}</li>
+                ))}
+              </ul>
+            ) : null}
+            {matchMode === 'table' ? (
+              <>
+                <label className="field">
+                  <span>Имена игроков</span>
+                  <textarea
+                    rows={3}
+                    value={playerNames}
+                    placeholder={defaultPlayerNames}
+                    spellCheck={false}
+                    onChange={(event) => onPlayerNames(event.target.value)}
+                  />
+                </label>
+                <p className="status-line">
+                  Имя с новой строки или через точку с запятой. Пустое поле — Игрок 1, Игрок 2 и Игрок 3.
+                </p>
+              </>
+            ) : (
+              <label className="field">
+                <span>Ваше имя</span>
+                <input
+                  value={conferenceName}
+                  spellCheck={false}
+                  onChange={(event) => onConferenceName(event.target.value)}
+                />
+              </label>
+            )}
+          </div>
+          <div className="start-col">
+            <label className="field">
+              <span>Модель</span>
+              <select value={modelId} onChange={(event) => onModel(event.target.value)}>
+                {voiceModels.map((item) => (
+                  <option key={item.id} value={item.id}>
+                    {item.label}
+                  </option>
+                ))}
+              </select>
+            </label>
+            {needsKey ? null : (
+              <p className="status-line">Заглушка ведущей: ключ не нужен, ответы подставляет игра.</p>
+            )}
+            {needsKey ? (
+              <>
+                <label className="field">
+                  <span>{keyFieldLabel(voiceById(modelId).provider)}</span>
+                  <input
+                    type={showKey ? 'text' : 'password'}
+                    value={apiKey}
+                    autoComplete="off"
+                    spellCheck={false}
+                    onChange={(event) => onApiKey(event.target.value)}
+                  />
+                </label>
+                <div className="row">
+                  <button type="button" className="ghost" onClick={onToggleKey}>
+                    {showKey ? 'Скрыть ключ' : 'Показать ключ'}
+                  </button>
+                  <button type="button" className="ghost" onClick={onClearKey}>
+                    Удалить ключ
+                  </button>
+                </div>
+              </>
+            ) : null}
+            {matchMode === 'conference' ? (
+              <label className="field">
+                <span>Адрес Jitsi</span>
+                <input value={jitsiUrl} spellCheck={false} onChange={(event) => onJitsiUrl(event.target.value)} />
+              </label>
+            ) : null}
+          </div>
+        </div>
+        <fieldset className="mode-switch">
+          <legend className="visually-hidden">Режим игры</legend>
+          <label>
+            <input
+              type="radio"
+              name="match-mode"
+              checked={matchMode === 'table'}
+              onChange={() => onMatchMode('table')}
+            />
+            За столом
+          </label>
+          <label>
+            <input
+              type="radio"
+              name="match-mode"
+              checked={matchMode === 'conference'}
+              onChange={() => onMatchMode('conference')}
+            />
+            Конференция
+          </label>
+        </fieldset>
         <button
           type="button"
           className="primary"
-          disabled={busy || readingResume || loadingPack || !packReady || (needsKey && apiKey.trim().length === 0)}
+          disabled={
+            busy ||
+            readingResume ||
+            loadingPack ||
+            !packReady ||
+            (needsKey && apiKey.trim().length === 0) ||
+            (matchMode === 'conference' && conferenceName.trim().length === 0)
+          }
           onClick={onStart}
         >
           Начать игру
@@ -180,7 +250,7 @@ export function StartScreen(props: {
         {resumeFromDisk && resumePackName ? <p className="status-line">Пак «{resumePackName}»</p> : null}
         <button
           type="button"
-          className={resumeFileName ? 'ghost continue-with-file' : 'ghost'}
+          className={resumeMode ? 'ghost continue-with-file' : 'ghost'}
           disabled={!canContinue || busy || readingResume || (needsKey && apiKey.trim().length === 0)}
           onClick={() => {
             if (resumeFromDisk) {
@@ -191,7 +261,11 @@ export function StartScreen(props: {
           }}
         >
           <span>Продолжить прошлую игру</span>
-          {resumeFileName ? <span className="continue-file">{resumeFileName}</span> : null}
+          {resumeMode && resumePackName ? (
+            <span className="continue-file">
+              {resumeMode === 'conference' ? 'Онлайн' : 'За столом'} · {resumePackName}
+            </span>
+          ) : null}
         </button>
         <input
           ref={resumeFileRef}
@@ -205,7 +279,7 @@ export function StartScreen(props: {
             if (file) onResumeFile(file)
           }}
         />
-        {busy ? <p className="status-line">{startupStatus(link)}</p> : null}
+        {busy ? <p className="status-line">{busyStatus?.trim() || startupStatus(link)}</p> : null}
         {error ? <p className="error">{error}</p> : null}
       </section>
     </main>

@@ -185,3 +185,39 @@ curl -sD - -o /dev/null --max-time 5 \
 Без заголовка `Sec-WebSocket-Protocol: xmpp` Prosody отвечает `501 Not Implemented`, даже когда nginx и модуль websocket в порядке. `curl -I` здесь не годится: это метод HEAD, не рукопожатие.
 
 Если снаружи не `101`, ту же команду запускают на сервере, подставив `http://127.0.0.1:8000/xmpp-websocket`. На localhost `101`, а снаружи другой код — в загруженный nginx не попал `location = /jitsi/xmpp-websocket`. Это видно так: `nginx -T | grep xmpp-websocket`. На localhost тоже нет `101`, хотя заголовок `xmpp` есть — смотреть контейнер web и Prosody, не публичный nginx. `501` без этого заголовка ни о чём не говорит.
+
+### Консоль браузера: STUN/TURN
+
+После успешного входа в XMPP `lib-jitsi-meet` спрашивает у Prosody список STUN/TURN (`urn:xmpp:extdisco:2`, затем `:1`). В `docker-jitsi-meet` модуль `external_services` поднимается только если в `.env` заданы `TURN_HOST` или `TURNS_HOST`. Без них Prosody отвечает `service-unavailable`, и в консоли красным:
+
+```text
+Strophe error: … "operation":"get STUN/TURN credentials (extdisco:2)" …
+getting turn credentials with extdisco:2 failed, trying extdisco:1
+getting turn credentials failed
+is mod_turncredentials or similar installed and configured?
+```
+
+Это не nginx и не ошибка игры. Сигнализация уже жива: в том же логе есть `SASL authentication succeeded`, `Strophe connected` и Jabber ID. Для нашей схемы (JVB, `ENABLE_P2P=0`, открытый UDP 10000 и верный `JVB_ADVERTISE_IPS`) TURN не обязателен: медиа идёт на мост напрямую. Сообщение можно игнорировать, пока комната открывается и звук/видео доходят.
+
+Если сигнализация есть, а медиа нет — сначала проверить `JVB_ADVERTISE_IPS` и UDP 10000 в файрволе, не TURN. Coturn нужен только когда у игроков режут UDP к JVB (жёсткий NAT, сети «только TCP 443»). Тогда поднимают отдельный coturn и в `.env` рядом с остальными строками:
+
+```bash
+TURN_HOST=<хост coturn>
+TURN_PORT=443
+TURN_TRANSPORT=tcp
+TURN_CREDENTIALS=<тот же static-auth-secret, что у coturn>
+```
+
+После правки — снова `docker compose up -d` (или `docker-compose up -d`). Пока coturn нет, эти переменные не добавлять: пустые значения ситуацию не улучшают.
+
+Другие строки того же захода не чинят: `Analytics disabled` — мы сами отключили сторонние запросы; `Permissions policy violation: unload` — предупреждение Chromium внутри библиотеки, на вход в комнату не влияет.
+
+`conference.joined` может прийти раньше готовности BridgeChannel. Если сразу после него библиотека пишет `BridgeChannel has not been initialized yet`, сервер уже не нужно перестраивать: приложение держит ранние endpoint-сообщения в очереди до `conference.dataChannelOpened`. Исправленная версия не должна вслед за этой строкой вызывать `ChatRoom doLeave` и `connection.disconnect`.
+
+Ранний BridgeChannel проверяется из репозитория без ключа модели:
+
+```bash
+JITSI_LIVE=1 npx playwright test e2e/jitsi.live.play.ts
+```
+
+Первый сценарий поднимает двух настоящих анонимных клиентов в случайной комнате и отправляет endpoint-сообщение сразу после `conference.joined`. Второй проходит реальное Jitsi-лобби приложения, отдельного участника «Ведущая», передачу пакета, ready и старт. В приложении удалённый звук выводится через разблокированный кликом Web Audio, потому что созданный после входа `<audio autoplay>` мобильные браузеры блокируют; дорожка не теряется и при `TRACK_ADDED` раньше `USER_JOINED`. Audio levels включены для пульсирующей рамки говорящего, а камеры меняются через `replaceTrack`. Полный звук, цикл нескольких физических камер и отсутствие эха всё ещё проверяем вручную с двумя устройствами.

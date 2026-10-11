@@ -9,11 +9,15 @@ import { recordResponseUsage, resetUsage } from './usage.ts'
 const speechPauseMs = 40
 /** Длинная дословная фраза: полоска кнопки успевает открыться, пока заглушка ещё «читает». */
 const longSpeechChars = 180
-const longSpeechMs = 8_000
+// Должно быть строго дольше максимального раннего окна (8 с), иначе два таймера
+// финишируют одновременно и e2e не успевает увидеть reading.armed.
+const longSpeechMs = 10_000
 
 export type MockControls = {
   hear: (text: string, durationMs?: number) => void
   setSpeechMs: (ms: number) => void
+  /** Только конференция на заглушке: портит байт пакета у joiner. */
+  flipPackByte?: () => void
 }
 
 declare global {
@@ -36,8 +40,9 @@ export class MockRealtimeClient implements GameVoice {
   private itemSeq = 0
   private callSeq = 0
   private transcripts = new Map<string, StoredTranscript>()
+  private hostOutputContext: AudioContext | null = null
 
-  async connect(_apiKey: string): Promise<void> {
+  async connect(_apiKey: string, _options?: { captureMic?: boolean }): Promise<void> {
     resetUsage()
     recordResponseUsage({
       id: 'mock-session',
@@ -60,6 +65,18 @@ export class MockRealtimeClient implements GameVoice {
   }
 
   setSpeechSpeed(_speed: number): void {}
+
+  attachHostOutput(handler: (stream: MediaStream) => void): void {
+    this.hostOutputContext?.close().catch(() => undefined)
+    const context = new AudioContext()
+    const destination = context.createMediaStreamDestination()
+    this.hostOutputContext = context
+    // У мока нет PCM, но Jitsi-мастер всё равно должен опубликовать ровно
+    // одну дорожку участника «Ведущая» и пройти тот же lifecycle.
+    handler(destination.stream)
+  }
+
+  setInputStream(_stream: MediaStream | null): void {}
 
   setTranscriptionPrompt(prompt: string): void {
     this.transcriptionPrompt = prompt
@@ -93,6 +110,7 @@ export class MockRealtimeClient implements GameVoice {
   ): void {
     const token = ++this.speechToken
     const line = expect || hostLine(purpose, instructions)
+    if (!line.trim()) return
     const wait = expect && expect.length > longSpeechChars ? longSpeechMs : this.speechMs
     pushHostLine(line, chatNote?.(line) ?? '')
     this.onLink({ host: 'speaking' })
@@ -118,6 +136,8 @@ export class MockRealtimeClient implements GameVoice {
     this.speechToken += 1
     this.transcriptionPrompt = ''
     this.transcripts.clear()
+    this.hostOutputContext?.close().catch(() => undefined)
+    this.hostOutputContext = null
     this.onLink({ connection: 'idle', mic: 'idle', host: 'idle' })
   }
 
@@ -138,6 +158,10 @@ export class MockRealtimeClient implements GameVoice {
 
 function hostLine(purpose: string, instructions = ''): string {
   if (purpose === 'welcome') return 'Здравствуйте. Выбирайте вопрос.'
+  if (purpose === 'lobby') {
+    if (instructions.includes('Игра создана')) return 'Игра создана. Ждём игроков.'
+    return ''
+  }
   if (purpose === 'clarify') return 'Не расслышала. Назовите тему и стоимость ещё раз.'
   if (purpose === 'announce') return announceLine(instructions)
   if (purpose === 'bridge') return 'Следующий раунд. Выбирайте вопрос.'

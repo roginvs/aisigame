@@ -7,6 +7,7 @@ import { outputCut, outputFlushWaitMs, timersAfterPlaybackStarted, timersAfterRe
 import type { HostAudioTimers, OutputCutState } from './playback.ts'
 import { isolatedCue, isolatedToolResponse, speechMatches, verbatimResponse } from './speechMatch.ts'
 import { sessionTools } from './tools.ts'
+import { createSilentMicStream } from './pcm.ts'
 import type { VoiceWire } from './wire.ts'
 import { echoesAnswerPrompt } from '../game/answerPrompt.ts'
 import { echoesChoicePrompt } from '../game/choicePrompt.ts'
@@ -121,6 +122,8 @@ export class RealtimeClient {
   private transcriptWaiters = new Map<string, Array<(text: string) => void>>()
   private looseTranscriptWaiters: Array<(text: string) => void> = []
   private dropped = false
+  private hostOutputHandler: ((stream: MediaStream) => void) | null = null
+  private usingExternalInput = false
 
   onLink: (patch: Partial<LinkStatus>) => void = () => {}
   onFailure: (message: string) => void = () => {}
@@ -134,28 +137,37 @@ export class RealtimeClient {
     this.wire = options.wire ?? null
   }
 
-  async connect(apiKey: string): Promise<void> {
+  async connect(apiKey: string, options?: { captureMic?: boolean }): Promise<void> {
     this.stopSession()
     this.dropped = false
     resetUsage()
     const token = this.sessionToken
     const alive = () => token === this.sessionToken
-    this.onLink({ connection: 'connecting', mic: 'requesting', host: 'idle' })
+    const captureMic = options?.captureMic !== false
+    this.onLink({
+      connection: 'connecting',
+      mic: captureMic ? 'requesting' : 'muted',
+      host: 'idle',
+    })
     unlockAudio()
     if (this.wire) {
-      await this.connectWire(apiKey, token, alive)
+      await this.connectWire(apiKey, token, alive, { captureMic })
       return
     }
 
     let mic: MediaStream
     try {
-      mic = await navigator.mediaDevices.getUserMedia({
-        audio: {
-          echoCancellation: true,
-          noiseSuppression: true,
-          autoGainControl: true,
-        },
-      })
+      if (captureMic) {
+        mic = await navigator.mediaDevices.getUserMedia({
+          audio: {
+            echoCancellation: true,
+            noiseSuppression: true,
+            autoGainControl: true,
+          },
+        })
+      } else {
+        mic = createSilentMicStream()
+      }
     } catch (error) {
       this.onLink({ connection: 'error', mic: 'error' })
       throw new Error(errorText(error))
@@ -175,6 +187,7 @@ export class RealtimeClient {
       const [stream] = event.streams
       if (!stream || !alive()) return
       this.audio.srcObject = stream
+      this.hostOutputHandler?.(forkHostStream(stream))
       void this.audio.play().then(
         () => this.onLink({ host: 'idle' }),
         () => this.onLink({ host: 'blocked' }),
@@ -246,6 +259,37 @@ export class RealtimeClient {
     pushTrace('note', 'Сессия Realtime готова')
   }
 
+  attachHostOutput(handler: (stream: MediaStream) => void): void {
+    if (this.wire) {
+      this.wire.attachHostOutput(handler)
+      return
+    }
+    this.hostOutputHandler = handler
+    const current = this.audio.srcObject
+    if (current instanceof MediaStream) handler(forkHostStream(current))
+  }
+
+  /** null — снова микрофон из connect(); иначе replaceTrack на отправителе WebRTC. */
+  setInputStream(stream: MediaStream | null): void {
+    if (this.wire) {
+      this.wire.setInputStream(stream)
+      return
+    }
+    if (!this.pc) return
+    const sender = this.pc.getSenders().find((item) => item.track?.kind === 'audio')
+    if (!sender) return
+    if (stream === null) {
+      this.usingExternalInput = false
+      const track = this.mic?.getAudioTracks()[0] ?? null
+      void sender.replaceTrack(track)
+      return
+    }
+    const track = stream.getAudioTracks()[0] ?? null
+    if (!track) return
+    this.usingExternalInput = true
+    void sender.replaceTrack(track)
+  }
+
   setMicEnabled(enabled: boolean): void {
     if (this.wire) {
       const wasLive = this.micLive
@@ -259,9 +303,16 @@ export class RealtimeClient {
       if (enabled && !wasLive) this.send({ type: 'input_audio_buffer.clear' })
       return
     }
-    if (!this.mic) return
-    const wasLive = this.mic.getAudioTracks().some((track) => track.enabled)
-    for (const track of this.mic.getAudioTracks()) track.enabled = enabled
+    if (!this.mic || !this.pc) return
+    const sender = this.pc.getSenders().find((item) => item.track?.kind === 'audio')
+    const wasLive = this.usingExternalInput
+      ? Boolean(sender?.track?.enabled)
+      : this.mic.getAudioTracks().some((track) => track.enabled)
+    if (this.usingExternalInput) {
+      if (sender?.track) sender.track.enabled = enabled
+    } else {
+      for (const track of this.mic.getAudioTracks()) track.enabled = enabled
+    }
     if (enabled && !this.canSend()) {
       this.dropLink('Связь с ведущей прервалась. Начните игру ещё раз.')
       return
@@ -460,6 +511,8 @@ export class RealtimeClient {
     this.dc = null
     this.pc = null
     this.mic = null
+    this.hostOutputHandler = null
+    this.usingExternalInput = false
     if (dc) dc.onmessage = null
     if (pc) {
       pc.onconnectionstatechange = null
@@ -569,18 +622,27 @@ export class RealtimeClient {
 
   private sessionUpdatedWaiter: ((event: LooseEvent) => void) | null = null
 
-  private async connectWire(apiKey: string, token: number, alive: () => boolean): Promise<void> {
+  private async connectWire(
+    apiKey: string,
+    token: number,
+    alive: () => boolean,
+    options?: { captureMic?: boolean },
+  ): Promise<void> {
     const wire = this.wire
     if (!wire) return
     try {
-      await wire.open(apiKey, {
-        message: (raw) => {
-          if (alive()) this.handleMessage(raw)
+      await wire.open(
+        apiKey,
+        {
+          message: (raw) => {
+            if (alive()) this.handleMessage(raw)
+          },
+          closed: (message) => {
+            if (alive()) this.dropLink(message)
+          },
         },
-        closed: (message) => {
-          if (alive()) this.dropLink(message)
-        },
-      })
+        { captureMic: options?.captureMic !== false },
+      )
     } catch (error) {
       this.onLink({ connection: 'error', mic: 'error' })
       throw error instanceof Error ? error : new Error('Не удалось подключиться')
@@ -1130,7 +1192,13 @@ export type GameVoice = Pick<
   | 'requestTool'
   | 'sendToolOutput'
   | 'stopSession'
+  | 'attachHostOutput'
+  | 'setInputStream'
 >
+
+function forkHostStream(stream: MediaStream): MediaStream {
+  return new MediaStream(stream.getAudioTracks().map((track) => track.clone()))
+}
 
 function readToolCall(response: Record<string, unknown>): ToolCall | null {
   const output = Array.isArray(response.output) ? response.output : []

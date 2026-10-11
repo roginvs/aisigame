@@ -1,8 +1,23 @@
 import { describe, expect, it } from 'vitest'
 import { buildCommit, pageOrigin } from '../buildInfo.ts'
-import { formatDebugDump, getTrace, logTrace, noteLink, pushTrace } from './trace.ts'
+import {
+  appendRemoteDebug,
+  clearRemoteDebugForTests,
+  formatDebugDump,
+  formatDebugSize,
+  getTrace,
+  logTrace,
+  noteLink,
+  pushTrace,
+  sharedDebugBatch,
+} from './trace.ts'
 
 describe('formatDebugDump', () => {
+  it('форматирует размер копии в КБ и МБ', () => {
+    expect(formatDebugSize(1_536)).toBe('~1,5 КБ')
+    expect(formatDebugSize(4 * 1024 * 1024)).toBe('~4 МБ')
+  })
+
   it('сохраняет путь машины, полный контекст, связь и обмен', () => {
     noteLink({ connection: 'connected', mic: 'live', host: 'blocked' })
     pushTrace('out', 'session.update', { type: 'session.update', session: { model: 'gpt-realtime-2.1-mini' } })
@@ -62,7 +77,7 @@ describe('formatDebugDump', () => {
     expect(text).not.toContain('sk-')
   })
 
-  it('покадровое событие пишет в консоль и не попадает в копию', () => {
+  it('покадровое событие не пишет в консоль и не попадает в копию', () => {
     const lines: unknown[][] = []
     const original = console.log
     console.log = (...args: unknown[]) => {
@@ -76,7 +91,35 @@ describe('formatDebugDump', () => {
     }
     expect(getTrace().length).toBe(before)
     expect(formatDebugDump({ path: 'choosing.listening', context: {} })).not.toContain('response.output_audio.delta')
-    expect(String(lines[0]?.[0])).toContain('[aisigame')
-    expect(String(lines[0]?.[0])).toContain('response.output_audio.delta')
+    expect(lines).toEqual([])
+  })
+
+  it('готовит ограниченный и обезличенный батч для мастера', () => {
+    const cursor = getTrace().at(-1)?.id ?? 0
+    pushTrace('note', 'joiner error Bearer secret-value', {
+      apiKey: 'sk-test-secret',
+      detail: 'x'.repeat(8_000),
+    })
+    const batch = sharedDebugBatch(cursor)
+
+    expect(batch.entries).toHaveLength(1)
+    expect(batch.entries[0]?.title).toContain('Bearer [key]')
+    expect(batch.entries[0]?.detail?.length).toBeLessThanOrEqual(4_000)
+    expect(batch.entries[0]?.detail).not.toContain('sk-test-secret')
+  })
+
+  it('добавляет в debug dump мастера ограниченный лог игрока', () => {
+    clearRemoteDebugForTests()
+    appendRemoteDebug('phone-client', 'Маша', [
+      { at: '2026-10-11T08:44:18.000Z', kind: 'note', title: 'застряла сверка', detail: '{"token":"Bearer secret"}' },
+    ])
+
+    const text = formatDebugDump({ path: 'lobby', context: {} })
+    expect(text).toContain('## remote player trace')
+    expect(text).toContain('### Маша (phone-client)')
+    expect(text).toContain('застряла сверка')
+    expect(text).not.toContain('Bearer secret')
+    expect(text).toContain('Bearer [key]')
+    clearRemoteDebugForTests()
   })
 })

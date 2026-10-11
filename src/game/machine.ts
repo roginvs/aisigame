@@ -347,6 +347,23 @@ export const gameMachine = setup({
     setResolvingStatus: assign({
       statusLine: () => 'Ведущая разбирает выбор',
     }),
+    handoffChooser: assign({
+      chooserId: ({ context, event }) =>
+        event.type === 'CHOOSER_OFFLINE' ? event.toPlayerId : context.chooserId,
+      clarifyReason: ({ context, event }) => {
+        if (event.type !== 'CHOOSER_OFFLINE') return context.clarifyReason
+        const disconnected = context.players.find((player) => player.id === event.fromPlayerId)?.name ?? 'Игрок'
+        const replacement = context.players.find((player) => player.id === event.toPlayerId)?.name ?? 'Игрок'
+        const choice = isFinal(context) ? 'тему финала' : 'вопрос'
+        return `${disconnected} отключился. ${replacement}, выбирайте ${choice}.`
+      },
+      statusLine: ({ context, event }) => {
+        if (event.type !== 'CHOOSER_OFFLINE') return context.statusLine
+        const disconnected = context.players.find((player) => player.id === event.fromPlayerId)?.name ?? 'Игрок'
+        const replacement = context.players.find((player) => player.id === event.toPlayerId)?.name ?? 'Игрок'
+        return `${disconnected} отключился · ${replacement} выбирает`
+      },
+    }),
     noteUnclear: assign({
       clarifyReason: ({ event }) => {
         if (event.type === 'QUESTION_UNCLEAR') return event.reason
@@ -697,6 +714,15 @@ export const gameMachine = setup({
       betMisses: () => 0,
       activePlayerId: () => null,
     }),
+    addPlayer: assign({
+      players: ({ context, event }) => {
+        if (event.type !== 'ADD_PLAYER') return context.players
+        const clientId = event.player.clientId?.trim()
+        if (!clientId) return context.players
+        if (context.players.some((player) => player.clientId === clientId)) return context.players
+        return [...context.players, { ...event.player, clientId }]
+      },
+    }),
     nextFinalist: assign({
       finalCursor: ({ context }) => context.finalCursor + 1,
     }),
@@ -726,7 +752,14 @@ export const gameMachine = setup({
     purposeBridge: ({ event }) => event.type === 'HOST_AUDIO_FINISHED' && event.purpose === 'bridge',
     purposeBet: ({ event }) => event.type === 'HOST_AUDIO_FINISHED' && event.purpose === 'bet',
     purposeTurn: ({ event }) => event.type === 'HOST_AUDIO_FINISHED' && event.purpose === 'turn',
+    purposeChooserHandoff: ({ event }) =>
+      event.type === 'HOST_AUDIO_FINISHED' && event.purpose === 'chooserHandoff',
     purposeFalseStart: ({ event }) => event.type === 'HOST_AUDIO_FINISHED' && event.purpose === 'falseStart',
+    validChooserHandoff: ({ context, event }) =>
+      event.type === 'CHOOSER_OFFLINE' &&
+      event.fromPlayerId === context.chooserId &&
+      event.toPlayerId !== event.fromPlayerId &&
+      inRoster(context, event.toPlayerId),
     sayFalseStart: ({ context }) => context.sayFalseStart,
     readFinal: ({ context, event }) =>
       event.type === 'HOST_AUDIO_FINISHED' && event.purpose === 'read' && isFinal(context),
@@ -848,6 +881,10 @@ export const gameMachine = setup({
       },
       { guard: liveRoundSkip(), target: '.finished', actions: 'clearActivePlay' },
     ],
+    ADD_PLAYER: {
+      guard: not(stateIn('startMenu')),
+      actions: 'addPlayer',
+    },
   },
   states: {
     startMenu: {
@@ -896,6 +933,13 @@ export const gameMachine = setup({
     choosing: {
       initial: 'listening',
       entry: 'setChoosingStatus',
+      on: {
+        CHOOSER_OFFLINE: {
+          guard: 'validChooserHandoff',
+          target: '#game.chooserHandoff',
+          actions: 'handoffChooser',
+        },
+      },
       states: {
         listening: {
           on: {
@@ -933,6 +977,11 @@ export const gameMachine = setup({
             PLAYER_SPEECH_STARTED: { target: 'listening', actions: 'setChoosingStatus' },
           },
         },
+      },
+    },
+    chooserHandoff: {
+      on: {
+        HOST_AUDIO_FINISHED: { guard: 'purposeChooserHandoff', target: 'choosing' },
       },
     },
     flashing: {
@@ -1111,6 +1160,7 @@ export const gameMachine = setup({
           { guard: ({ context }) => context.resumePath === 'choosing.listening', target: 'choosing.listening', actions: 'resumeClock' },
           { guard: ({ context }) => context.resumePath === 'choosing.resolving', target: 'choosing.resolving', actions: 'resumeClock' },
           { guard: ({ context }) => context.resumePath === 'choosing.clarifying', target: 'choosing.clarifying', actions: 'resumeClock' },
+          { guard: ({ context }) => context.resumePath === 'chooserHandoff', target: 'chooserHandoff', actions: 'resumeClock' },
           { guard: ({ context }) => context.resumePath === 'flashing', target: 'flashing', actions: 'resumeClock' },
           { guard: ({ context }) => context.resumePath === 'reading.armed', target: 'reading.armed', actions: 'resumeClock' },
           { guard: ({ context }) => context.resumePath === 'falseStartCue', target: 'falseStartCue', actions: 'resumeClock' },

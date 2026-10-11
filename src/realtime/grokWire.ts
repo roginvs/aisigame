@@ -197,14 +197,14 @@ export class GrokWire implements VoiceWire {
     this.player = new PcmPlayer(sampleRate, () => this.markPlayback(true), () => this.markPlayback(false))
   }
 
-  async open(apiKey: string, sink: VoiceSink): Promise<void> {
+  async open(apiKey: string, sink: VoiceSink, options?: { captureMic?: boolean }): Promise<void> {
     this.close()
     this.sink = sink
     this.turn = freshGrokTurn()
     const secret = await ephemeralSecret(apiKey)
     const mic = new PcmMic(sampleRate, (pcm) => this.sendPcm(pcm))
     try {
-      await mic.open()
+      await mic.open({ captureMic: options?.captureMic !== false })
     } catch (error) {
       throw new Error(micError(error))
     }
@@ -229,6 +229,14 @@ export class GrokWire implements VoiceWire {
 
   setOutputMuted(muted: boolean): void {
     this.player.setMuted(muted)
+  }
+
+  attachHostOutput(handler: (stream: MediaStream) => void): void {
+    this.player.attachHostOutput(handler)
+  }
+
+  setInputStream(stream: MediaStream | null): void {
+    this.mic?.setInputStream(stream)
   }
 
   close(): void {

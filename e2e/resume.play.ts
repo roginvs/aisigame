@@ -43,6 +43,8 @@ test('выход стирает партию, обновление страни�
 
   await page.reload()
   await expect(continueButton).toBeEnabled()
+  await expect(continueButton).toContainText('За столом · Турнир')
+  await expect(continueButton).not.toContainText('Прошлая игра:')
   await continueButton.click()
   await expect(page.locator('.eyebrow').first()).toContainText('Второй раунд')
   await expect(page.locator('.player', { hasText: 'Игрок 2' })).toContainText('100')
@@ -60,7 +62,8 @@ test('пакет с диска продолжается повторным вы�
 
   const continueButton = page.getByRole('button', { name: 'Продолжить прошлую игру' })
   await expect(continueButton).toBeEnabled()
-  await expect(page.getByText('Пак «чиллово-кнопочный #3»')).toBeVisible()
+  await expect(continueButton).toContainText('За столом · chill.siq')
+  await expect(page.getByText('Пак «chill.siq»')).toBeVisible()
   await expect(page.getByRole('button', { name: 'Начать игру' })).toBeEnabled()
   const beforePick = await page.evaluate(() => localStorage.getItem('aisigame.game'))
 

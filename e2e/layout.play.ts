@@ -23,6 +23,9 @@ test('экран вопроса без скроллбаров и с нормал
   await expect(page.locator('.bubble.from-host', { hasText: 'Какого цвета круг' })).toBeVisible()
   await page.getByRole('button', { name: 'Игрок 2', exact: true }).click()
   await expect(page.locator('.answerer')).toHaveText('Отвечает игрок 2')
+  // Состояние ответа ограничено таймером: сохраняем геометрию до серии
+  // последующих проверок, а не ждём тот же transient-элемент в самом конце.
+  const answererBox = await page.locator('.answerer').boundingBox()
 
   await page.screenshot({ path: 'test-results/layout-question.png' })
 
@@ -71,17 +74,24 @@ test('экран вопроса без скроллбаров и с нормал
   const image = page.locator('.question-media img')
   await expect(image).toBeVisible()
   const imageBox = await image.boundingBox()
-  const answerer = await page.locator('.answerer').boundingBox()
   expect(questionBox).not.toBeNull()
   expect(imageBox).not.toBeNull()
-  expect(answerer).not.toBeNull()
-  if (!questionBox || !imageBox || !answerer) return
+  expect(answererBox).not.toBeNull()
+  if (!questionBox || !imageBox || !answererBox) return
   expect(imageBox.y).toBeGreaterThanOrEqual(questionBox.y - 1)
   expect(imageBox.y + imageBox.height).toBeLessThanOrEqual(questionBox.y + questionBox.height + 2)
-  expect(answerer.y + answerer.height).toBeLessThanOrEqual(questionBox.y + questionBox.height + 2)
+  expect(answererBox.y + answererBox.height).toBeLessThanOrEqual(questionBox.y + questionBox.height + 2)
 
   await expect(page.locator('.tech-column')).toHaveCount(0)
-  await expect(page.getByRole('button', { name: 'Скопировать дебаг' })).toBeVisible()
+  const copyDebug = page.locator('.debug-copy')
+  await expect(copyDebug).toHaveAccessibleName('Скопировать дебаг')
+  await expect(copyDebug).toBeVisible()
+  const copyWidth = (await copyDebug.boundingBox())?.width
+  await copyDebug.click()
+  await expect(copyDebug).toHaveAccessibleName(/Скопировано ~[\d,]+ (КБ|МБ)/)
+  expect((await copyDebug.boundingBox())?.width).toBe(copyWidth)
+  await expect(copyDebug).toHaveAccessibleName('Скопировать дебаг', { timeout: 3_000 })
+  expect((await copyDebug.boundingBox())?.width).toBe(copyWidth)
   await expect(page.getByRole('button', { name: 'Пропустить раунд' })).toBeVisible()
   expect(logs.some((line) => line.includes('[aisigame'))).toBe(true)
   await expect(page.locator('.cost')).toHaveText('973')

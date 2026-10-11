@@ -21,6 +21,76 @@ export type SavedGame = SavedMatch & {
   packName: string
   /** SHA-256 своего файла, hex. Пусто у каталога и у старых снимков без хеша. */
   packHash: string
+  mode?: 'table' | 'conference'
+  /** Снимок сделан в комнате мастера до запуска самой партии. */
+  conferenceLobby?: boolean
+  jitsiUrl?: string
+  roomId?: string
+  chat?: { name: string; text: string }[]
+}
+
+export type PersistMatchConference = {
+  mode?: 'table' | 'conference'
+  conferenceLobby?: boolean
+  jitsiUrl?: string
+  roomId?: string
+  chat?: { name: string; text: string }[]
+}
+
+export function persistConferenceLobby(
+  input: {
+    packId: string
+    packFile: string
+    packHash?: string
+    pack: QuestionPack
+    master: Player
+    jitsiUrl: string
+    roomId: string
+    chat?: { name: string; text: string }[]
+  },
+  storage: Storage = localStorage,
+): SavedGame | null {
+  const game = sanitize({
+    version: 1,
+    packId: input.packId,
+    packFile: input.packFile,
+    packName: input.pack.name,
+    packHash: normalizeHash(input.packHash),
+    mode: 'conference',
+    conferenceLobby: true,
+    jitsiUrl: input.jitsiUrl,
+    roomId: input.roomId,
+    chat: input.chat,
+    players: [input.master],
+    roundIndex: input.pack.rounds[0]?.index ?? 0,
+    playedIds: [],
+    missedIds: [],
+    chooserId: input.master.id,
+    finalists: [],
+    bets: [],
+    finalCursor: 0,
+    betMisses: 0,
+    activeQuestionId: null,
+    activePlayerId: null,
+    activeStake: null,
+    attemptId: 0,
+    clarifications: 0,
+    heard: '',
+    wrongHeard: [],
+    sayCloseGuess: false,
+    announceKind: null,
+    judgmentStatus: null,
+    phase: 'welcoming',
+  })
+  if (!game) return readSavedGame(storage)
+  storage.setItem(gameStorageKey, JSON.stringify(game))
+  return game
+}
+
+/** Режим партии из снимка. Старые снимки без mode — стол за одним экраном. */
+export function readMatchMode(saved: SavedGame | null | undefined): 'table' | 'conference' {
+  if (saved?.mode === 'conference') return 'conference'
+  return 'table'
 }
 
 const announceKinds: AnnounceKind[] = ['correct', 'incorrect', 'silence', 'nobody', 'unclear', 'repeat']
@@ -40,6 +110,7 @@ const canonicalPhases: Record<string, string> = {
   'choosing.listening': 'choosing.listening',
   'choosing.resolving': 'choosing.listening',
   'choosing.clarifying': 'choosing.listening',
+  chooserHandoff: 'choosing.listening',
   flashing: 'flashing',
   reading: 'reading.sealed',
   'reading.sealed': 'reading.sealed',
@@ -114,8 +185,11 @@ export function resumeNeedsFile(saved: SavedGame | null, diskPackId = uploadedPa
 }
 
 export function resumePackTitle(saved: SavedGame | null, diskPackId = uploadedPackId): string {
-  if (!resumeNeedsFile(saved, diskPackId) || !saved) return ''
-  return saved.packName.trim() || saved.packFile.trim()
+  if (!saved) return ''
+  if (resumeNeedsFile(saved, diskPackId)) {
+    return saved.packFile.trim() || saved.packName.trim() || saved.packId.trim()
+  }
+  return saved.packName.trim() || saved.packId.trim()
 }
 
 /** Имя файла с диска, как его выбрали. Пустое не подменяется названием пакета. */
@@ -157,7 +231,14 @@ function normalizeHash(value: string | null | undefined): string {
 }
 
 export function persistMatch(
-  input: { packId: string; packFile: string; packHash?: string; path: string; context: GameContext },
+  input: {
+    packId: string
+    packFile: string
+    packHash?: string
+    path: string
+    context: GameContext
+    conference?: PersistMatchConference
+  },
   storage: Storage = localStorage,
 ): SavedGame | null {
   if (input.path === 'startMenu') return readSavedGame(storage)
@@ -170,6 +251,7 @@ export function persistMatch(
     (input.packId === uploadedPackId && previous?.packId === input.packId && previous.packFile === input.packFile
       ? previous.packHash
       : '')
+  const conference = conferenceForSave(input.conference, previous)
   const game = sanitize({
     version: 1,
     packId: input.packId,
@@ -177,6 +259,7 @@ export function persistMatch(
     packName: input.context.packName,
     packHash,
     ...matchFromContext(input.context, phase),
+    ...conference,
   })
   if (!game) return readSavedGame(storage)
   storage.setItem(gameStorageKey, JSON.stringify(game))
@@ -244,9 +327,34 @@ export function restoredMatch(pack: QuestionPack, saved: SavedMatch): Pick<
   }
 }
 
+function conferenceForSave(
+  input: PersistMatchConference | undefined,
+  previous: SavedGame | null,
+): Pick<SavedGame, 'mode' | 'conferenceLobby' | 'jitsiUrl' | 'roomId' | 'chat'> {
+  if (input?.mode === 'table') return { mode: 'table' }
+  const mode = input?.mode ?? previous?.mode
+  const conferenceLobby = input?.conferenceLobby ?? previous?.conferenceLobby
+  const jitsiUrl = input?.jitsiUrl ?? previous?.jitsiUrl
+  const roomId = input?.roomId ?? previous?.roomId
+  const chatSource = input?.chat ?? previous?.chat
+  const chat = chatSource ? chatSource.slice(-200) : undefined
+  return {
+    ...(mode === 'conference' ? { mode } : mode === 'table' ? { mode } : {}),
+    ...(conferenceLobby === true ? { conferenceLobby: true } : {}),
+    ...(typeof jitsiUrl === 'string' && jitsiUrl.trim() ? { jitsiUrl: jitsiUrl.trim() } : {}),
+    ...(typeof roomId === 'string' && roomId.trim() ? { roomId: roomId.trim() } : {}),
+    ...(chat && chat.length > 0 ? { chat } : {}),
+  }
+}
+
 function matchFromContext(context: GameContext, phase: string): SavedMatch {
   return {
-    players: context.players.map((player) => ({ id: player.id, name: player.name, score: player.score })),
+    players: context.players.map((player) => ({
+      id: player.id,
+      name: player.name,
+      score: player.score,
+      ...(player.clientId ? { clientId: player.clientId } : {}),
+    })),
     roundIndex: context.roundIndex,
     playedIds: [...context.playedIds],
     missedIds: [...context.missedIds],
@@ -353,12 +461,14 @@ function sanitize(value: unknown): SavedGame | null {
   const judgmentStatus =
     record.judgmentStatus === null ? null : judgmentStatuses.find((status) => status === record.judgmentStatus)
   if (judgmentStatus === undefined) return null
+  const conference = normalizeConference(record)
   return {
     version: 1,
     packId: record.packId,
     packFile: record.packFile,
     packName: record.packName,
     packHash,
+    ...conference,
     players,
     roundIndex,
     playedIds,
@@ -393,9 +503,42 @@ function normalizePlayers(value: unknown): Player[] | null {
     if (typeof record.score !== 'number' || !Number.isFinite(record.score)) return null
     if (seen.has(record.id)) return null
     seen.add(record.id)
-    players.push({ id: record.id, name: record.name.trim(), score: record.score })
+    const clientId = typeof record.clientId === 'string' ? record.clientId.trim() : ''
+    players.push({
+      id: record.id,
+      name: record.name.trim(),
+      score: record.score,
+      ...(clientId ? { clientId } : {}),
+    })
   }
   return players
+}
+
+function normalizeConference(
+  record: Record<string, unknown>,
+): Pick<SavedGame, 'mode' | 'conferenceLobby' | 'jitsiUrl' | 'roomId' | 'chat'> {
+  const out: Pick<SavedGame, 'mode' | 'conferenceLobby' | 'jitsiUrl' | 'roomId' | 'chat'> = {}
+  if (record.mode === 'conference') out.mode = 'conference'
+  else if (record.mode === 'table') out.mode = 'table'
+  if (record.conferenceLobby === true) out.conferenceLobby = true
+  if (typeof record.jitsiUrl === 'string' && record.jitsiUrl.trim()) out.jitsiUrl = record.jitsiUrl.trim()
+  if (typeof record.roomId === 'string' && record.roomId.trim()) out.roomId = record.roomId.trim()
+  const chat = normalizeChat(record.chat)
+  if (chat && chat.length > 0) out.chat = chat.slice(-200)
+  return out
+}
+
+function normalizeChat(value: unknown): { name: string; text: string }[] | null {
+  if (value === undefined) return null
+  if (!Array.isArray(value)) return null
+  const messages: { name: string; text: string }[] = []
+  for (const item of value) {
+    if (!item || typeof item !== 'object') return null
+    const row = item as Record<string, unknown>
+    if (typeof row.name !== 'string' || typeof row.text !== 'string') return null
+    messages.push({ name: row.name, text: row.text })
+  }
+  return messages
 }
 
 function rosterHas(players: readonly Player[], id: PlayerId | null): id is PlayerId {

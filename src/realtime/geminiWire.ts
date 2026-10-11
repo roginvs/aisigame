@@ -91,7 +91,7 @@ export class GeminiWire implements VoiceWire {
     )
   }
 
-  async open(apiKey: string, sink: VoiceSink): Promise<void> {
+  async open(apiKey: string, sink: VoiceSink, options?: { captureMic?: boolean }): Promise<void> {
     this.close()
     this.sink = sink
     this.responseId = ''
@@ -102,7 +102,7 @@ export class GeminiWire implements VoiceWire {
     this.names.clear()
     const mic = new PcmMic(inputRate, (pcm) => this.sendPcm(pcm))
     try {
-      await mic.open()
+      await mic.open({ captureMic: options?.captureMic !== false })
     } catch (error) {
       throw new Error(micError(error))
     }
@@ -165,6 +165,14 @@ export class GeminiWire implements VoiceWire {
 
   setOutputMuted(muted: boolean): void {
     this.player.setMuted(muted)
+  }
+
+  attachHostOutput(handler: (stream: MediaStream) => void): void {
+    this.player.attachHostOutput(handler)
+  }
+
+  setInputStream(stream: MediaStream | null): void {
+    this.mic?.setInputStream(stream)
   }
 
   close(): void {

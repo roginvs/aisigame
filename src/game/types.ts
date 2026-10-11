@@ -18,6 +18,7 @@ export type SpeechPurpose =
   | 'bridge'
   | 'bet'
   | 'turn'
+  | 'chooserHandoff'
   | 'falseStart'
 
 export type RoundKind = 'normal' | 'final'
@@ -74,6 +75,8 @@ export type Player = {
   id: PlayerId
   name: string
   score: number
+  /** Онлайн-участник конференции. В режиме за столом не задаётся. */
+  clientId?: string
 }
 
 export type AnswerJudgment = {
@@ -127,11 +130,13 @@ export type GameEvent =
   | { type: 'TALKED_OVER' }
   | { type: 'ANSWER_JUDGED'; judgment: AnswerJudgment }
   | { type: 'ANSWER_ECHO' }
+  | { type: 'CHOOSER_OFFLINE'; fromPlayerId: PlayerId; toPlayerId: PlayerId }
   | { type: 'PAUSE'; path: string }
   | { type: 'RESUME' }
   | { type: 'STOP' }
   | { type: 'NEXT_ROUND' }
   | { type: 'RESET_GAME' }
+  | { type: 'ADD_PLAYER'; player: Player }
 
 export type GameContext = {
   players: Player[]

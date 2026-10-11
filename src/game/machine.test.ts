@@ -828,6 +828,32 @@ describe('game machine', () => {
     expect(actor.getSnapshot().context.chooserId).toBe(1)
   })
 
+  it('передаёт выбор другому игроку и ждёт объявления, если выбирающий отключился', () => {
+    const actor = createActor(gameMachine)
+    actor.start()
+    actor.send({
+      type: 'START_GAME',
+      pack: demoPack,
+      players: [
+        { id: 1, name: 'Маша', score: 0, clientId: 'master' },
+        { id: 2, name: 'Вася', score: 0, clientId: 'guest' },
+      ],
+    })
+    actor.send({ type: 'CONNECTED' })
+    actor.send({ type: 'HOST_AUDIO_FINISHED', purpose: 'welcome' })
+
+    actor.send({ type: 'CHOOSER_OFFLINE', fromPlayerId: 2, toPlayerId: 1 })
+    expect(statePath(actor.getSnapshot().value)).toBe('chooserHandoff')
+    expect(actor.getSnapshot().context.chooserId).toBe(1)
+    expect(actor.getSnapshot().context.clarifyReason).toBe('Вася отключился. Маша, выбирайте вопрос.')
+
+    actor.send({ type: 'HOST_AUDIO_FINISHED', purpose: 'turn' })
+    expect(statePath(actor.getSnapshot().value)).toBe('chooserHandoff')
+    actor.send({ type: 'HOST_AUDIO_FINISHED', purpose: 'chooserHandoff' })
+    expect(statePath(actor.getSnapshot().value)).toBe('choosing.listening')
+    expect(actor.getSnapshot().context.statusLine).toBe('назовите тему и стоимость')
+  })
+
   it('в начале следующего раунда, включая выбор темы финала, снова выбирает второй игрок', () => {
     const pack: QuestionPack = {
       name: 'Два раунда',
@@ -1496,6 +1522,36 @@ describe('game machine', () => {
     actor.send({ type: 'HOST_AUDIO_FINISHED', purpose: 'clarify' })
     actor.send({ type: 'QUESTION_SELECTED', themeId: 'Тема 2', value: 100 })
     expect(actor.getSnapshot().context.activeQuestionId).toBe('r0-t1-100-0')
+  })
+  it('ADD_PLAYER добавляет игрока с clientId и не меняет фазу', () => {
+    const actor = reachBuzzing()
+    const phaseBefore = statePath(actor.getSnapshot().value)
+    const scoresBefore = new Map(actor.getSnapshot().context.players.map((player) => [player.id, player.score]))
+    actor.send({
+      type: 'ADD_PLAYER',
+      player: { id: 4, name: 'Удалённый', score: 0, clientId: 'client-4' },
+    })
+    const snap = actor.getSnapshot()
+    expect(statePath(snap.value)).toBe(phaseBefore)
+    for (const player of snap.context.players) {
+      if (scoresBefore.has(player.id)) expect(player.score).toBe(scoresBefore.get(player.id))
+    }
+    expect(snap.context.players).toContainEqual({ id: 4, name: 'Удалённый', score: 0, clientId: 'client-4' })
+  })
+
+  it('ADD_PLAYER с тем же clientId не дублирует игрока', () => {
+    const actor = reachBuzzing()
+    actor.send({
+      type: 'ADD_PLAYER',
+      player: { id: 4, name: 'Первый', score: 0, clientId: 'same-client' },
+    })
+    actor.send({
+      type: 'ADD_PLAYER',
+      player: { id: 5, name: 'Второй', score: 0, clientId: 'same-client' },
+    })
+    const ids = actor.getSnapshot().context.players.filter((player) => player.clientId === 'same-client')
+    expect(ids).toHaveLength(1)
+    expect(ids[0]).toMatchObject({ id: 4, name: 'Первый', score: 0 })
   })
 })
 

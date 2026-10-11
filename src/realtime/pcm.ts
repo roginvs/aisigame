@@ -1,5 +1,12 @@
 import { gameAudioContext } from '../audio/beep.ts'
 
+/** Тихая дорожка без getUserMedia — сессия модели в конференции до кнопки микрофона. */
+export function createSilentMicStream(): MediaStream {
+  const ctx = gameAudioContext()
+  void ctx.resume()
+  return ctx.createMediaStreamDestination().stream
+}
+
 /** PCM16 little-endian в base64 и обратно. Так аудио едет по WebSocket у Grok и Gemini. */
 export function pcmToBase64(pcm: Int16Array): string {
   const bytes = new Uint8Array(pcm.buffer, pcm.byteOffset, pcm.byteLength)
@@ -38,6 +45,7 @@ export class PcmPlayer {
   private muted = false
   private epoch = 0
   private nodes: AudioBufferSourceNode[] = []
+  private hostTap: MediaStreamAudioDestinationNode | null = null
   private readonly rate: number
   private readonly onStarted: () => void
   private readonly onDrained: () => void
@@ -58,6 +66,7 @@ export class PcmPlayer {
     const source = ctx.createBufferSource()
     source.buffer = buffer
     source.connect(ctx.destination)
+    if (this.hostTap) source.connect(this.hostTap)
     const epoch = this.epoch
     const startAt = Math.max(ctx.currentTime + 0.02, this.next)
     source.start(startAt)
@@ -104,6 +113,18 @@ export class PcmPlayer {
     if (muted) this.stop()
   }
 
+  /** Ответ модели в Jitsi: локальный выход на destination не трогаем. */
+  attachHostOutput(handler: (stream: MediaStream) => void): void {
+    if (this.hostTap) {
+      handler(this.hostTap.stream)
+      return
+    }
+    const ctx = gameAudioContext()
+    void ctx.resume()
+    this.hostTap = ctx.createMediaStreamDestination()
+    handler(this.hostTap.stream)
+  }
+
   private drain(): void {
     this.started = false
     this.finishing = false
@@ -117,10 +138,12 @@ export class PcmPlayer {
 /** Микрофон комнаты кусками PCM. Дорожка глушится, пока ведущая говорит: так же, как у OpenAI. */
 export class PcmMic {
   private enabled = false
-  private stream: MediaStream | null = null
+  private ownStream: MediaStream | null = null
   private source: MediaStreamAudioSourceNode | null = null
   private processor: ScriptProcessorNode | null = null
   private mute: GainNode | null = null
+  private graphReady = false
+  private captureStream: MediaStream | null = null
   private readonly rate: number
   private readonly onPcm: (pcm: Int16Array) => void
 
@@ -129,34 +152,32 @@ export class PcmMic {
     this.onPcm = onPcm
   }
 
-  async open(): Promise<void> {
-    this.stream = await navigator.mediaDevices.getUserMedia({
-      audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true },
-    })
-    for (const track of this.stream.getAudioTracks()) track.enabled = false
-    const ctx = gameAudioContext()
-    void ctx.resume()
-    const source = ctx.createMediaStreamSource(this.stream)
-    const processor = ctx.createScriptProcessor(4096, 1, 1)
-    processor.onaudioprocess = (event) => {
-      if (!this.enabled) return
-      const input = event.inputBuffer.getChannelData(0)
-      const pcm = downsample(input, ctx.sampleRate, this.rate)
-      if (pcm.length) this.onPcm(pcm)
+  async open(options?: { captureMic?: boolean }): Promise<void> {
+    if (options?.captureMic === false) {
+      this.ownStream = createSilentMicStream()
+    } else {
+      this.ownStream = await navigator.mediaDevices.getUserMedia({
+        audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true },
+      })
     }
-    const mute = ctx.createGain()
-    mute.gain.value = 0
-    source.connect(processor)
-    processor.connect(mute)
-    mute.connect(ctx.destination)
-    this.source = source
-    this.processor = processor
-    this.mute = mute
+    for (const track of this.ownStream.getAudioTracks()) track.enabled = false
+    this.ensureGraph()
+    this.setCaptureStream(this.ownStream)
+  }
+
+  /** Смесь комнаты вместо микрофона; null — снова свой mic из open(). */
+  setInputStream(stream: MediaStream | null): void {
+    if (!this.graphReady) return
+    if (stream === null) {
+      if (this.ownStream) this.setCaptureStream(this.ownStream)
+      return
+    }
+    this.setCaptureStream(stream)
   }
 
   setEnabled(enabled: boolean): void {
     this.enabled = enabled
-    this.stream?.getAudioTracks().forEach((track) => {
+    this.captureStream?.getAudioTracks().forEach((track) => {
       track.enabled = enabled
     })
   }
@@ -169,8 +190,41 @@ export class PcmMic {
     this.processor = null
     this.mute = null
     this.source = null
-    this.stream?.getTracks().forEach((track) => track.stop())
-    this.stream = null
+    this.graphReady = false
+    this.ownStream?.getTracks().forEach((track) => track.stop())
+    this.ownStream = null
+  }
+
+  private ensureGraph(): void {
+    if (this.graphReady) return
+    const ctx = gameAudioContext()
+    void ctx.resume()
+    const processor = ctx.createScriptProcessor(4096, 1, 1)
+    processor.onaudioprocess = (event) => {
+      if (!this.enabled) return
+      const input = event.inputBuffer.getChannelData(0)
+      const pcm = downsample(input, ctx.sampleRate, this.rate)
+      if (pcm.length) this.onPcm(pcm)
+    }
+    const mute = ctx.createGain()
+    mute.gain.value = 0
+    processor.connect(mute)
+    mute.connect(ctx.destination)
+    this.processor = processor
+    this.mute = mute
+    this.graphReady = true
+  }
+
+  private setCaptureStream(stream: MediaStream): void {
+    if (!this.processor) return
+    const ctx = gameAudioContext()
+    void ctx.resume()
+    this.source?.disconnect()
+    const source = ctx.createMediaStreamSource(stream)
+    source.connect(this.processor)
+    this.source = source
+    this.captureStream = stream
+    for (const track of stream.getAudioTracks()) track.enabled = this.enabled
   }
 }
 

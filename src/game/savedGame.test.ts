@@ -5,7 +5,9 @@ import {
   clearSavedGame,
   gameStorageKey,
   packCanResume,
+  persistConferenceLobby,
   persistMatch,
+  readMatchMode,
   readSavedGame,
   decideResumeFile,
   resumeFileName,
@@ -264,9 +266,10 @@ describe('saved game', () => {
     expect(resumeNeedsFile(disk)).toBe(true)
     expect(resumeNeedsFile(sample({ packId: 'demo' }))).toBe(false)
     expect(resumeNeedsFile(null)).toBe(false)
-    expect(resumePackTitle(disk)).toBe('чиллово-кнопочный #3')
+    expect(resumePackTitle(disk)).toBe('chill.siq')
     expect(resumePackTitle(sample({ packId: 'file', packName: '  ', packFile: 'other.xml' }))).toBe('other.xml')
-    expect(resumePackTitle(sample({ packId: 'demo' }))).toBe('')
+    expect(resumePackTitle(sample({ packId: 'demo' }))).toBe('Демо')
+    expect(resumePackTitle(sample({ packId: 'legacy', packName: '  ' }))).toBe('legacy')
     expect(readSavedGame(memory())).toBeNull()
     storage.setItem(gameStorageKey, '{')
     expect(readSavedGame(storage)).toBeNull()
@@ -498,5 +501,104 @@ describe('saved game', () => {
     expect(weird?.packFile).toBe('kept.siq')
     expect(weird?.packHash).toBe('')
     expect(weird).not.toBeNull()
+  })
+
+  it('старый снимок без mode читается как стол', () => {
+    const storage = memory()
+    storage.setItem(gameStorageKey, JSON.stringify(sample()))
+    const saved = readSavedGame(storage)
+    expect(saved).not.toBeNull()
+    expect(saved?.mode).toBeUndefined()
+    expect(readMatchMode(saved)).toBe('table')
+  })
+
+  it('поля конференции сохраняются и читаются обратно', () => {
+    const storage = memory()
+    const chat = [
+      { name: 'Аня', text: 'привет' },
+      { name: 'Боря', text: 'ответ' },
+    ]
+    persistMatch(
+      {
+        packId: 'demo',
+        packFile: 'demo.siq',
+        path: 'choosing.listening',
+        context: context({
+          players: [
+            { id: 1, name: 'Хост', score: 0, clientId: 'host-1' },
+            { id: 2, name: 'Гость', score: 0, clientId: 'guest-2' },
+          ],
+        }),
+        conference: {
+          mode: 'conference',
+          jitsiUrl: 'https://meet.example/jitsi',
+          roomId: 'room-abc',
+          chat,
+        },
+      },
+      storage,
+    )
+    const saved = readSavedGame(storage)
+    expect(saved?.mode).toBe('conference')
+    expect(saved?.jitsiUrl).toBe('https://meet.example/jitsi')
+    expect(saved?.roomId).toBe('room-abc')
+    expect(saved?.chat).toEqual(chat)
+    expect(saved?.players[0]?.clientId).toBe('host-1')
+    expect(readMatchMode(saved)).toBe('conference')
+  })
+
+  it('сохраняет онлайн-лобби до старта машины и отличает его от начатой партии', () => {
+    const storage = memory()
+    const lobby = persistConferenceLobby(
+      {
+        packId: 'demo',
+        packFile: 'demo.siq',
+        packHash: 'ab'.repeat(32),
+        pack: demoPack,
+        master: { id: 1, name: 'Мастер', score: 0, clientId: 'master-1' },
+        jitsiUrl: 'https://meet.example/jitsi',
+        roomId: 'room-lobby',
+      },
+      storage,
+    )
+    expect(lobby).toMatchObject({
+      mode: 'conference',
+      conferenceLobby: true,
+      roomId: 'room-lobby',
+      phase: 'welcoming',
+    })
+    expect(lobby?.players).toEqual([{ id: 1, name: 'Мастер', score: 0, clientId: 'master-1' }])
+    expect(packCanResume(readSavedGame(storage), ['demo'])).toBe(true)
+
+    persistMatch(
+      {
+        packId: 'demo',
+        packFile: 'demo.siq',
+        packHash: 'ab'.repeat(32),
+        path: 'choosing.listening',
+        context: context(),
+        conference: {
+          mode: 'conference',
+          conferenceLobby: false,
+          jitsiUrl: 'https://meet.example/jitsi',
+          roomId: 'room-lobby',
+        },
+      },
+      storage,
+    )
+    expect(readSavedGame(storage)?.conferenceLobby).toBeUndefined()
+
+    persistMatch(
+      {
+        packId: 'demo',
+        packFile: 'demo.siq',
+        path: 'choosing.listening',
+        context: context(),
+        conference: { mode: 'table' },
+      },
+      storage,
+    )
+    expect(readSavedGame(storage)).toMatchObject({ mode: 'table' })
+    expect(readSavedGame(storage)?.roomId).toBeUndefined()
   })
 })
