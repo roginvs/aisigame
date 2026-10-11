@@ -7,6 +7,7 @@ import { createMicMixer, type MicMixer } from './audioMix.ts'
 import { nextCameraDeviceId } from './camera.ts'
 import { createSpeakerActivity } from './speakerActivity.ts'
 import { conferenceAudioStream, createConferenceAudioOutput } from './conferenceAudio.ts'
+import { pushTrace } from '../debug/trace.ts'
 
 type JitsiMeetJS = {
   init: (options: unknown) => void
@@ -532,27 +533,45 @@ export async function connectJitsiConference(input: {
     async cycleCamera() {
       if (!localVideo || !cameraOn) return
       const devices = await navigator.mediaDevices.enumerateDevices()
-      const currentDeviceId =
+      const cameras = devices.filter((device) => device.kind === 'videoinput' && device.deviceId)
+      if (cameras.length <= 1) return
+      let tryFrom =
         cameraDeviceId ?? localVideo.getOriginalStream?.().getVideoTracks()[0]?.getSettings().deviceId ?? null
-      const deviceId = nextCameraDeviceId(devices, currentDeviceId)
-      if (!deviceId || deviceId === currentDeviceId) return
-      const tracks = await JitsiMeetJS.createLocalTracks({ devices: ['video'], cameraDeviceId: deviceId })
-      const nextVideo = tracks[0] ?? null
-      if (!nextVideo) throw new Error('Следующая камера недоступна')
-      const previousVideo = localVideo
-      const element = videoBindings.get(localId())
-      try {
-        await conference.replaceTrack(previousVideo, nextVideo)
-        if (element) previousVideo.detach(element)
-        localVideo = nextVideo
-        cameraDeviceId = deviceId
-        attachVideo(localId())
-        previousVideo.dispose()
-        emitTiles()
-      } catch (error) {
-        nextVideo.dispose()
-        throw error
+      let lastError: unknown = null
+      for (let attempt = 0; attempt < cameras.length - 1; attempt += 1) {
+        const deviceId = nextCameraDeviceId(devices, tryFrom)
+        if (!deviceId || deviceId === tryFrom) break
+        tryFrom = deviceId
+        let nextVideo: JitsiTrack | null = null
+        try {
+          const tracks = await JitsiMeetJS.createLocalTracks({ devices: ['video'], cameraDeviceId: deviceId })
+          nextVideo = tracks[0] ?? null
+          if (!nextVideo) throw new Error('Следующая камера недоступна')
+          const previousVideo = localVideo
+          const element = videoBindings.get(localId())
+          await conference.replaceTrack(previousVideo, nextVideo)
+          localVideo = nextVideo
+          nextVideo = null
+          cameraDeviceId = deviceId
+          try {
+            if (element) previousVideo.detach(element)
+            attachVideo(localId())
+          } catch {
+            // Камера в комнате уже новая; плитка подцепится при следующем bind.
+          }
+          previousVideo.dispose()
+          emitTiles()
+          return
+        } catch (error) {
+          nextVideo?.dispose()
+          lastError = error
+          pushTrace('note', 'Камера не переключилась, пробуем следующую', {
+            deviceId,
+            error: error instanceof Error ? error.message : String(error),
+          })
+        }
       }
+      throw lastError instanceof Error ? lastError : new Error('Следующая камера недоступна')
     },
     micLive: () => micLive,
     cameraOn: () => cameraOn,
