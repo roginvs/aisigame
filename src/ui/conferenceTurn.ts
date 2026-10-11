@@ -58,3 +58,21 @@ export function conferenceTurnTitle(
   if (!player) return null
   return `${player.name} ${action}`
 }
+
+/**
+ * Пока модель в конференции слышит только выбирающего или отвечающего —
+ * та же строка у всех, в том числе у joiners по снимку фазы.
+ * В окне кнопки, лобби и на ставке финала микс общий — подсказки нет.
+ */
+export function conferenceSoloListenHint(path: string, conferenceLayout: boolean): string | null {
+  if (!conferenceLayout) return null
+  if (
+    path === 'choosing.listening' ||
+    path === 'choosing.clarifying' ||
+    path === 'answering.waiting' ||
+    path === 'answering.hearing'
+  ) {
+    return 'Никого другого не слушаю'
+  }
+  return null
+}

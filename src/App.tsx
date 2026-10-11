@@ -21,6 +21,7 @@ import {
 } from './conference/prefs.ts'
 import { contextFromSnapshot } from './conference/snapshotView.ts'
 import { jitsiHostFromBase, stripInviteParams } from './conference/stripInvite.ts'
+import { focusedModelParticipantId } from './conference/audioMix.ts'
 import type { ConferenceHandle, ConferenceTile } from './conference/media.ts'
 import { createConferenceTransport } from './conference/transportFactory.ts'
 import { putPack, getPack } from './conference/packDb.ts'
@@ -307,6 +308,15 @@ export default function App() {
   useEffect(() => {
     conferenceTilesRef.current = conferenceTiles
   }, [conferenceTiles])
+
+  useEffect(() => {
+    if (conferenceRole !== 'master') return
+    const handle = conferenceHandleRef.current
+    if (!handle) return
+    handle.setModelHearOnly(
+      focusedModelParticipantId(path, chooserParticipantId, answererParticipantId),
+    )
+  }, [answererParticipantId, chooserParticipantId, conferenceRole, path])
 
   useEffect(() => {
     if (
@@ -790,6 +800,7 @@ export default function App() {
           conferenceChatRef.current = chat
           setConferenceChat(chat)
         },
+        isRoomSpeaking: () => conferenceHandleRef.current?.anyoneSpeaking() ?? false,
         resumePlayers: restoringGame ? resume?.saved.players : undefined,
       })
       masterSessionRef.current = session

@@ -7,6 +7,8 @@ import { buildConferenceSnapshot, timerRemainingMs } from './buildSnapshot.ts'
 import { CHUNK_BYTES, createPackTransferMaster, type PackTransferMaster } from './packTransfer.ts'
 import {
   LOBBY_IDLE_INTERVAL_MS,
+  LOBBY_SILENCE_BEFORE_SPEECH_MS,
+  LOBBY_SILENCE_POLL_MS,
   LOBBY_SPEECH_MIN_INTERVAL_MS,
   requestLobbySpeech,
   packLobbySummary,
@@ -34,6 +36,8 @@ export type MasterSessionOptions = {
   setChat: (chat: ConferenceChatLine[]) => void
   /** Игроки сохранённой партии. Если переданы, лобби не объявляется и не рассылается. */
   resumePlayers?: readonly Player[]
+  /** Речь людей в комнате (без «Ведущей»): лобби ждёт тишину перед репликой. */
+  isRoomSpeaking?: () => boolean
 }
 
 export class MasterSession {
@@ -53,11 +57,14 @@ export class MasterSession {
   private spokenLobbySignature = ''
   private lastLobbySpeechAt = 0
   private lobbySpeechTimer = 0
+  private lobbyQuietSince = 0
+  private lobbyNeedsOpenedSpeech = false
   private heartbeatTimer = 0
   private presenceTimer = 0
   private onRosterCb: () => void
   private getChat: () => ConferenceChatLine[]
   private setChat: (chat: ConferenceChatLine[]) => void
+  private isRoomSpeaking: () => boolean
   private machineSub: { unsubscribe: () => void } | null = null
   private masterClientId: string
   private packOfferSent = false
@@ -79,6 +86,7 @@ export class MasterSession {
     this.onRosterCb = options.onRoster
     this.getChat = options.getChat
     this.setChat = options.setChat
+    this.isRoomSpeaking = options.isRoomSpeaking ?? (() => false)
     this.roster = new ConferenceRoster(options.masterClientId, options.masterName)
     this.verified.add(options.masterClientId)
     if (options.resumePlayers?.length) {
@@ -187,7 +195,7 @@ export class MasterSession {
   sendChat(name: string, text: string): void {
     const clean = text.trim()
     if (!clean) return
-    const chat = [...this.getChat(), { name, text: clean }].slice(-200)
+    const chat = [...this.getChat(), { name, text: clean, at: new Date().toISOString() }].slice(-200)
     this.setChat(chat)
     if (this.gameStarted) this.broadcastGameSnapshot()
     else this.broadcastLobbySnapshot()
@@ -267,7 +275,7 @@ export class MasterSession {
       const clean = message.text.trim()
       const name = this.roster.get(message.clientId)?.name
       if (!clean || !name) return
-      const chat = [...this.getChat(), { name, text: clean }].slice(-200)
+      const chat = [...this.getChat(), { name, text: clean, at: new Date().toISOString() }].slice(-200)
       this.setChat(chat)
       if (this.gameStarted) this.broadcastGameSnapshot()
       else this.broadcastLobbySnapshot()
@@ -325,15 +333,10 @@ export class MasterSession {
   private maybeOpenLobbySpeech(): void {
     if (this.lobbyOpenedSpeech) return
     this.lobbyOpenedSpeech = true
-    this.lastLobbySpeechAt = Date.now()
+    this.lobbyNeedsOpenedSpeech = true
     this.spokenLobbySignature = this.lobbySignature()
-    requestLobbySpeech(this.client, {
-      kind: 'opened',
-      packName: this.pack.name,
-      packSummary: packLobbySummary(this.pack),
-      roster: this.roster.list(),
-    })
-    this.scheduleLobbySpeech(LOBBY_IDLE_INTERVAL_MS)
+    // Реплика после короткой тишины комнаты — не врезаемся в разговор.
+    this.scheduleLobbySpeech(0)
   }
 
   private maybeLobbySpeech(): void {
@@ -356,14 +359,35 @@ export class MasterSession {
     }, Math.max(0, delayMs))
   }
 
+  /** Ждёт ~2.5 с тишины людей, прежде чем ведущая заговорит в лобби. */
+  private waitLobbySilence(): boolean {
+    if (this.isRoomSpeaking()) {
+      this.lobbyQuietSince = 0
+      this.scheduleLobbySpeech(LOBBY_SILENCE_POLL_MS)
+      return false
+    }
+    const now = Date.now()
+    if (this.lobbyQuietSince === 0) this.lobbyQuietSince = now
+    const left = LOBBY_SILENCE_BEFORE_SPEECH_MS - (now - this.lobbyQuietSince)
+    if (left > 0) {
+      this.scheduleLobbySpeech(Math.min(left, LOBBY_SILENCE_POLL_MS))
+      return false
+    }
+    return true
+  }
+
   private speakLobbyTurn(): void {
     if (!this.lobbyOpenedSpeech || this.gameStarted) return
+    if (!this.waitLobbySilence()) return
     const signature = this.lobbySignature()
     const changed = signature !== this.spokenLobbySignature
+    const kind = this.lobbyNeedsOpenedSpeech ? 'opened' : changed ? 'update' : 'idle'
+    this.lobbyNeedsOpenedSpeech = false
     this.spokenLobbySignature = signature
     this.lastLobbySpeechAt = Date.now()
+    this.lobbyQuietSince = 0
     requestLobbySpeech(this.client, {
-      kind: changed ? 'update' : 'idle',
+      kind,
       packName: this.pack.name,
       packSummary: packLobbySummary(this.pack),
       roster: this.roster.list(),

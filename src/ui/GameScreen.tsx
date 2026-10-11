@@ -19,7 +19,7 @@ import { ConferenceVideoStrip } from './ConferenceVideoStrip.tsx'
 import { AirStatus } from './airStatus.tsx'
 import { buzzKeyLabel, isKeyboardPlayer, playerFromBuzzKey } from './buzzKeys.ts'
 import { ConversationChat } from './DebugChat.tsx'
-import { canBuzzPlayer, canPickCell, conferenceTurnTitle } from './conferenceTurn.ts'
+import { canBuzzPlayer, canPickCell, conferenceSoloListenHint, conferenceTurnTitle } from './conferenceTurn.ts'
 import { HostPresence } from './HostPresence.tsx'
 import { InviteDialog } from './InviteDialog.tsx'
 import { QuestionClip, QuestionMedia } from './QuestionMedia.tsx'
@@ -198,6 +198,7 @@ export function GameScreen(props: {
     Boolean(conference?.layout),
     context,
   )
+  const soloListenHint = conferenceSoloListenHint(path, Boolean(conference?.layout))
   const flashing = path === 'flashing' || (paused && context.resumePath === 'flashing')
   const showQuestion = Boolean(question) && !flashing
   const showTimer = context.phaseStartedAt !== null && context.phaseDurationMs !== null
@@ -547,6 +548,7 @@ export function GameScreen(props: {
             path={path}
             link={link}
             title={turnTitle}
+            titleHint={soloListenHint}
             status={
               conference?.lobby
                 ? conference.waitingMaster

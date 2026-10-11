@@ -4,11 +4,15 @@ import type { AnnounceKind, JudgmentStatus } from '../game/types.ts'
 export type ConferenceConversationLine = {
   role: 'host' | 'player' | 'judge'
   text: string
+  /** ISO-время для общего хронологического потока с текстовым чатом. */
+  at?: string
 }
 
 export type ConferenceChatLine = {
   name: string
   text: string
+  /** ISO-время; нужно, чтобы чат не прилипал к низу колонки «Разговор». */
+  at?: string
 }
 
 export type ConferenceSnapshotPlayer = {
@@ -299,11 +303,13 @@ function validPresence(value: unknown): boolean {
 
 function validConversationLine(value: unknown): boolean {
   return isRecord(value) && (value.role === 'host' || value.role === 'player' || value.role === 'judge') &&
-    typeof value.text === 'string' && value.text.length <= 20_000
+    typeof value.text === 'string' && value.text.length <= 20_000 &&
+    (value.at === undefined || shortString(value.at, 40))
 }
 
 function validChatLine(value: unknown): boolean {
-  return isRecord(value) && shortString(value.name, 100) && typeof value.text === 'string' && value.text.length <= 4_000
+  return isRecord(value) && shortString(value.name, 100) && typeof value.text === 'string' && value.text.length <= 4_000 &&
+    (value.at === undefined || shortString(value.at, 40))
 }
 
 function stringArray(value: unknown, max: number): boolean {

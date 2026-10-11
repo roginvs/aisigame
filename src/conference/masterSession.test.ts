@@ -10,7 +10,17 @@ import { clearRememberedPlayersForTests } from './presence.ts'
 import { PRESENCE_STALE_MS } from './presence.ts'
 import type { ConferenceTransport } from './transport.ts'
 import { formatDebugDump } from '../debug/trace.ts'
-import { LOBBY_IDLE_INTERVAL_MS, LOBBY_SPEECH_MIN_INTERVAL_MS } from './lobbySpeech.ts'
+import {
+  LOBBY_IDLE_INTERVAL_MS,
+  LOBBY_SILENCE_BEFORE_SPEECH_MS,
+  LOBBY_SILENCE_POLL_MS,
+  LOBBY_SPEECH_MIN_INTERVAL_MS,
+} from './lobbySpeech.ts'
+
+/** Первая реплика лобби ждёт короткой тишины комнаты. */
+function flushLobbySilence(): void {
+  vi.advanceTimersByTime(LOBBY_SILENCE_BEFORE_SPEECH_MS)
+}
 
 class MemoryTransport implements ConferenceTransport {
   sent: ConferenceMessage[] = []
@@ -79,7 +89,7 @@ describe('MasterSession resume', () => {
     const actor = createActor(gameMachine)
     actor.start()
     const transport = new MemoryTransport()
-    let chat: { name: string; text: string }[] = []
+    let chat: { name: string; text: string; at?: string }[] = []
     const session = new MasterSession({
       transport,
       client: {} as GameVoice,
@@ -122,7 +132,8 @@ describe('MasterSession resume', () => {
     )
     expect(chat).toEqual([])
     transport.receive({ type: 'chat', clientId: 'guest-client', authToken: 'guest-token', text: 'привет' })
-    expect(chat).toEqual([{ name: 'Гость', text: 'привет' }])
+    expect(chat).toMatchObject([{ name: 'Гость', text: 'привет' }])
+    expect(chat[0]?.at).toEqual(expect.any(String))
 
     // Реконнект получает новый endpoint только с тем же секретом вкладки;
     // прежний endpoint после перепривязки больше не авторитетен.
@@ -254,6 +265,9 @@ describe('MasterSession resume', () => {
       authToken: 'guest-token',
       hash: 'hash',
     } as const
+    flushLobbySilence()
+    expect(requestSpeech).toHaveBeenCalledTimes(1)
+
     transport.receive(hello)
     transport.receive(verified)
     transport.receive({ type: 'ready', clientId: 'guest-client', authToken: 'guest-token' })
@@ -263,6 +277,7 @@ describe('MasterSession resume', () => {
       vi.advanceTimersByTime(3_000)
       transport.receive(hello)
     }
+    flushLobbySilence()
     expect(requestSpeech).toHaveBeenCalledTimes(2)
     expect(requestSpeech.mock.calls.at(-1)?.[2]).toContain('Гость (игрок): пакет сверен, готов')
 
@@ -275,6 +290,7 @@ describe('MasterSession resume', () => {
       vi.advanceTimersByTime(3_000)
       transport.receive(hello)
     }
+    flushLobbySilence()
     expect(requestSpeech).toHaveBeenCalledTimes(2)
 
     session.dispose()
@@ -301,13 +317,52 @@ describe('MasterSession resume', () => {
       setChat: () => {},
     })
 
+    flushLobbySilence()
+    expect(requestSpeech).toHaveBeenCalledTimes(1)
     vi.advanceTimersByTime(LOBBY_IDLE_INTERVAL_MS - 1)
     expect(requestSpeech).toHaveBeenCalledTimes(1)
     vi.advanceTimersByTime(1)
+    flushLobbySilence()
     expect(requestSpeech).toHaveBeenCalledTimes(2)
     expect(requestSpeech.mock.calls.at(-1)?.[2]).toContain('Статусы не изменились')
     vi.advanceTimersByTime(LOBBY_IDLE_INTERVAL_MS)
+    flushLobbySilence()
     expect(requestSpeech).toHaveBeenCalledTimes(3)
+
+    session.dispose()
+    actor.stop()
+  })
+
+  it('в лобби не говорит, пока в комнате есть речь, и ждёт короткую тишину', () => {
+    const actor = createActor(gameMachine)
+    actor.start()
+    const transport = new MemoryTransport()
+    const requestSpeech = vi.fn()
+    let speaking = true
+    const session = new MasterSession({
+      transport,
+      client: { requestSpeech } as unknown as GameVoice,
+      actor,
+      masterClientId: 'master-client',
+      masterName: 'Мастер',
+      pack: demoPack,
+      packBytes: new Uint8Array([1, 2, 3]),
+      packHash: 'hash',
+      authorityToken: 'master-token',
+      onRoster: () => {},
+      getChat: () => [],
+      setChat: () => {},
+      isRoomSpeaking: () => speaking,
+    })
+
+    vi.advanceTimersByTime(LOBBY_SILENCE_BEFORE_SPEECH_MS + 5_000)
+    expect(requestSpeech).toHaveBeenCalledTimes(0)
+    speaking = false
+    // Сначала догоняем опрос, который ещё ждал речи, затем окно тишины.
+    vi.advanceTimersByTime(LOBBY_SILENCE_POLL_MS)
+    flushLobbySilence()
+    expect(requestSpeech).toHaveBeenCalledTimes(1)
+    expect(requestSpeech.mock.calls[0]?.[0]).toBe('lobby')
 
     session.dispose()
     actor.stop()

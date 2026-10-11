@@ -16,13 +16,15 @@ export function HostPresence(props: {
   status: string
   /** Персональный статус хода в конференции, например «Вася выбирает вопрос». */
   title?: string | null
+  /** Строка под персональным ходом, например «Никого другого не слушаю». */
+  titleHint?: string | null
   error?: string | null
 }) {
   const paused = props.path === 'paused'
   const stopped = props.path === 'stopped'
   const mood = paused || stopped ? 'think' : hostMood(props.path, props.link)
   const copy = props.title
-    ? { title: props.title, hint: '' }
+    ? { title: props.title, hint: props.titleHint?.trim() || '' }
     : stopped
     ? { title: 'Остановлена', hint: 'Сессия закрыта, ведущая не ждёт' }
     : paused

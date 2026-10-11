@@ -2,6 +2,7 @@ import { useEffect, useLayoutEffect, useRef, useState, useSyncExternalStore } fr
 import { getTrace, subscribeTrace, type ChatRole, type TraceEntry } from '../debug/trace.ts'
 import type { ConferenceChatLine, ConferenceConversationLine } from '../conference/messages.ts'
 import { chatPinKey, isAtTail, pinColumn } from './chatScroll.ts'
+import { mergeConversationStream, type VoiceStreamLine } from './conversationStream.ts'
 
 export function ConversationChat(props?: {
   conversation?: ConferenceConversationLine[]
@@ -10,19 +11,20 @@ export function ConversationChat(props?: {
   composerLabel?: string
 }) {
   const entries = useSyncExternalStore(subscribeTrace, getTrace, getTrace)
-  const traceBubbles = entries.filter((entry) => entry.kind === 'chat')
-  const bubbles =
+  const voiceLines: VoiceStreamLine[] =
     props?.conversation && props.conversation.length > 0
-      ? props.conversation.map((line, index) => ({
-          id: index,
-          kind: 'chat' as const,
-          at: '',
-          title: roleLabel(line.role),
-          detail: { role: line.role, text: line.text },
-        }))
-      : traceBubbles
+      ? props.conversation
+      : entries
+          .filter((entry) => entry.kind === 'chat')
+          .map((entry) => ({
+            role: chatRole(entry.detail),
+            text: chatText(entry.detail) || entry.title,
+            at: entry.at,
+            ...(chatNote(entry.detail) ? { note: chatNote(entry.detail) } : {}),
+          }))
+  const stream = mergeConversationStream(voiceLines, props?.chat ?? [])
   const [draft, setDraft] = useState('')
-  const [scrollerRef, logRef] = usePinColumn(chatPinKey(bubbles))
+  const [scrollerRef, logRef] = usePinColumn(chatPinKey(stream))
   return (
     <aside className="chat-column" aria-label="Разговор">
       <div className="chat-head">
@@ -33,16 +35,30 @@ export function ConversationChat(props?: {
       </div>
       <div className="chat-scroll" ref={scrollerRef}>
         <div className="chat-log" ref={logRef}>
-          {bubbles.length === 0 ? <p className="chat-hint">Пока тишина.</p> : null}
-          {bubbles.map((entry) => (
-            <Bubble key={entry.id} entry={entry} />
-          ))}
-          {props?.chat?.map((line, index) => (
-            <p key={`${line.name}-${index}`} className="bubble from-player bubble-typed">
-              <span>Чат · {line.name}</span>
-              {line.text}
-            </p>
-          ))}
+          {stream.length === 0 ? <p className="chat-hint">Пока тишина.</p> : null}
+          {stream.map((item) =>
+            item.kind === 'typed' ? (
+              <p key={item.key} className="bubble from-player bubble-typed">
+                <span>Чат · {item.name}</span>
+                {item.text}
+              </p>
+            ) : (
+              <Bubble
+                key={item.key}
+                entry={{
+                  id: 0,
+                  at: item.at,
+                  kind: 'chat',
+                  title: roleLabel(item.role),
+                  detail: {
+                    role: item.role,
+                    text: item.text,
+                    ...(item.note ? { note: item.note } : {}),
+                  },
+                }}
+              />
+            ),
+          )}
         </div>
       </div>
       {props?.onSendChat ? (

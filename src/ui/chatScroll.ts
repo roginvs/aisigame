@@ -1,19 +1,22 @@
 export type PinEntry = {
-  id: number
-  title: string
+  id?: number
+  key?: string
+  title?: string
+  text?: string
   detail?: unknown
 }
 
 /** Ключ списка на экране: новая строка, срез на лимите и выросший текст. */
 export function chatPinKey(entries: readonly PinEntry[]): string {
   let chars = 0
-  let lastId = 0
+  let last = '0'
   for (const entry of entries) {
-    lastId = entry.id
-    chars += entry.title.length
+    last = entry.key ?? String(entry.id ?? '0')
+    chars += (entry.title ?? '').length
+    chars += (entry.text ?? '').length
     chars += detailChars(entry.detail)
   }
-  return `${entries.length}:${lastId}:${chars}`
+  return `${entries.length}:${last}:${chars}`
 }
 
 export function pinColumn(node: { scrollTop: number; scrollHeight: number }): void {

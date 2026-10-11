@@ -26,7 +26,7 @@ export type SavedGame = SavedMatch & {
   conferenceLobby?: boolean
   jitsiUrl?: string
   roomId?: string
-  chat?: { name: string; text: string }[]
+  chat?: { name: string; text: string; at?: string }[]
 }
 
 export type PersistMatchConference = {
@@ -34,7 +34,7 @@ export type PersistMatchConference = {
   conferenceLobby?: boolean
   jitsiUrl?: string
   roomId?: string
-  chat?: { name: string; text: string }[]
+  chat?: { name: string; text: string; at?: string }[]
 }
 
 export function persistConferenceLobby(
@@ -46,7 +46,7 @@ export function persistConferenceLobby(
     master: Player
     jitsiUrl: string
     roomId: string
-    chat?: { name: string; text: string }[]
+    chat?: { name: string; text: string; at?: string }[]
   },
   storage: Storage = localStorage,
 ): SavedGame | null {
@@ -528,15 +528,16 @@ function normalizeConference(
   return out
 }
 
-function normalizeChat(value: unknown): { name: string; text: string }[] | null {
+function normalizeChat(value: unknown): { name: string; text: string; at?: string }[] | null {
   if (value === undefined) return null
   if (!Array.isArray(value)) return null
-  const messages: { name: string; text: string }[] = []
+  const messages: { name: string; text: string; at?: string }[] = []
   for (const item of value) {
     if (!item || typeof item !== 'object') return null
     const row = item as Record<string, unknown>
     if (typeof row.name !== 'string' || typeof row.text !== 'string') return null
-    messages.push({ name: row.name, text: row.text })
+    const at = typeof row.at === 'string' ? row.at : undefined
+    messages.push(at ? { name: row.name, text: row.text, at } : { name: row.name, text: row.text })
   }
   return messages
 }

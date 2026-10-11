@@ -8,7 +8,7 @@ export function readConversationLines(limit = 200): ConferenceConversationLine[]
     const role = chatRole(entry.detail)
     const text = chatText(entry.detail)
     if (!text) continue
-    out.push({ role, text })
+    out.push({ role, text, at: entry.at })
   }
   return out.slice(-limit)
 }

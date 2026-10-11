@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import type { Player } from '../game/types.ts'
-import { canBuzzPlayer, canPickCell, conferenceTurnTitle } from './conferenceTurn.ts'
+import { canBuzzPlayer, canPickCell, conferenceSoloListenHint, conferenceTurnTitle } from './conferenceTurn.ts'
 
 const players: Player[] = [
   { id: 1, name: 'Аня', score: 0, clientId: 'client-a' },
@@ -79,5 +79,20 @@ describe('conferenceTurnTitle', () => {
   it('оставляет прежнюю подпись вне персонального хода или конференции', () => {
     expect(conferenceTurnTitle('answering.waiting', false, context)).toBeNull()
     expect(conferenceTurnTitle('judging', true, context)).toBeNull()
+  })
+})
+
+describe('conferenceSoloListenHint', () => {
+  it('показывает узкий слух на выборе и ответе', () => {
+    expect(conferenceSoloListenHint('choosing.listening', true)).toBe('Никого другого не слушаю')
+    expect(conferenceSoloListenHint('choosing.clarifying', true)).toBe('Никого другого не слушаю')
+    expect(conferenceSoloListenHint('answering.waiting', true)).toBe('Никого другого не слушаю')
+    expect(conferenceSoloListenHint('answering.hearing', true)).toBe('Никого другого не слушаю')
+  })
+
+  it('не показывает узкий слух, когда модель слышит всех', () => {
+    expect(conferenceSoloListenHint('buzzing.open', true)).toBeNull()
+    expect(conferenceSoloListenHint('finalBets.hearing', true)).toBeNull()
+    expect(conferenceSoloListenHint('choosing.listening', false)).toBeNull()
   })
 })
