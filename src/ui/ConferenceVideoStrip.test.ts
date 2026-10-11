@@ -33,6 +33,7 @@ describe('ConferenceVideoStrip', () => {
     )
 
     expect(html).toContain('video-tile mic-live speaking')
+    expect(html).toContain('<video autoPlay="" playsInline="" muted=""')
     expect(html).toContain('aria-label="Следующая камера"')
     expect(html).toContain('<span class="video-placeholder">Василий Петров</span>')
   })

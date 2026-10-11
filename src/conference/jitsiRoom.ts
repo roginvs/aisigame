@@ -6,7 +6,7 @@ import type { ConferenceTransport } from './transport.ts'
 import { createMicMixer, type MicMixer } from './audioMix.ts'
 import { nextCameraDeviceId } from './camera.ts'
 import { createSpeakerActivity } from './speakerActivity.ts'
-import { createConferenceAudioOutput } from './conferenceAudio.ts'
+import { conferenceAudioStream, createConferenceAudioOutput } from './conferenceAudio.ts'
 
 type JitsiMeetJS = {
   init: (options: unknown) => void
@@ -75,6 +75,7 @@ type JitsiTrack = {
   detach: (element: HTMLElement) => void
   getParticipantId?: () => string
   getOriginalStream?: () => MediaStream
+  getTrack?: () => MediaStreamTrack
 }
 
 declare global {
@@ -348,7 +349,7 @@ export async function connectJitsiConference(input: {
 
   function ensureRemoteAudio(id: string, track: JitsiTrack): void {
     if (botHandle && id === botHandle.localParticipantId()) return
-    const stream = track.getOriginalStream?.()
+    const stream = conferenceAudioStream(track)
     if (!stream) return
     conferenceAudio.attach(id, stream)
     syncModelMixer()
@@ -493,6 +494,7 @@ export async function connectJitsiConference(input: {
         micLive = false
       }
       syncModelMixer()
+      conferenceAudio.resume()
       emitTiles()
     },
     localMicStream: () => localMicMedia,

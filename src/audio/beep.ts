@@ -1,3 +1,4 @@
+import { primeConferencePlayback } from '../conference/conferenceAudio.ts'
 import { buzzerBeepMs } from '../options.ts'
 
 let audioContext: AudioContext | null = null
@@ -9,6 +10,7 @@ const pipGapSeconds = 0.07
 export function unlockAudio(): void {
   const ctx = ensureContext()
   void ctx.resume()
+  primeConferencePlayback()
 }
 
 /** Контекст, который открывает жест старта. Индикатор вопроса берёт его же, чтобы не остаться suspended. */

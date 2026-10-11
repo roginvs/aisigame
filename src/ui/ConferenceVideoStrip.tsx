@@ -58,7 +58,7 @@ function VideoTile(props: {
     >
       <div className="video-frame">
         {tile.cameraOn ? (
-          <video ref={videoRef} autoPlay playsInline muted={tile.isLocal} />
+          <video ref={videoRef} autoPlay playsInline muted />
         ) : (
           <span className="video-placeholder">{tile.name.trim() || 'Игрок'}</span>
         )}
