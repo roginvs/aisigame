@@ -71,6 +71,7 @@ Websocket: браузер для `wss` не смотрит на `Access-Control-
 Перед `server` с `fallout-nevada.ru`, в контексте `http { }`, **рядом с другими `server`, не внутри `server`**, вставьте `map`:
 
 ```nginx
+map_hash_bucket_size 64;
 map $http_origin $jitsi_cors {
     default "";
     "http://127.0.0.1:5173" $http_origin;
