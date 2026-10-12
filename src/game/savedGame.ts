@@ -1,3 +1,4 @@
+import { CONFERENCE_HISTORY_LIMIT } from '../conference/messages.ts'
 import { questionById } from './pack.ts'
 import { openingChooser } from './players.ts'
 import type {
@@ -345,7 +346,7 @@ function conferenceForSave(
   const jitsiUrl = input?.jitsiUrl ?? previous?.jitsiUrl
   const roomId = input?.roomId ?? previous?.roomId
   const chatSource = input?.chat ?? previous?.chat
-  const chat = chatSource ? chatSource.slice(-200) : undefined
+  const chat = chatSource ? chatSource.slice(-CONFERENCE_HISTORY_LIMIT) : undefined
   return {
     ...(mode === 'conference' ? { mode } : mode === 'table' ? { mode } : {}),
     ...(conferenceLobby === true ? { conferenceLobby: true } : {}),
@@ -532,7 +533,7 @@ function normalizeConference(
   if (typeof record.jitsiUrl === 'string' && record.jitsiUrl.trim()) out.jitsiUrl = record.jitsiUrl.trim()
   if (typeof record.roomId === 'string' && record.roomId.trim()) out.roomId = record.roomId.trim()
   const chat = normalizeChat(record.chat)
-  if (chat && chat.length > 0) out.chat = chat.slice(-200)
+  if (chat && chat.length > 0) out.chat = chat.slice(-CONFERENCE_HISTORY_LIMIT)
   return out
 }
 

@@ -13,7 +13,12 @@ import {
   requestLobbySpeech,
   packLobbySummary,
 } from './lobbySpeech.ts'
-import type { ConferenceChatLine, ConferenceMessage, ConferenceSnapshot } from './messages.ts'
+import {
+  CONFERENCE_HISTORY_LIMIT,
+  type ConferenceChatLine,
+  type ConferenceMessage,
+  type ConferenceSnapshot,
+} from './messages.ts'
 import { paceAfterAck, type TransferPace } from './packProgress.ts'
 import { ConferenceRoster } from './roster.ts'
 import type { ConferenceTransport } from './transport.ts'
@@ -198,7 +203,9 @@ export class MasterSession {
   sendChat(name: string, text: string): void {
     const clean = text.trim()
     if (!clean) return
-    const chat = [...this.getChat(), { name, text: clean, at: new Date().toISOString() }].slice(-200)
+    const chat = [...this.getChat(), { name, text: clean, at: new Date().toISOString() }].slice(
+      -CONFERENCE_HISTORY_LIMIT,
+    )
     this.setChat(chat)
     if (this.gameStarted) this.broadcastGameSnapshot()
     else this.broadcastLobbySnapshot()
@@ -285,7 +292,9 @@ export class MasterSession {
       const clean = message.text.trim()
       const name = this.roster.get(message.clientId)?.name
       if (!clean || !name) return
-      const chat = [...this.getChat(), { name, text: clean, at: new Date().toISOString() }].slice(-200)
+      const chat = [...this.getChat(), { name, text: clean, at: new Date().toISOString() }].slice(
+        -CONFERENCE_HISTORY_LIMIT,
+      )
       this.setChat(chat)
       if (this.gameStarted) this.broadcastGameSnapshot()
       else this.broadcastLobbySnapshot()

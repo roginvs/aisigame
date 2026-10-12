@@ -1,6 +1,9 @@
 /** Сообщения конференции — plain JSON, без классов. */
 import type { AnnounceKind, JudgmentStatus } from '../game/types.ts'
 
+/** Сколько последних реплик «Разговора» и строк чата кладём в снимок и храним у мастера. */
+export const CONFERENCE_HISTORY_LIMIT = 100
+
 export type ConferenceConversationLine = {
   role: 'host' | 'player' | 'judge'
   text: string
@@ -296,8 +299,8 @@ function validSnapshot(value: Record<string, unknown>): boolean {
   if (!stringArray(value.wrongHeard, 10_000)) return false
   if (!nullableString(value.judgmentStatus, 100) || !nullableString(value.announceKind, 100)) return false
   if (!nullableFinite(value.phaseDurationMs) || !nullableFinite(value.timerRemainingMs)) return false
-  return Array.isArray(value.conversation) && value.conversation.length <= 200 && value.conversation.every(validConversationLine) &&
-    Array.isArray(value.chat) && value.chat.length <= 200 && value.chat.every(validChatLine)
+  return Array.isArray(value.conversation) && value.conversation.length <= CONFERENCE_HISTORY_LIMIT && value.conversation.every(validConversationLine) &&
+    Array.isArray(value.chat) && value.chat.length <= CONFERENCE_HISTORY_LIMIT && value.chat.every(validChatLine)
 }
 
 function validPlayer(value: unknown): boolean {

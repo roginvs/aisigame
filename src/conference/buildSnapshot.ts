@@ -1,6 +1,11 @@
 import { buildCommit } from '../buildInfo.ts'
 import type { GameContext } from '../game/types.ts'
-import type { ConferenceChatLine, ConferenceSnapshot, ConferenceSnapshotPresence } from './messages.ts'
+import {
+  CONFERENCE_HISTORY_LIMIT,
+  type ConferenceChatLine,
+  type ConferenceSnapshot,
+  type ConferenceSnapshotPresence,
+} from './messages.ts'
 import type { RosterEntry } from './roster.ts'
 import { readConversationLines } from './traceConversation.ts'
 
@@ -69,8 +74,8 @@ export function buildConferenceSnapshot(input: {
     statusLine: input.context.statusLine,
     phaseDurationMs: input.context.phaseDurationMs,
     timerRemainingMs: input.timerRemainingMs,
-    conversation: readConversationLines(200),
-    chat: input.chat.slice(-200),
+    conversation: readConversationLines(CONFERENCE_HISTORY_LIMIT),
+    chat: input.chat.slice(-CONFERENCE_HISTORY_LIMIT),
   }
 }
 

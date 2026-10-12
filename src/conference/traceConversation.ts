@@ -1,7 +1,7 @@
 import { getTrace, type ChatRole } from '../debug/trace.ts'
-import type { ConferenceConversationLine } from './messages.ts'
+import { CONFERENCE_HISTORY_LIMIT, type ConferenceConversationLine } from './messages.ts'
 
-export function readConversationLines(limit = 200): ConferenceConversationLine[] {
+export function readConversationLines(limit = CONFERENCE_HISTORY_LIMIT): ConferenceConversationLine[] {
   const out: ConferenceConversationLine[] = []
   for (const entry of getTrace()) {
     if (entry.kind !== 'chat') continue
