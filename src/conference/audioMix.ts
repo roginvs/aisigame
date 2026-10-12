@@ -77,12 +77,18 @@ export function createMicMixer(): MicMixer {
       drop(key)
       return
     }
-    const originals = stream.getAudioTracks().filter((track) => track.readyState === 'live')
+    // enabled=false (часто после mute) не кормим модель; иначе clone() навсегда
+    // копирует выключенное состояние, а оригинал после unmute уже слышен в <audio>.
+    const originals = stream
+      .getAudioTracks()
+      .filter((track) => track.readyState === 'live' && track.enabled !== false)
     if (originals.length === 0) {
       drop(key)
       return
     }
-    const fingerprint = `${cloneTracks ? 'c' : 'o'}:${originals.map((track) => track.id).join(',')}`
+    const fingerprint = `${cloneTracks ? 'c' : 'o'}:${originals
+      .map((track) => `${track.id}:${track.enabled !== false ? '1' : '0'}`)
+      .join(',')}`
     const existing = sources.get(key)
     if (existing?.fingerprint === fingerprint) return
     drop(key)

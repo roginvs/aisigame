@@ -71,14 +71,21 @@ export function attachController(options: {
   let choiceHeard = ''
   /** Попытка, для которой сейчас принимаем речь ответа. */
   let liveAttemptId: number | null = null
-  /** Когда открыли эту попытку: речь, начавшаяся раньше, отбрасывается. */
+  /** Когда открыли эту попытку: речь, начавшаяся раньше, отбрасывается (кроме carry). */
   let answerArmedAt = 0
   let liveSpeechItemId: string | null = null
+  /** Речь, уже шедшая в момент кнопки / buzz: засчитываем в эту попытку. */
+  let answerCarryItemId: string | null = null
+  let openSpeechItemId: string | null = null
+  let openSpeechStartedAt = 0
   let answerItemId: string | null = null
   let answerTranscript = ''
   let answerConfidence: number | null = null
   let judgeToken = 0
   let buzzerEarAt = 0
+  /** Свежая речь на выборе / ответе — не долбить подсказкой «мик выкл.». */
+  let lastChooserSpeechAt = 0
+  let lastAnswerSpeechAt = 0
   let overRead = false
   const held: Array<() => void> = []
   let announceWait: { token: number; timer: ReturnType<typeof setTimeout>; say: () => void } | null = null
@@ -161,6 +168,13 @@ export function attachController(options: {
   client.onSpeechStarted = (info) => {
     const path = statePath(actor.getSnapshot().value)
     if (path === 'stopped' || path === 'paused') return
+    const itemId = info?.itemId ?? null
+    if (itemId) {
+      openSpeechItemId = itemId
+      openSpeechStartedAt = Date.now()
+    }
+    if (path.startsWith('choosing')) lastChooserSpeechAt = Date.now()
+    if (path.startsWith('answering')) lastAnswerSpeechAt = Date.now()
     if (isReadingPath(path) || path === 'falseStartCue') {
       overRead = true
       return
@@ -173,9 +187,10 @@ export function attachController(options: {
     if (path === 'answering.waiting' || path === 'answering.hearing') {
       if (!answerAttemptLive()) {
         pushTrace('note', 'поздний старт речи ответа отброшен: чужая попытка')
+        client.suppressPlayerChat(itemId)
         return
       }
-      liveSpeechItemId = info?.itemId ?? liveSpeechItemId
+      liveSpeechItemId = itemId ?? liveSpeechItemId
       // Подсказка про выключенный микрофон не должна звучать поверх ответа.
       if (path === 'answering.waiting') client.interruptSpeech()
       actor.send({ type: 'PLAYER_SPEECH_STARTED' })
@@ -184,6 +199,10 @@ export function attachController(options: {
   client.onSpeechStopped = ({ durationMs, itemId }) => {
     const path = statePath(actor.getSnapshot().value)
     if (path === 'stopped' || path === 'paused') return
+    if (itemId && openSpeechItemId === itemId) {
+      openSpeechItemId = null
+      openSpeechStartedAt = 0
+    }
     const startedOverRead = overRead
     overRead = false
     if ((startedOverRead || isReadingPath(path) || path === 'falseStartCue') && !path.startsWith('answering')) {
@@ -196,9 +215,14 @@ export function attachController(options: {
       return
     }
     if (path === 'answering.waiting' || path === 'answering.hearing') {
-      if (!acceptAnswerSpeech(durationMs, itemId)) return
+      if (!acceptAnswerSpeech(durationMs, itemId)) {
+        client.suppressPlayerChat(itemId)
+        return
+      }
       answerItemId = itemId ?? liveSpeechItemId
       liveSpeechItemId = answerItemId
+      client.allowPlayerChat(answerItemId)
+      lastAnswerSpeechAt = Date.now()
       actor.send({ type: 'PLAYER_SPEECH_FINISHED' })
       return
     }
@@ -206,7 +230,10 @@ export function attachController(options: {
       client.interruptSpeech()
       actor.send({ type: 'PLAYER_SPEECH_STARTED' })
     }
-    if (statePath(actor.getSnapshot().value) === 'choosing.listening') void considerChoice(durationMs, itemId)
+    if (statePath(actor.getSnapshot().value) === 'choosing.listening') {
+      lastChooserSpeechAt = Date.now()
+      void considerChoice(durationMs, itemId)
+    }
     if (statePath(actor.getSnapshot().value).startsWith('buzzing')) void considerBlurt(durationMs, itemId)
   }
   client.onToolCall = (call, purpose, turn) => {
@@ -410,42 +437,57 @@ export function attachController(options: {
   function armAnswerAttempt(attemptId: number): void {
     liveAttemptId = attemptId
     answerArmedAt = Date.now()
-    liveSpeechItemId = null
     answerItemId = null
     answerTranscript = ''
     answerConfidence = null
     judgeToken += 1
+    client.gatePlayerChat(true)
+    // Кнопка посреди длинной реплики: ту же utterance несём в попытку.
+    if (openSpeechItemId && openSpeechStartedAt > 0) {
+      answerCarryItemId = openSpeechItemId
+      liveSpeechItemId = openSpeechItemId
+      pushTrace('note', 'речь ответа подхвачена с кнопки / buzz')
+    } else {
+      answerCarryItemId = null
+      liveSpeechItemId = null
+    }
   }
 
   function dropAnswerAttempt(): void {
     liveAttemptId = null
     liveSpeechItemId = null
+    answerCarryItemId = null
     answerItemId = null
     answerTranscript = ''
     answerConfidence = null
     judgeToken += 1
+    client.gatePlayerChat(false)
   }
 
   function answerAttemptLive(): boolean {
     return liveAttemptId !== null && actor.getSnapshot().context.attemptId === liveAttemptId
   }
 
-  /** Речь ответа только своей попытки и только если она началась после открытия попытки. */
+  /**
+   * Речь ответа своей попытки: после открытия попытки, с окна кнопки,
+   * или та же utterance, что уже шла в момент buzz.
+   */
   function acceptAnswerSpeech(durationMs: number, itemId: string | null): boolean {
     if (!answerAttemptLive()) {
       pushTrace('note', 'поздняя речь ответа отброшена: чужая попытка')
       return false
     }
-    const startedAt = Date.now() - Math.max(0, durationMs)
-    if (startedAt < answerArmedAt - 100) {
-      pushTrace('note', 'поздняя речь ответа отброшена: началась до попытки')
-      return false
-    }
+    if (answerCarryItemId && itemId && itemId === answerCarryItemId) return true
     if (liveSpeechItemId && itemId && liveSpeechItemId !== itemId) {
       pushTrace('note', 'поздняя речь ответа отброшена: чужой item')
       return false
     }
-    return true
+    const startedAt = Date.now() - Math.max(0, durationMs)
+    if (startedAt >= answerArmedAt - 100) return true
+    // Речь началась в текущем окне кнопки — дожатие кнопки посреди фразы.
+    if (buzzerEarAt > 0 && startedAt >= buzzerEarAt - 100) return true
+    pushTrace('note', 'поздняя речь ответа отброшена: началась до попытки')
+    return false
   }
 
   function speakWhileListening(purpose: SpeechPurpose, instructions: string, expect?: string): void {
@@ -492,6 +534,7 @@ export function attachController(options: {
     }
     if (gate === 'ask-again') {
       pushTrace('note', `реплика не похожа на выбор: ${shown}`)
+      pushJudgeLine(selectionChatText(shown, false, 'нужны тема и стоимость'))
       actor.send({
         type: 'QUESTION_UNCLEAR',
         reason: 'Не расслышала тему и стоимость. Повторите, пожалуйста.',
@@ -720,10 +763,12 @@ export function attachController(options: {
   onActions?.({
     remindMutedAnswerer(playerName) {
       if (statePath(actor.getSnapshot().value) !== 'answering.waiting') return
+      if (Date.now() - lastAnswerSpeechAt < gameConfig.mutedAnswerReminderMs) return
       speakWhileListening('micWarning', mutedAnswerMicCue(playerName))
     },
     remindMutedChooser(playerName) {
       if (statePath(actor.getSnapshot().value) !== 'choosing.listening') return
+      if (Date.now() - lastChooserSpeechAt < gameConfig.mutedAnswerReminderMs) return
       speakWhileListening('micWarning', mutedMicCue(playerName))
     },
   })

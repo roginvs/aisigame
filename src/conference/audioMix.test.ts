@@ -174,6 +174,31 @@ describe('createMicMixer', () => {
     mixer.dispose()
   })
 
+  it('drops muted remotes and re-clones after unmute', () => {
+    const mixer = createMicMixer()
+    const remoteAudio = new FakeTrack('audio', false, 'live', 'remote-a')
+    const stream = {
+      getAudioTracks: () => [remoteAudio],
+      getTracks: () => [remoteAudio],
+    } as unknown as MediaStream
+    mixer.setRemoteStreams([{ id: 'guest', stream }])
+    expect(remoteAudio.clone).not.toHaveBeenCalled()
+
+    remoteAudio.enabled = true
+    mixer.setRemoteStreams([{ id: 'guest', stream }])
+    expect(remoteAudio.clone).toHaveBeenCalledTimes(1)
+
+    const firstClone = remoteAudio.clone.mock.results[0]?.value as FakeTrack
+    remoteAudio.enabled = false
+    mixer.setRemoteStreams([{ id: 'guest', stream }])
+    expect(firstClone.stop).toHaveBeenCalledTimes(1)
+
+    remoteAudio.enabled = true
+    mixer.setRemoteStreams([{ id: 'guest', stream }])
+    expect(remoteAudio.clone).toHaveBeenCalledTimes(2)
+    mixer.dispose()
+  })
+
   it('does not stop the local mic track when the local source is cleared', () => {
     const mixer = createMicMixer()
     const localAudio = new FakeTrack('audio', true, 'live', 'local-a')

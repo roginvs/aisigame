@@ -1,6 +1,7 @@
 import { pushHostLine, pushPlayerLine } from '../debug/trace.ts'
 import { echoesAnswerPrompt } from '../game/answerPrompt.ts'
 import { echoesChoicePrompt } from '../game/choicePrompt.ts'
+import { echoesTranscriptionPrompt } from '../game/promptEcho.ts'
 import { nearHomophone, sharesAnswer } from '../game/judgment.ts'
 import type { GameVoice, LinkStatus, ToolCall } from './client.ts'
 import type { StoredTranscript } from './utterance.ts'
@@ -41,6 +42,11 @@ export class MockRealtimeClient implements GameVoice {
   private callSeq = 0
   private transcripts = new Map<string, StoredTranscript>()
   private transcriptWaiters = new Map<string, Array<(line: StoredTranscript) => void>>()
+  private playerChatGated = false
+  private playerChatAllowed = new Set<string>()
+  private playerChatSuppressed = new Set<string>()
+  private playerChatPending = new Map<string, string>()
+  private playerChatPublished = new Set<string>()
   private hostOutputContext: AudioContext | null = null
 
   async connect(_apiKey: string, _options?: { captureMic?: boolean }): Promise<void> {
@@ -83,6 +89,36 @@ export class MockRealtimeClient implements GameVoice {
     this.transcriptionPrompt = prompt
   }
 
+  gatePlayerChat(gate: boolean): void {
+    this.playerChatGated = gate
+    if (!gate) {
+      this.playerChatPending.clear()
+      this.playerChatAllowed.clear()
+      this.playerChatSuppressed.clear()
+    }
+  }
+
+  allowPlayerChat(itemId: string | null): void {
+    if (!itemId) return
+    this.playerChatSuppressed.delete(itemId)
+    this.playerChatAllowed.add(itemId)
+    const pending = this.playerChatPending.get(itemId)
+    if (pending !== undefined) {
+      this.playerChatPending.delete(itemId)
+      this.publishPlayerChat(itemId, pending)
+      return
+    }
+    const known = this.transcripts.get(itemId)
+    if (known) this.publishPlayerChat(itemId, known.text)
+  }
+
+  suppressPlayerChat(itemId: string | null): void {
+    if (!itemId) return
+    this.playerChatSuppressed.add(itemId)
+    this.playerChatPending.delete(itemId)
+    this.playerChatAllowed.delete(itemId)
+  }
+
   setSpeechMs(ms: number): void {
     this.speechMs = ms
   }
@@ -119,9 +155,7 @@ export class MockRealtimeClient implements GameVoice {
     if (this.transcripts.has(itemId)) return
     const line = { text, confidence }
     this.transcripts.set(itemId, line)
-    if (!echoesChoicePrompt(text, this.transcriptionPrompt) && !echoesAnswerPrompt(text, this.transcriptionPrompt)) {
-      pushPlayerLine(text || 'речь не распознана')
-    }
+    this.offerPlayerChat(itemId, text)
     const matched = this.transcriptWaiters.get(itemId) ?? []
     this.transcriptWaiters.delete(itemId)
     for (const waiter of matched) waiter(line)
@@ -174,6 +208,11 @@ export class MockRealtimeClient implements GameVoice {
     this.speechToken += 1
     this.transcriptionPrompt = ''
     this.transcripts.clear()
+    this.playerChatGated = false
+    this.playerChatAllowed.clear()
+    this.playerChatSuppressed.clear()
+    this.playerChatPending.clear()
+    this.playerChatPublished.clear()
     this.hostOutputContext?.close().catch(() => undefined)
     this.hostOutputContext = null
     this.onLink({ connection: 'idle', mic: 'idle', host: 'idle' })
@@ -183,14 +222,38 @@ export class MockRealtimeClient implements GameVoice {
     const itemId = `mock-item-${++this.itemSeq}`
     const started = Date.now()
     this.transcripts.set(itemId, { text, confidence: null })
-    if (!echoesChoicePrompt(text, this.transcriptionPrompt) && !echoesAnswerPrompt(text, this.transcriptionPrompt)) {
-      pushPlayerLine(text || 'речь не распознана')
-    }
+    this.offerPlayerChat(itemId, text)
     this.onSpeechStarted({ itemId })
     window.setTimeout(() => {
       const elapsed = Math.max(1, Date.now() - started)
       this.onSpeechStopped({ durationMs: Math.min(durationMs, elapsed), itemId })
     }, speechPauseMs)
+  }
+
+  private offerPlayerChat(itemId: string, text: string): void {
+    if (this.isPromptEcho(text)) return
+    if (this.playerChatSuppressed.has(itemId) || this.playerChatPublished.has(itemId)) return
+    if (this.playerChatGated && !this.playerChatAllowed.has(itemId)) {
+      this.playerChatPending.set(itemId, text)
+      return
+    }
+    this.publishPlayerChat(itemId, text)
+  }
+
+  private publishPlayerChat(itemId: string, text: string): void {
+    if (this.playerChatPublished.has(itemId) || this.playerChatSuppressed.has(itemId)) return
+    if (this.isPromptEcho(text)) return
+    this.playerChatPublished.add(itemId)
+    pushPlayerLine(text || 'речь не распознана')
+  }
+
+  private isPromptEcho(text: string): boolean {
+    const prompt = this.transcriptionPrompt
+    return (
+      echoesChoicePrompt(text, prompt) ||
+      echoesAnswerPrompt(text, prompt) ||
+      echoesTranscriptionPrompt(text, prompt)
+    )
   }
 
   /** Тесты: только конец речи с известным itemId, без started (запоздавший VAD). */

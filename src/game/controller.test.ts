@@ -394,6 +394,104 @@ describe('attachController answer listening', () => {
     actor.stop()
   })
 
+  it('подхватывает речь, начатую до кнопки, в ту же попытку ответа', async () => {
+    const client = new MockRealtimeClient()
+    const { actor, stop } = await boot(client)
+    actor.send({ type: 'QUESTION_SELECTED', themeId: 'p', value: 400 })
+    await vi.advanceTimersByTimeAsync(gameConfig.cellFlashMs + 80)
+    expect(statePath(actor.getSnapshot().value)).toBe('buzzing.open')
+
+    const itemId = 'carry-before-buzz'
+    client.onSpeechStarted({ itemId })
+    actor.send({ type: 'BUZZER_PRESSED', playerId: 1 })
+    expect(statePath(actor.getSnapshot().value)).toBe('answering.waiting')
+
+    client.deliverTranscript(itemId, 'ответ')
+    client.emitSpeechStopped(itemId, 8_000)
+    await vi.advanceTimersByTimeAsync(120)
+
+    expect(actor.getSnapshot().context.players.find((player) => player.id === 1)?.score).toBe(400)
+    expect(playerLines().some((line) => line.includes('ответ'))).toBe(true)
+    expect(
+      getTrace().some((entry) => entry.kind === 'note' && String(entry.title).includes('подхвачена')),
+    ).toBe(true)
+
+    stop()
+    actor.stop()
+  })
+
+  it('не пишет в чат транскрипт отброшенной речи ответа', async () => {
+    vi.stubGlobal(
+      'AudioContext',
+      class {
+        state = 'running'
+        destination = {}
+        createOscillator() {
+          return {
+            type: 'sine',
+            frequency: { value: 0 },
+            connect() {},
+            start() {},
+            stop() {},
+          }
+        }
+        createGain() {
+          return {
+            gain: {
+              value: 0,
+              setValueAtTime() {},
+              linearRampToValueAtTime() {},
+            },
+            connect() {},
+          }
+        }
+        resume() {
+          return Promise.resolve()
+        }
+        close() {
+          return Promise.resolve()
+        }
+      },
+    )
+    const client = new MockRealtimeClient()
+    const { actor, stop } = await boot(client)
+    actor.send({ type: 'QUESTION_SELECTED', themeId: 'p', value: 400 })
+    await vi.advanceTimersByTimeAsync(gameConfig.cellFlashMs + 80)
+    actor.send({ type: 'BUZZER_PRESSED', playerId: 1 })
+    expect(statePath(actor.getSnapshot().value)).toBe('answering.waiting')
+
+    client.deliverTranscript('discarded-early', 'Фотосинтез')
+    client.emitSpeechStopped('discarded-early', 8_000)
+    await vi.advanceTimersByTimeAsync(80)
+
+    expect(playerLines().some((line) => line.includes('Фотосинтез'))).toBe(false)
+    expect(
+      getTrace().some((entry) => entry.kind === 'note' && String(entry.title).includes('поздняя речь ответа')),
+    ).toBe(true)
+    expect(statePath(actor.getSnapshot().value)).toBe('answering.waiting')
+
+    stop()
+    actor.stop()
+  })
+
+  it('не напоминает про микрофон сразу после свежей речи на выборе', async () => {
+    const client = new MockRealtimeClient()
+    const requestSpeech = vi.spyOn(client, 'requestSpeech')
+    const { actor, stop, actions } = await boot(client)
+    expect(statePath(actor.getSnapshot().value)).toBe('choosing.listening')
+
+    // Короткий звук остаётся в listening, но помечает свежую речь.
+    client.hear('кх', 400)
+    await vi.advanceTimersByTimeAsync(80)
+    expect(statePath(actor.getSnapshot().value)).toBe('choosing.listening')
+    requestSpeech.mockClear()
+    actions().remindMutedChooser('Bella')
+    expect(requestSpeech).not.toHaveBeenCalled()
+
+    stop()
+    actor.stop()
+  })
+
   it('после смены выбирающего не открывает ячейку по запоздавшему транскрипту', async () => {
     const client = new MockRealtimeClient()
     const { actor, stop } = await boot(client)

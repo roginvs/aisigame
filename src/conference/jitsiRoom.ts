@@ -535,11 +535,11 @@ export async function connectJitsiConference(input: {
   function syncModelMixer(): void {
     if (!modelMixer) return
     const botId = botParticipantId()
-    // В микс — только включённый микрофон: при mute клон раньше продолжал
-    // кормить модель, а оригинал без клона подчиняется Jitsi mute/unmute.
+    // В микс — только включённый микрофон: muted remotes не кладём, иначе clone()
+    // с enabled=false после unmute остаётся мёртвым, а <audio> уже играет.
     // Выбор/ответ сужают микс до одного участника; HTML playback людей не трогаем.
     const remotes = [...remoteAudio.entries()]
-      .filter(([id]) => !botId || id !== botId)
+      .filter(([id, track]) => (!botId || id !== botId) && !track.isMuted?.())
       .flatMap(([id, track]) => {
         const stream = conferenceAudioStream(track)
         return stream ? [{ id, stream }] : []
@@ -697,6 +697,16 @@ export async function connectJitsiConference(input: {
       } else {
         attachVideo(userId)
       }
+    }
+    // Mute/unmute аудио: пересобрать клон в миксе модели (fingerprint с enabled).
+    if (jitsiTrack.getType() === 'audio') {
+      const muted = Boolean(jitsiTrack.isMuted?.())
+      if (userId && !jitsiTrack.isLocal()) {
+        pushTrace('note', muted ? 'Удалённый микрофон выключен' : 'Удалённый микрофон включён', {
+          participantId: userId,
+        })
+      }
+      syncModelMixer()
     }
     emitTiles()
   })

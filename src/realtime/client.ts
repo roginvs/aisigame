@@ -11,6 +11,7 @@ import { createSilentMicStream } from './pcm.ts'
 import type { VoiceWire } from './wire.ts'
 import { echoesAnswerPrompt } from '../game/answerPrompt.ts'
 import { echoesChoicePrompt } from '../game/choicePrompt.ts'
+import { echoesTranscriptionPrompt } from '../game/promptEcho.ts'
 import { transcriptionConfidence, transcriptOf, type StoredTranscript } from './utterance.ts'
 
 export type LinkStatus = {
@@ -123,6 +124,12 @@ export class RealtimeClient {
   private transcripts = new Map<string, StoredTranscript>()
   private transcriptWaiters = new Map<string, Array<(text: string) => void>>()
   private looseTranscriptWaiters: Array<(text: string) => void> = []
+  /** Пока открыта попытка ответа: в чат только после allow / не после suppress. */
+  private playerChatGated = false
+  private playerChatAllowed = new Set<string>()
+  private playerChatSuppressed = new Set<string>()
+  private playerChatPending = new Map<string, string>()
+  private playerChatPublished = new Set<string>()
   private dropped = false
   private hostOutputHandler: ((stream: MediaStream) => void) | null = null
   private usingExternalInput = false
@@ -358,6 +365,37 @@ export class RealtimeClient {
     })
   }
 
+  /** Во время ответа держим «Услышано» до принятия речи попыткой. */
+  gatePlayerChat(gate: boolean): void {
+    this.playerChatGated = gate
+    if (!gate) {
+      this.playerChatPending.clear()
+      this.playerChatAllowed.clear()
+      this.playerChatSuppressed.clear()
+    }
+  }
+
+  allowPlayerChat(itemId: string | null): void {
+    if (!itemId) return
+    this.playerChatSuppressed.delete(itemId)
+    this.playerChatAllowed.add(itemId)
+    const pending = this.playerChatPending.get(itemId)
+    if (pending !== undefined) {
+      this.playerChatPending.delete(itemId)
+      this.publishPlayerChat(itemId, pending)
+      return
+    }
+    const known = this.transcripts.get(itemId)
+    if (known) this.publishPlayerChat(itemId, known.text)
+  }
+
+  suppressPlayerChat(itemId: string | null): void {
+    if (!itemId) return
+    this.playerChatSuppressed.add(itemId)
+    this.playerChatPending.delete(itemId)
+    this.playerChatAllowed.delete(itemId)
+  }
+
   waitForTranscript(
     itemId: string | null,
     timeoutMs: number,
@@ -387,15 +425,39 @@ export class RealtimeClient {
   private rememberTranscript(itemId: string, text: string, confidence: number | null = null): void {
     if (this.transcripts.has(itemId)) return
     this.transcripts.set(itemId, { text, confidence })
-    if (!echoesChoicePrompt(text, this.transcriptionPrompt) && !echoesAnswerPrompt(text, this.transcriptionPrompt)) {
-      pushPlayerLine(text || 'речь не распознана')
-    }
+    this.offerPlayerChat(itemId, text)
     const matched = this.transcriptWaiters.get(itemId) ?? []
     this.transcriptWaiters.delete(itemId)
     for (const waiter of matched) waiter(text)
     const loose = this.looseTranscriptWaiters
     this.looseTranscriptWaiters = []
     for (const waiter of loose) waiter(text)
+  }
+
+  private offerPlayerChat(itemId: string, text: string): void {
+    if (this.isPromptEcho(text)) return
+    if (this.playerChatSuppressed.has(itemId) || this.playerChatPublished.has(itemId)) return
+    if (this.playerChatGated && !this.playerChatAllowed.has(itemId)) {
+      this.playerChatPending.set(itemId, text)
+      return
+    }
+    this.publishPlayerChat(itemId, text)
+  }
+
+  private publishPlayerChat(itemId: string, text: string): void {
+    if (this.playerChatPublished.has(itemId) || this.playerChatSuppressed.has(itemId)) return
+    if (this.isPromptEcho(text)) return
+    this.playerChatPublished.add(itemId)
+    pushPlayerLine(text || 'речь не распознана')
+  }
+
+  private isPromptEcho(text: string): boolean {
+    const prompt = this.transcriptionPrompt
+    return (
+      echoesChoicePrompt(text, prompt) ||
+      echoesAnswerPrompt(text, prompt) ||
+      echoesTranscriptionPrompt(text, prompt)
+    )
   }
 
   private removeTranscriptWaiter(itemId: string | null, finish: (text: string) => void): void {
@@ -511,6 +573,11 @@ export class RealtimeClient {
     this.transcripts.clear()
     this.transcriptWaiters.clear()
     this.looseTranscriptWaiters = []
+    this.playerChatGated = false
+    this.playerChatAllowed.clear()
+    this.playerChatSuppressed.clear()
+    this.playerChatPending.clear()
+    this.playerChatPublished.clear()
     const dc = this.dc
     const pc = this.pc
     const mic = this.mic
@@ -1199,6 +1266,9 @@ export type GameVoice = Pick<
   | 'setOutputMuted'
   | 'setSpeechSpeed'
   | 'setTranscriptionPrompt'
+  | 'gatePlayerChat'
+  | 'allowPlayerChat'
+  | 'suppressPlayerChat'
   | 'waitForTranscript'
   | 'interruptSpeech'
   | 'requestSpeech'
