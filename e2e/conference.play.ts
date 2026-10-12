@@ -103,7 +103,7 @@ test.describe('конференция на BroadcastChannel', () => {
     await expect(master.getByRole('status').filter({ hasText: 'Жмите кнопку' })).toBeVisible({ timeout: 20_000 })
     await master.getByRole('group', { name: /Мастер: 0/ }).getByRole('button', { name: 'Мастер' }).click()
     await expect(joiner.getByRole('status').filter({ hasText: 'Мастер отвечает' })).toBeVisible()
-    const mutedReminder = master.getByText('Мастер, микрофон-то выключен.')
+    const mutedReminder = master.getByText(/Мастер,.+микрофон/i)
     await master.waitForTimeout(2_500)
     await expect(mutedReminder).toHaveCount(0)
     await expect(mutedReminder).toBeVisible({ timeout: 2_000 })

@@ -845,7 +845,7 @@ describe('game machine', () => {
     actor.send({ type: 'CHOOSER_OFFLINE', fromPlayerId: 2, toPlayerId: 1 })
     expect(statePath(actor.getSnapshot().value)).toBe('chooserHandoff')
     expect(actor.getSnapshot().context.chooserId).toBe(1)
-    expect(actor.getSnapshot().context.clarifyReason).toBe('Вася отключился. Маша, выбирайте вопрос.')
+    expect(actor.getSnapshot().context.clarifyReason).toBe('Вася отключился')
 
     actor.send({ type: 'HOST_AUDIO_FINISHED', purpose: 'turn' })
     expect(statePath(actor.getSnapshot().value)).toBe('chooserHandoff')

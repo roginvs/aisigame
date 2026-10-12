@@ -353,9 +353,7 @@ export const gameMachine = setup({
       clarifyReason: ({ context, event }) => {
         if (event.type !== 'CHOOSER_OFFLINE') return context.clarifyReason
         const disconnected = context.players.find((player) => player.id === event.fromPlayerId)?.name ?? 'Игрок'
-        const replacement = context.players.find((player) => player.id === event.toPlayerId)?.name ?? 'Игрок'
-        const choice = isFinal(context) ? 'тему финала' : 'вопрос'
-        return `${disconnected} отключился. ${replacement}, выбирайте ${choice}.`
+        return `${disconnected} отключился`
       },
       statusLine: ({ context, event }) => {
         if (event.type !== 'CHOOSER_OFFLINE') return context.statusLine
