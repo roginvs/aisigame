@@ -420,6 +420,33 @@ describe('attachController answer listening', () => {
     actor.stop()
   })
 
+  it('не засчитывает короткий фантом эталона из подсказки Whisper', async () => {
+    const client = new MockRealtimeClient()
+    const { actor, stop } = await boot(client)
+    actor.send({ type: 'QUESTION_SELECTED', themeId: 'p', value: 400 })
+    await vi.advanceTimersByTimeAsync(gameConfig.cellFlashMs + 80)
+    actor.send({ type: 'BUZZER_PRESSED', playerId: 1 })
+    expect(statePath(actor.getSnapshot().value)).toBe('answering.waiting')
+    const scoreBefore = actor.getSnapshot().context.players.find((player) => player.id === 1)?.score ?? 0
+
+    // Тишина / шум: VAD короткий, Whisper подставил эталон из подсказки.
+    client.hear('ответ', 400)
+    await vi.advanceTimersByTimeAsync(120)
+
+    expect(statePath(actor.getSnapshot().value)).toBe('answering.waiting')
+    expect(actor.getSnapshot().context.players.find((player) => player.id === 1)?.score).toBe(scoreBefore)
+    expect(
+      getTrace().some((entry) => entry.kind === 'note' && String(entry.title).includes('фантом ответа')),
+    ).toBe(true)
+
+    client.hear('ответ', 900)
+    await vi.advanceTimersByTimeAsync(120)
+    expect(actor.getSnapshot().context.players.find((player) => player.id === 1)?.score).toBe(scoreBefore + 400)
+
+    stop()
+    actor.stop()
+  })
+
   it('не пишет в чат транскрипт отброшенной речи ответа', async () => {
     vi.stubGlobal(
       'AudioContext',
@@ -543,20 +570,22 @@ describe('attachController answer listening', () => {
     actor.send({ type: 'BUZZER_PRESSED', playerId: 1 })
     expect(statePath(actor.getSnapshot().value)).toBe('answering.waiting')
     const hint = client.prompts.at(-1) ?? ''
-    expect(hint).toContain('«Пылесосел»')
-    expect(hint).toContain('«Утюгусь»')
-    expect(hint).toContain('на слоги')
+    expect(hint).toContain('Пылесосел')
+    expect(hint).toContain('Утюгусь')
+    expect(hint).toContain('пустая расшифровка')
+    expect(hint).toContain('Редкие слова')
+    expect(hint).not.toContain('«Пылесосел»')
     expect(hint).not.toContain('Шлакоблокунь')
     expect(hint).not.toContain('договор')
 
     const score = () => actor.getSnapshot().context.players.find((player) => player.id === 1)?.score
     client.hear(hint, 800)
     expect(statePath(actor.getSnapshot().value)).toBe('answering.hearing')
-    expect(client.prompts.at(-1)).toContain('«Пылесосел»')
+    expect(client.prompts.at(-1)).toContain('Пылесосел')
     await vi.advanceTimersByTimeAsync(80)
     expect(statePath(actor.getSnapshot().value)).toBe('answering.waiting')
     expect(score()).toBe(0)
-    expect(playerLines().some((line) => line.includes('Возможные ответы') || line.includes('Пылесосел'))).toBe(false)
+    expect(playerLines().some((line) => line.includes('Редкие слова') || line.includes('Пылесосел'))).toBe(false)
     expect(judgeLines().some((line) => line.includes('Пылесосел'))).toBe(false)
     expect(getTrace().some((entry) => entry.kind === 'note' && entry.title.includes('подсказку ответа'))).toBe(true)
 

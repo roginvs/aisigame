@@ -1,15 +1,24 @@
 import { describe, expect, it } from 'vitest'
-import { answerListeningPrompt, echoesAnswerPrompt } from './answerPrompt.ts'
+import {
+  answerListeningPrompt,
+  echoesAnswerPrompt,
+  phantomAnswerMaxConfidence,
+  phantomAnswerMaxMs,
+  phantomListedAnswer,
+} from './answerPrompt.ts'
 
 const buzzerPrompt = 'Человек говорит, пока нужно нажать кнопку. Это ещё не ответ на вопрос.'
 
 describe('answerListeningPrompt', () => {
   it('передаёт ответы ячейки и не совпадает с подсказкой до кнопки', () => {
     const prompt = answerListeningPrompt(['Пылесосел', 'Утюгусь', 'Пылесосел'])
-    expect(prompt).toContain('«Пылесосел»')
-    expect(prompt).toContain('«Утюгусь»')
-    expect(prompt).toContain('на слоги')
-    expect(prompt.split('«Пылесосел»')).toHaveLength(2)
+    expect(prompt).toContain('Пылесосел')
+    expect(prompt).toContain('Утюгусь')
+    expect(prompt).toContain('пустая расшифровка')
+    expect(prompt).toContain('Редкие слова')
+    expect(prompt).not.toContain('«Пылесосел»')
+    expect(prompt).not.toContain('Возможные ответы')
+    expect(prompt.split('Пылесосел')).toHaveLength(2)
     expect(prompt).not.toContain('Шлакоблокунь')
     expect(prompt).not.toContain('договор')
     expect(prompt.length).toBeLessThanOrEqual(1024)
@@ -20,11 +29,26 @@ describe('answerListeningPrompt', () => {
   it('отбрасывает эхо подсказки и оставляет само слово эталона', () => {
     const prompt = answerListeningPrompt(['Пылесосел', 'Утюгусь'])
     expect(echoesAnswerPrompt(prompt, prompt)).toBe(true)
-    expect(echoesAnswerPrompt(`Возможные ответы: «Пылесосел» / «Утюгусь».`, prompt)).toBe(true)
-    expect(echoesAnswerPrompt('Игрок называет ответ. Может сказать редкое или выдуманное слово.', prompt)).toBe(true)
+    expect(echoesAnswerPrompt(`Редкие слова, которые могут встретиться: Пылесосел, Утюгусь.`, prompt)).toBe(true)
+    expect(
+      echoesAnswerPrompt(
+        'Игрок отвечает по-русски одним словом или короткой фразой. Тишина, кашель и шум — пустая расшифровка, не подставляй слова из словаря.',
+        prompt,
+      ),
+    ).toBe(true)
     expect(echoesAnswerPrompt('пылесосел', prompt)).toBe(false)
     expect(echoesAnswerPrompt('Пылесосел.', prompt)).toBe(false)
     expect(echoesAnswerPrompt('Утюгусь', prompt)).toBe(false)
     expect(echoesAnswerPrompt('пы ле со сел', prompt)).toBe(false)
+  })
+
+  it('короткий VAD или низкая уверенность с эталоном из подсказки — фантом', () => {
+    const prompt = answerListeningPrompt(['Солнце', 'Пылесосел'])
+    expect(phantomListedAnswer('Солнце', prompt, phantomAnswerMaxMs - 50, null)).toBe(true)
+    expect(phantomListedAnswer('Солнце', prompt, phantomAnswerMaxMs + 100, null)).toBe(false)
+    expect(phantomListedAnswer('Солнце', prompt, 1200, phantomAnswerMaxConfidence - 0.05)).toBe(true)
+    expect(phantomListedAnswer('Солнце', prompt, 1200, 0.9)).toBe(false)
+    expect(phantomListedAnswer('Бетельгейзе', prompt, 200, null)).toBe(false)
+    expect(phantomListedAnswer('', prompt, 200, null)).toBe(false)
   })
 })

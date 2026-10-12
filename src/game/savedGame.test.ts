@@ -605,4 +605,59 @@ describe('saved game', () => {
     expect(readSavedGame(storage)).toMatchObject({ mode: 'table' })
     expect(readSavedGame(storage)?.roomId).toBeUndefined()
   })
+
+  it('сохраняет и снимает галку «Меньше слышать»', () => {
+    const storage = memory()
+    persistMatch(
+      {
+        packId: 'demo',
+        packFile: 'demo.siq',
+        path: 'choosing.listening',
+        context: context(),
+        hearTurnOnly: true,
+        conference: { mode: 'conference', roomId: 'r1', jitsiUrl: 'https://meet.example/jitsi' },
+      },
+      storage,
+    )
+    expect(readSavedGame(storage)?.hearTurnOnly).toBe(true)
+
+    persistMatch(
+      {
+        packId: 'demo',
+        packFile: 'demo.siq',
+        path: 'choosing.listening',
+        context: context(),
+        hearTurnOnly: false,
+        conference: { mode: 'conference', roomId: 'r1', jitsiUrl: 'https://meet.example/jitsi' },
+      },
+      storage,
+    )
+    expect(readSavedGame(storage)?.hearTurnOnly).toBeUndefined()
+
+    persistConferenceLobby(
+      {
+        packId: 'demo',
+        packFile: 'demo.siq',
+        pack: demoPack,
+        master: { id: 1, name: 'Мастер', score: 0, clientId: 'm1' },
+        jitsiUrl: 'https://meet.example/jitsi',
+        roomId: 'lobby-1',
+        hearTurnOnly: true,
+      },
+      storage,
+    )
+    expect(readSavedGame(storage)?.hearTurnOnly).toBe(true)
+
+    persistMatch(
+      {
+        packId: 'demo',
+        packFile: 'demo.siq',
+        path: 'startMenu',
+        context: context(),
+        hearTurnOnly: false,
+      },
+      storage,
+    )
+    expect(readSavedGame(storage)?.hearTurnOnly).toBeUndefined()
+  })
 })

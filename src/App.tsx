@@ -120,8 +120,8 @@ export default function App() {
   const [conferenceRole, setConferenceRole] = useState<'master' | 'joiner' | null>(null)
   const [conferenceRoomId, setConferenceRoomId] = useState<string | null>(null)
   const [conferenceLobby, setConferenceLobby] = useState(false)
-  /** Мастер: вне выбора/ответа модель глуха; на ходе — только этот игрок. */
-  const [hearTurnOnly, setHearTurnOnly] = useState(false)
+  /** Мастер: вне выбора/ответа модель глуха; на ходе — только этот игрок. В снимке партии. */
+  const [hearTurnOnly, setHearTurnOnly] = useState(() => readSavedGame()?.hearTurnOnly === true)
   const [masterRoster, setMasterRoster] = useState<RosterEntry[]>([])
   const [masterRosterAll, setMasterRosterAll] = useState<RosterEntry[]>([])
   const [masterParticipantIds, setMasterParticipantIds] = useState<Record<string, string>>({})
@@ -419,6 +419,7 @@ export default function App() {
         packHash,
         path,
         context: snapshot.context,
+        hearTurnOnly,
         conference:
           conferenceRole === 'master' && conferenceRoomId
             ? {
@@ -433,7 +434,19 @@ export default function App() {
               : { mode: 'table', conferenceLobby: false },
       }),
     )
-  }, [snapshot, packId, packFile, packHash, path, conferenceRole, conferenceRoomId, conferenceLobby, jitsiUrl, conferenceChat])
+  }, [
+    snapshot,
+    packId,
+    packFile,
+    packHash,
+    path,
+    conferenceRole,
+    conferenceRoomId,
+    conferenceLobby,
+    jitsiUrl,
+    conferenceChat,
+    hearTurnOnly,
+  ])
 
   useEffect(() => {
     if (!pendingContinue) return
@@ -514,7 +527,7 @@ export default function App() {
     const next = voiceById(id).id
     if (next === modelId) return
     writeVoiceModelId(next)
-    persistMatch({ packId, packFile, packHash, path, context: snapshot.context })
+    persistMatch({ packId, packFile, packHash, path, context: snapshot.context, hearTurnOnly })
     markModelSwitch()
     window.location.replace(hrefAfterModelSwitch(window.location.href))
   }
@@ -833,6 +846,7 @@ export default function App() {
             jitsiUrl: roomJitsi,
             roomId,
             chat: conferenceChatRef.current,
+            hearTurnOnly,
           }),
         )
       }
@@ -948,6 +962,7 @@ export default function App() {
     conference?: { masterName?: string; jitsiBase?: string },
   ): Promise<void> {
     resumeConferenceOptions.current = conference ?? null
+    setHearTurnOnly(saved.hearTurnOnly === true)
     if (readMatchMode(saved) === 'conference' && saved.packHash) {
       const cached = await getPack(saved.packHash)
       if (cached) {
@@ -1049,6 +1064,7 @@ export default function App() {
     suppressSave.current = true
     clearSavedGame()
     setSavedGame(null)
+    setHearTurnOnly(false)
     teardownConference()
     send({ type: 'RESET_GAME' })
   }

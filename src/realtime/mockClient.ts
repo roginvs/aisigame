@@ -218,15 +218,15 @@ export class MockRealtimeClient implements GameVoice {
     this.onLink({ connection: 'idle', mic: 'idle', host: 'idle' })
   }
 
-  hear(text: string, durationMs = 1000): void {
+  hear(text: string, durationMs = 1000, confidence: number | null = null): void {
     const itemId = `mock-item-${++this.itemSeq}`
-    const started = Date.now()
-    this.transcripts.set(itemId, { text, confidence: null })
+    this.transcripts.set(itemId, { text, confidence })
     this.offerPlayerChat(itemId, text)
     this.onSpeechStarted({ itemId })
+    // Запрошенная длительность, не wall-clock: иначе при fake timers (~40 мс)
+    // фантом-гард принимал бы любой эталон за тишину.
     window.setTimeout(() => {
-      const elapsed = Math.max(1, Date.now() - started)
-      this.onSpeechStopped({ durationMs: Math.min(durationMs, elapsed), itemId })
+      this.onSpeechStopped({ durationMs, itemId })
     }, speechPauseMs)
   }
 
@@ -264,11 +264,9 @@ export class MockRealtimeClient implements GameVoice {
   /** Тесты: started/stopped сразу, транскрипт позже через deliverTranscript. */
   hearDeferred(durationMs = 1000): string {
     const itemId = `mock-item-${++this.itemSeq}`
-    const started = Date.now()
     this.onSpeechStarted({ itemId })
     window.setTimeout(() => {
-      const elapsed = Math.max(1, Date.now() - started)
-      this.onSpeechStopped({ durationMs: Math.min(durationMs, elapsed), itemId })
+      this.onSpeechStopped({ durationMs, itemId })
     }, speechPauseMs)
     return itemId
   }

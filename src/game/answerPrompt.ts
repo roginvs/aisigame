@@ -1,14 +1,26 @@
 const transcriptionPromptMax = 1024
 
 export const answerListeningLead =
-  'Игрок называет ответ. Может сказать редкое или выдуманное слово или разбить его на слоги.'
+  'Игрок отвечает по-русски одним словом или короткой фразой. Тишина, кашель и шум — пустая расшифровка, не подставляй слова из словаря.'
 
-const answerListMark = 'Возможные ответы:'
+/** Метка списка в подсказке: Whisper не должен выдавать её как речь. */
+const answerListMark = 'Редкие слова, которые могут встретиться:'
+
+/**
+ * Короткий VAD-шум: Whisper часто подставляет эталон из подсказки.
+ * Настоящий односложный ответ обычно длиннее; при ложном срабатывании игрок повторит.
+ */
+export const phantomAnswerMaxMs = 650
+
+/** Очень неуверенная расшифровка, совпавшая с эталоном из подсказки — скорее галлюцинация. */
+export const phantomAnswerMaxConfidence = 0.28
 
 /** Подсказка распознавания, пока после кнопки слушают ответ. Без текста вопроса и без тем. */
 export function answerListeningPrompt(answers: readonly string[]): string {
   const lines = uniqueLines(answers)
-  if (!lines.length) return 'Игрок отвечает на вопрос викторины по-русски.'
+  if (!lines.length) {
+    return 'Игрок отвечает на вопрос викторины по-русски. Тишина и шум — пустая расшифровка.'
+  }
   const head = `${answerListeningLead} ${answerListMark}`
   const picked: string[] = []
   for (const line of lines) {
@@ -16,7 +28,7 @@ export function answerListeningPrompt(answers: readonly string[]): string {
     picked.push(line)
   }
   if (picked.length) return formatPrompt(head, picked)
-  const room = Math.max(1, transcriptionPromptMax - `${head} «».`.length)
+  const room = Math.max(1, transcriptionPromptMax - `${head} .`.length)
   return formatPrompt(head, [lines[0]!.slice(0, room)])
 }
 
@@ -39,8 +51,27 @@ export function echoesAnswerPrompt(transcript: string, prompt: string): boolean 
   return false
 }
 
+/**
+ * Тишина / короткий шум: Whisper подставил эталон из подсказки.
+ * Само короткое слово эталона при нормальной длительности речи сюда не попадает.
+ */
+export function phantomListedAnswer(
+  transcript: string,
+  prompt: string,
+  durationMs: number,
+  confidence: number | null,
+): boolean {
+  const said = canon(transcript)
+  if (!said) return false
+  const bodies = listedAnswers(prompt)
+  if (!bodies.includes(said)) return false
+  if (durationMs > 0 && durationMs < phantomAnswerMaxMs) return true
+  if (typeof confidence === 'number' && confidence < phantomAnswerMaxConfidence) return true
+  return false
+}
+
 function formatPrompt(head: string, lines: string[]): string {
-  return `${head} ${lines.map((line) => `«${line}»`).join(' / ')}.`
+  return `${head} ${lines.join(', ')}.`
 }
 
 function uniqueLines(answers: readonly string[]): string[] {
@@ -61,7 +92,7 @@ function listedAnswers(prompt: string): string[] {
   if (markAt < 0) return []
   return prompt
     .slice(markAt + answerListMark.length)
-    .split(' / ')
+    .split(',')
     .map((part) => canon(part))
     .filter(Boolean)
 }

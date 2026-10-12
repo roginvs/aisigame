@@ -7,7 +7,7 @@ import { verbatimSpeech, withPlayNote } from '../realtime/speechMatch.ts'
 import { parseBet } from './bet.ts'
 import { questionSpeech, spokenChoiceForms } from './choices.ts'
 import { matchSpokenCell, selectionChatText } from './choiceMatch.ts'
-import { answerListeningPrompt, echoesAnswerPrompt } from './answerPrompt.ts'
+import { answerListeningPrompt, echoesAnswerPrompt, phantomListedAnswer } from './answerPrompt.ts'
 import { choicePrompt, echoesChoicePrompt } from './choicePrompt.ts'
 import { blurtGate, choiceGate, repeatsQuestion } from './heard.ts'
 import { judgmentChatText, settleJudgment } from './judgment.ts'
@@ -81,6 +81,8 @@ export function attachController(options: {
   let answerItemId: string | null = null
   let answerTranscript = ''
   let answerConfidence: number | null = null
+  /** Длительность принятой речи ответа: короткий VAD + эталон из подсказки = фантом. */
+  let answerDurationMs = 0
   let judgeToken = 0
   let buzzerEarAt = 0
   /** Свежая речь на выборе / ответе — не долбить подсказкой «мик выкл.». */
@@ -199,6 +201,12 @@ export function attachController(options: {
   client.onSpeechStopped = ({ durationMs, itemId }) => {
     const path = statePath(actor.getSnapshot().value)
     if (path === 'stopped' || path === 'paused') return
+    // VAD-длительность может быть длиннее wall-clock с момента started — для окна попытки
+    // берём фактический старт utterance, иначе короткий фантом-гард ломает нормальные ответы.
+    const speechStartedAt =
+      itemId && openSpeechItemId === itemId && openSpeechStartedAt > 0
+        ? openSpeechStartedAt
+        : Date.now() - Math.max(0, durationMs)
     if (itemId && openSpeechItemId === itemId) {
       openSpeechItemId = null
       openSpeechStartedAt = 0
@@ -215,12 +223,13 @@ export function attachController(options: {
       return
     }
     if (path === 'answering.waiting' || path === 'answering.hearing') {
-      if (!acceptAnswerSpeech(durationMs, itemId)) {
+      if (!acceptAnswerSpeech(durationMs, itemId, speechStartedAt)) {
         client.suppressPlayerChat(itemId)
         return
       }
       answerItemId = itemId ?? liveSpeechItemId
       liveSpeechItemId = answerItemId
+      answerDurationMs = Math.max(0, durationMs)
       client.allowPlayerChat(answerItemId)
       lastAnswerSpeechAt = Date.now()
       actor.send({ type: 'PLAYER_SPEECH_FINISHED' })
@@ -440,6 +449,7 @@ export function attachController(options: {
     answerItemId = null
     answerTranscript = ''
     answerConfidence = null
+    answerDurationMs = 0
     judgeToken += 1
     client.gatePlayerChat(true)
     // Кнопка посреди длинной реплики: ту же utterance несём в попытку.
@@ -460,6 +470,7 @@ export function attachController(options: {
     answerItemId = null
     answerTranscript = ''
     answerConfidence = null
+    answerDurationMs = 0
     judgeToken += 1
     client.gatePlayerChat(false)
   }
@@ -472,7 +483,7 @@ export function attachController(options: {
    * Речь ответа своей попытки: после открытия попытки, с окна кнопки,
    * или та же utterance, что уже шла в момент buzz.
    */
-  function acceptAnswerSpeech(durationMs: number, itemId: string | null): boolean {
+  function acceptAnswerSpeech(durationMs: number, itemId: string | null, speechStartedAt: number): boolean {
     if (!answerAttemptLive()) {
       pushTrace('note', 'поздняя речь ответа отброшена: чужая попытка')
       return false
@@ -482,11 +493,10 @@ export function attachController(options: {
       pushTrace('note', 'поздняя речь ответа отброшена: чужой item')
       return false
     }
-    const startedAt = Date.now() - Math.max(0, durationMs)
-    if (startedAt >= answerArmedAt - 100) return true
+    if (speechStartedAt >= answerArmedAt - 100) return true
     // Речь началась в текущем окне кнопки — дожатие кнопки посреди фразы.
-    if (buzzerEarAt > 0 && startedAt >= buzzerEarAt - 100) return true
-    pushTrace('note', 'поздняя речь ответа отброшена: началась до попытки')
+    if (buzzerEarAt > 0 && speechStartedAt >= buzzerEarAt - 100) return true
+    pushTrace('note', `поздняя речь ответа отброшена: началась до попытки (${durationMs} мс)`)
     return false
   }
 
@@ -627,6 +637,15 @@ export function attachController(options: {
     const answerPrompt = answerListeningPrompt(questionById(live.questions, live.activeQuestionId)?.answers ?? [])
     if (echoesAnswerPrompt(heard.text, answerPrompt)) {
       pushTrace('note', 'распознавание повторило подсказку ответа, это не ответ')
+      actor.send({ type: 'ANSWER_ECHO' })
+      return
+    }
+    if (phantomListedAnswer(heard.text, answerPrompt, answerDurationMs, heard.confidence)) {
+      pushTrace(
+        'note',
+        `фантом ответа из подсказки (${answerDurationMs} мс, conf ${heard.confidence ?? '—'}): ${heard.text}`,
+      )
+      client.suppressPlayerChat(itemId)
       actor.send({ type: 'ANSWER_ECHO' })
       return
     }

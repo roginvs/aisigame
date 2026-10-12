@@ -34,6 +34,8 @@ export type SavedGame = SavedMatch & {
   jitsiUrl?: string
   roomId?: string
   chat?: { name: string; text: string; at?: string }[]
+  /** Мастер: галка «Меньше слышать». Старые снимки без поля — выкл. */
+  hearTurnOnly?: boolean
 }
 
 export type PersistMatchConference = {
@@ -42,6 +44,7 @@ export type PersistMatchConference = {
   jitsiUrl?: string
   roomId?: string
   chat?: { name: string; text: string; at?: string }[]
+  hearTurnOnly?: boolean
 }
 
 export function persistConferenceLobby(
@@ -54,6 +57,7 @@ export function persistConferenceLobby(
     jitsiUrl: string
     roomId: string
     chat?: { name: string; text: string; at?: string }[]
+    hearTurnOnly?: boolean
   },
   storage: Storage = localStorage,
 ): SavedGame | null {
@@ -68,6 +72,7 @@ export function persistConferenceLobby(
     jitsiUrl: input.jitsiUrl,
     roomId: input.roomId,
     chat: input.chat,
+    ...(input.hearTurnOnly === true ? { hearTurnOnly: true } : {}),
     players: [input.master],
     roundIndex: input.pack.rounds[0]?.index ?? 0,
     playedIds: [],
@@ -247,10 +252,14 @@ export function persistMatch(
     path: string
     context: GameContext
     conference?: PersistMatchConference
+    hearTurnOnly?: boolean
   },
   storage: Storage = localStorage,
 ): SavedGame | null {
-  if (input.path === 'startMenu') return readSavedGame(storage)
+  if (input.path === 'startMenu') {
+    // Лобби конференции: фаза машины ещё startMenu, но снимок уже есть — обновить галку.
+    return patchHearTurnOnly(input.hearTurnOnly ?? input.conference?.hearTurnOnly, storage)
+  }
   const phase = phaseForSave(input.path, input.context.resumePath)
   if (!phase) return readSavedGame(storage)
   const previous = readSavedGame(storage)
@@ -261,6 +270,7 @@ export function persistMatch(
       ? previous.packHash
       : '')
   const conference = conferenceForSave(input.conference, previous)
+  const hearTurnOnly = resolveHearTurnOnly(input.hearTurnOnly ?? input.conference?.hearTurnOnly, previous?.hearTurnOnly)
   const game = sanitize({
     version: savedGameVersion,
     packId: input.packId,
@@ -269,6 +279,7 @@ export function persistMatch(
     packHash,
     ...matchFromContext(input.context, phase),
     ...conference,
+    ...(hearTurnOnly ? { hearTurnOnly: true } : {}),
   })
   if (!game) return readSavedGame(storage)
   storage.setItem(gameStorageKey, JSON.stringify(game))
@@ -354,6 +365,28 @@ function conferenceForSave(
     ...(typeof roomId === 'string' && roomId.trim() ? { roomId: roomId.trim() } : {}),
     ...(chat && chat.length > 0 ? { chat } : {}),
   }
+}
+
+/** `undefined` — оставить как в прошлом снимке; `false` — выкл. и не писать поле. */
+function resolveHearTurnOnly(input: boolean | undefined, previous: boolean | undefined): boolean {
+  if (input === true) return true
+  if (input === false) return false
+  return previous === true
+}
+
+function patchHearTurnOnly(input: boolean | undefined, storage: Storage): SavedGame | null {
+  const previous = readSavedGame(storage)
+  if (!previous || input === undefined) return previous
+  const nextOn = input === true
+  const wasOn = previous.hearTurnOnly === true
+  if (nextOn === wasOn) return previous
+  const raw = { ...previous } as SavedGame & { hearTurnOnly?: boolean }
+  if (nextOn) raw.hearTurnOnly = true
+  else delete raw.hearTurnOnly
+  const game = sanitize(raw)
+  if (!game) return previous
+  storage.setItem(gameStorageKey, JSON.stringify(game))
+  return game
 }
 
 function matchFromContext(context: GameContext, phase: string): SavedMatch {
@@ -525,8 +558,8 @@ function normalizePlayers(value: unknown): Player[] | null {
 
 function normalizeConference(
   record: Record<string, unknown>,
-): Pick<SavedGame, 'mode' | 'conferenceLobby' | 'jitsiUrl' | 'roomId' | 'chat'> {
-  const out: Pick<SavedGame, 'mode' | 'conferenceLobby' | 'jitsiUrl' | 'roomId' | 'chat'> = {}
+): Pick<SavedGame, 'mode' | 'conferenceLobby' | 'jitsiUrl' | 'roomId' | 'chat' | 'hearTurnOnly'> {
+  const out: Pick<SavedGame, 'mode' | 'conferenceLobby' | 'jitsiUrl' | 'roomId' | 'chat' | 'hearTurnOnly'> = {}
   if (record.mode === 'conference') out.mode = 'conference'
   else if (record.mode === 'table') out.mode = 'table'
   if (record.conferenceLobby === true) out.conferenceLobby = true
@@ -534,6 +567,7 @@ function normalizeConference(
   if (typeof record.roomId === 'string' && record.roomId.trim()) out.roomId = record.roomId.trim()
   const chat = normalizeChat(record.chat)
   if (chat && chat.length > 0) out.chat = chat.slice(-CONFERENCE_HISTORY_LIMIT)
+  if (record.hearTurnOnly === true) out.hearTurnOnly = true
   return out
 }
 
