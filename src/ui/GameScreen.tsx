@@ -376,6 +376,9 @@ export function GameScreen(props: {
       <section className="layout">
         <div className="play">
         <div className="stage">
+        {conference?.masterOffline && !conference.waitingMaster ? (
+          <p className="error banner">Мастер-игрок отключился</p>
+        ) : null}
         {conference?.awaitingPack && conference.packProgress ? (
           <PackAwaitPanel progress={conference.packProgress} packName={conference.packName} />
         ) : showQuestion && question ? (
@@ -434,6 +437,7 @@ export function GameScreen(props: {
           <ConferenceLobbyStatus
             waitingMaster={conference.waitingMaster}
             masterOffline={conference.masterOffline}
+            banner={false}
           />
         ) : (
         <div className="board" role="grid" aria-label="Игровое поле">
@@ -584,15 +588,21 @@ export function GameScreen(props: {
             title={turnTitle}
             titleHint={soloListenHint}
             status={
-              conference?.awaitingPack && conference.packProgress
-                ? packProgressLabel(conference.packProgress)
-                : conference?.lobby
-                  ? conference.waitingMaster
-                    ? 'Ждём мастер-игрока'
-                    : 'Ждём начала игры'
-                  : context.statusLine
+              conference?.masterOffline && !conference.waitingMaster
+                ? ''
+                : conference?.awaitingPack && conference.packProgress
+                  ? packProgressLabel(conference.packProgress)
+                  : conference?.lobby
+                    ? conference.waitingMaster
+                      ? 'Ждём мастер-игрока'
+                      : 'Ждём начала игры'
+                    : context.statusLine
             }
-            error={conference?.mediaError ?? context.error}
+            error={
+              conference?.masterOffline && !conference.waitingMaster
+                ? 'Мастер-игрок отключился'
+                : (conference?.mediaError ?? context.error)
+            }
             conferenceSpeaking={conference?.hostSpeaking}
           />
           <ConversationChat

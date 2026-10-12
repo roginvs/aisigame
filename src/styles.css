@@ -1011,14 +1011,19 @@ button.continue-with-file .continue-file {
 
 .stage {
   display: flex;
+  flex-direction: column;
+  gap: 8px;
   min-height: 0;
   min-width: 0;
 }
 
 .stage > .board,
-.stage > .question {
+.stage > .question,
+.stage > .conference-lobby-status,
+.stage > .pack-await {
   flex: 1 1 auto;
   width: 100%;
+  min-height: 0;
 }
 
 .talk {

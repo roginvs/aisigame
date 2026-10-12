@@ -1146,7 +1146,8 @@ export default function App() {
       etaSeconds: entry.etaSeconds ?? null,
       ready: entry.ready,
       hashOk: entry.hashOk,
-      stale: entry.stale,
+      // Последний снимок замирает без мастера: локальный masterOffline серит карточку.
+      stale: entry.stale || (joinerLobby.masterOffline && entry.isMaster),
       hidden: entry.hidden,
       isMaster: entry.isMaster,
       lastSeen: 0,
