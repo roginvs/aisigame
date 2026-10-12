@@ -19,6 +19,16 @@ test('выход стирает партию, обновление страни�
   expect(JSON.stringify(started)).not.toMatch(/apiKey|openaiApiKey|sk-/)
 
   await expect(page.getByRole('button', { name: 'Выход' })).toBeVisible()
+  page.once('dialog', async (dialog) => {
+    expect(dialog.type()).toBe('confirm')
+    expect(dialog.message()).toBe('Выйти из игры?')
+    await dialog.dismiss()
+  })
+  await page.getByRole('button', { name: 'Выход' }).click()
+  await expect(page.getByRole('button', { name: 'Выход' })).toBeVisible()
+  expect(await page.evaluate(() => localStorage.getItem('aisigame.game'))).not.toBeNull()
+
+  page.once('dialog', (dialog) => dialog.accept())
   await page.getByRole('button', { name: 'Выход' }).click()
   await expect(page.getByRole('button', { name: 'Начать игру' })).toBeVisible()
   await expect(continueButton).toBeVisible()
@@ -110,6 +120,7 @@ test('пакет с диска продолжается повторным вы�
   expect(resumed.players.find((player) => player.id === 1)?.score).toBe(250)
   expect(JSON.stringify(resumed)).not.toMatch(/apiKey|openaiApiKey|sk-/)
 
+  page.once('dialog', (dialog) => dialog.accept())
   await page.getByRole('button', { name: 'Выход' }).click()
   await expect(page.getByRole('button', { name: 'Начать игру' })).toBeVisible()
   await expect(continueButton).toBeDisabled()

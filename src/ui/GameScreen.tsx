@@ -356,7 +356,11 @@ export function GameScreen(props: {
           <button
             type="button"
             className="ghost"
-            onClick={conference?.onConferenceExit ?? onReset}
+            onClick={() => {
+              if (window.confirm('Выйти из игры?')) {
+                (conference?.onConferenceExit ?? onReset)()
+              }
+            }}
           >
             🚪 Выход
           </button>
