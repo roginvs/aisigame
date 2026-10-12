@@ -7,6 +7,7 @@ import { createMicMixer, streamsForModelHear, type MicMixer } from './audioMix.t
 import { nextCameraDeviceId } from './camera.ts'
 import { createSpeakerActivity } from './speakerActivity.ts'
 import { conferenceAudioStream, createConferenceAudioOutput } from './conferenceAudio.ts'
+import { PACK_CHANNEL_HIGH_WATER_BYTES, PACK_CHANNEL_LOW_WATER_BYTES } from './chunks.ts'
 import { pushTrace } from '../debug/trace.ts'
 
 type JitsiMeetJS = {
@@ -133,7 +134,10 @@ export class JitsiMessageTransport implements ConferenceTransport {
   private conference: JitsiConference
   private pending: ConferenceMessage[] = []
   private retryTimer = 0
+  private drainTimer = 0
   private closed = false
+  private dataChannel: RTCDataChannel | null = null
+  private drainListener: (() => void) | null = null
 
   constructor(conference: JitsiConference, endpointEvent: string, dataChannelEvent?: string) {
     this.conference = conference
@@ -143,7 +147,12 @@ export class JitsiMessageTransport implements ConferenceTransport {
         for (const handler of this.handlers) handler(data, senderId)
       }
     })
-    if (dataChannelEvent) conference.on(dataChannelEvent, () => this.flush())
+    if (dataChannelEvent) {
+      conference.on(dataChannelEvent, () => {
+        this.dataChannel = null
+        this.flush()
+      })
+    }
   }
 
   send(message: ConferenceMessage): void {
@@ -171,27 +180,122 @@ export class JitsiMessageTransport implements ConferenceTransport {
 
   close(): void {
     this.closed = true
-    window.clearTimeout(this.retryTimer)
-    this.retryTimer = 0
+    this.clearRetryTimer()
+    this.clearDrainWait()
     this.pending = []
     this.handlers.clear()
+    this.dataChannel = null
   }
 
   private flush(): void {
     if (this.closed || this.pending.length === 0) return
-    window.clearTimeout(this.retryTimer)
-    this.retryTimer = 0
+    this.clearRetryTimer()
     try {
       while (this.pending.length > 0) {
-        this.conference.sendEndpointMessage('', this.pending[0])
+        const next = this.pending[0]!
+        // Снимки/hello пропускаем даже при полном буфере; тормозим только куски.
+        if (next.type === 'packChunk' && this.packSendBlocked()) {
+          this.armBufferedDrain()
+          return
+        }
+        this.conference.sendEndpointMessage('', next)
         this.pending.shift()
       }
+      this.clearDrainWait()
     } catch {
       // CONFERENCE_JOINED приходит раньше готовности BridgeChannel. Не роняем
       // сессию: сохраняем порядок сообщений и повторяем после открытия канала.
       this.retryTimer = window.setTimeout(() => this.flush(), 250)
     }
   }
+
+  private packSendBlocked(): boolean {
+    const channel = this.resolveDataChannel()
+    if (!channel) return false
+    return channel.bufferedAmount > PACK_CHANNEL_HIGH_WATER_BYTES
+  }
+
+  private resolveDataChannel(): RTCDataChannel | null {
+    if (this.dataChannel && this.dataChannel.readyState !== 'closed') return this.dataChannel
+    this.dataChannel = findBridgeDataChannel(this.conference)
+    if (this.dataChannel) {
+      try {
+        this.dataChannel.bufferedAmountLowThreshold = PACK_CHANNEL_LOW_WATER_BYTES
+      } catch {
+        // Некоторые обёртки не дают писать порог — остаётся опрос по таймеру.
+      }
+    }
+    return this.dataChannel
+  }
+
+  private armBufferedDrain(): void {
+    if (this.closed) return
+    const channel = this.resolveDataChannel()
+    if (channel && !this.drainListener) {
+      this.drainListener = () => this.flush()
+      channel.addEventListener('bufferedamountlow', this.drainListener)
+    }
+    if (!this.drainTimer) {
+      this.drainTimer = window.setTimeout(() => {
+        this.drainTimer = 0
+        this.flush()
+      }, 100)
+    }
+  }
+
+  private clearRetryTimer(): void {
+    window.clearTimeout(this.retryTimer)
+    this.retryTimer = 0
+  }
+
+  private clearDrainWait(): void {
+    window.clearTimeout(this.drainTimer)
+    this.drainTimer = 0
+    if (this.drainListener && this.dataChannel) {
+      this.dataChannel.removeEventListener('bufferedamountlow', this.drainListener)
+    }
+    this.drainListener = null
+  }
+}
+
+function isRtcDataChannel(value: unknown): value is RTCDataChannel {
+  return Boolean(
+    value &&
+      typeof value === 'object' &&
+      typeof (value as RTCDataChannel).bufferedAmount === 'number' &&
+      typeof (value as RTCDataChannel).readyState === 'string' &&
+      typeof (value as RTCDataChannel).addEventListener === 'function',
+  )
+}
+
+/** Достаём RTCDataChannel Bridge Channel из внутренностей lib-jitsi-meet, если доступен. */
+export function findBridgeDataChannel(conference: unknown): RTCDataChannel | null {
+  if (!conference || typeof conference !== 'object') return null
+  const rtc = (conference as { rtc?: unknown }).rtc
+  if (!rtc || typeof rtc !== 'object') return null
+
+  const holders: unknown[] = [
+    (rtc as { _channel?: unknown })._channel,
+    (rtc as { channel?: unknown }).channel,
+  ]
+  for (const holder of holders) {
+    if (isRtcDataChannel(holder)) return holder
+    if (holder && typeof holder === 'object') {
+      const inner =
+        (holder as { _channel?: unknown })._channel ?? (holder as { channel?: unknown }).channel
+      if (isRtcDataChannel(inner)) return inner
+    }
+  }
+
+  const pc =
+    (rtc as { peerconnection?: RTCPeerConnection }).peerconnection ??
+    (rtc as { _peerConnection?: RTCPeerConnection })._peerConnection
+  const list =
+    pc && typeof (pc as { getDataChannels?: () => RTCDataChannel[] }).getDataChannels === 'function'
+      ? (pc as { getDataChannels: () => RTCDataChannel[] }).getDataChannels()
+      : null
+  const open = list?.find((channel) => channel.readyState === 'open')
+  return open ?? null
 }
 
 function endpointSenderId(participant: unknown): string {

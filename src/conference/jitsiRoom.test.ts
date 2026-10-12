@@ -1,6 +1,30 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
+import { PACK_CHANNEL_HIGH_WATER_BYTES, PACK_CHANNEL_LOW_WATER_BYTES } from './chunks.ts'
 import type { ConferenceMessage } from './messages.ts'
-import { JitsiMessageTransport, visibleJitsiParticipants } from './jitsiRoom.ts'
+import { findBridgeDataChannel, JitsiMessageTransport, visibleJitsiParticipants } from './jitsiRoom.ts'
+
+function fakeDataChannel(bufferedAmount: number): RTCDataChannel {
+  const listeners = new Map<string, Set<() => void>>()
+  return {
+    bufferedAmount,
+    readyState: 'open',
+    bufferedAmountLowThreshold: 0,
+    addEventListener(type: string, handler: EventListenerOrEventListenerObject) {
+      const fn = typeof handler === 'function' ? (handler as () => void) : () => undefined
+      const set = listeners.get(type) ?? new Set()
+      set.add(fn)
+      listeners.set(type, set)
+    },
+    removeEventListener(type: string, handler: EventListenerOrEventListenerObject) {
+      const fn = typeof handler === 'function' ? (handler as () => void) : () => undefined
+      listeners.get(type)?.delete(fn)
+    },
+    dispatchEvent(event: Event) {
+      for (const fn of listeners.get(event.type) ?? []) fn()
+      return true
+    },
+  } as unknown as RTCDataChannel
+}
 
 describe('JitsiMessageTransport', () => {
   afterEach(() => {
@@ -56,6 +80,47 @@ describe('JitsiMessageTransport', () => {
 
     expect(sent).toEqual([first, second])
     transport.close()
+  })
+
+  it('не досылает packChunk при высоком bufferedAmount, снимок пропускает', () => {
+    vi.useFakeTimers()
+    vi.stubGlobal('window', globalThis)
+    const sent: ConferenceMessage[] = []
+    const channel = fakeDataChannel(PACK_CHANNEL_HIGH_WATER_BYTES + 1)
+    const conference = {
+      on: vi.fn(),
+      sendEndpointMessage: (_to: string, message: ConferenceMessage) => {
+        sent.push(message)
+      },
+      rtc: { _channel: channel },
+    }
+    const transport = new JitsiMessageTransport(conference as never, 'endpoint', 'data-open')
+    transport.send({
+      type: 'packChunk',
+      authorityToken: 'master',
+      targetClientId: 'guest',
+      hash: 'h',
+      index: 0,
+      total: 1,
+      dataBase64: 'YQ==',
+    })
+    expect(sent).toEqual([])
+    expect(channel.bufferedAmountLowThreshold).toBe(PACK_CHANNEL_LOW_WATER_BYTES)
+
+    transport.send({ type: 'snapshot', authorityToken: 'master', phase: 'lobby' } as ConferenceMessage)
+    expect(sent.map((message) => message.type)).toEqual(['snapshot'])
+
+    Object.defineProperty(channel, 'bufferedAmount', { value: 0, configurable: true })
+    channel.dispatchEvent(new Event('bufferedamountlow'))
+    expect(sent.map((message) => message.type)).toEqual(['snapshot', 'packChunk'])
+    transport.close()
+  })
+
+  it('findBridgeDataChannel читает rtc._channel', () => {
+    const channel = fakeDataChannel(0)
+    expect(findBridgeDataChannel({ rtc: { _channel: channel } })).toBe(channel)
+    expect(findBridgeDataChannel({ rtc: { _channel: { _channel: channel } } })).toBe(channel)
+    expect(findBridgeDataChannel({})).toBeNull()
   })
 
   it('ставит свежий снимок вперёд кусков пакета', () => {

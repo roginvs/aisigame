@@ -61,7 +61,8 @@ export class JoinerSession {
   private masterOffline = false
   private packName = ''
   private lastSnapshot: ConferenceSnapshot | null = null
-  private lastSnapshotAt: number | null = null
+  /** Любой трафик от мастера (снимок, offer, chunk) — признак, что он жив. */
+  private lastMasterAliveAt: number | null = null
   private activeOfferKey = ''
   private readyPackHash: string | null = null
   private masterAuthorityToken: string | null = null
@@ -92,7 +93,8 @@ export class JoinerSession {
     this.sendHello()
     this.heartbeatTimer = window.setInterval(() => {
       this.sendHello()
-      const offline = this.lastSnapshotAt !== null && Date.now() - this.lastSnapshotAt >= PRESENCE_STALE_MS
+      const offline =
+        this.lastMasterAliveAt !== null && Date.now() - this.lastMasterAliveAt >= PRESENCE_STALE_MS
       if (offline !== this.masterOffline) {
         this.masterOffline = offline
         this.emitLobby()
@@ -170,9 +172,7 @@ export class JoinerSession {
       return
     }
     if (message.type === 'snapshot') {
-      this.waitingMaster = false
-      this.masterOffline = false
-      this.lastSnapshotAt = Date.now()
+      this.noteMasterAlive()
       this.lastSnapshot = message
       this.gameStarted = message.phase !== 'lobby'
       this.callbacks.onSnapshot(message)
@@ -181,10 +181,12 @@ export class JoinerSession {
       return
     }
     if (message.type === 'packOffer') {
+      this.noteMasterAlive()
       await this.handlePackOffer(message)
       return
     }
     if (message.type === 'packChunk') {
+      this.noteMasterAlive()
       if (this.readyPackHash === message.hash) {
         this.sendPackAck(message.hash, message.total)
         return
@@ -349,6 +351,12 @@ export class JoinerSession {
       entries: batch.entries,
     })
     this.debugCursor = batch.lastId
+  }
+
+  private noteMasterAlive(): void {
+    this.waitingMaster = false
+    this.masterOffline = false
+    this.lastMasterAliveAt = Date.now()
   }
 
   private acceptMaster(authorityToken: string, senderId: string, canRebind: boolean): boolean {

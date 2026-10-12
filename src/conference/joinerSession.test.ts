@@ -3,6 +3,7 @@ import { sha256Hex } from '../game/savedGame.ts'
 import { chunkToWire, splitChunks } from './chunks.ts'
 import { JoinerSession, type JoinerPackCache, type JoinerLobbyState } from './joinerSession.ts'
 import type { ConferenceMessage, PackOfferMessage, SnapshotMessage } from './messages.ts'
+import { PRESENCE_HEARTBEAT_MS, PRESENCE_STALE_MS } from './presence.ts'
 import type { ConferenceTransport } from './transport.ts'
 import { pushTrace } from '../debug/trace.ts'
 
@@ -287,6 +288,36 @@ describe('JoinerSession pack cache and transfer', () => {
     await Promise.resolve()
     expect(session.snapshot()?.phase).toBe('lobby')
     session.dispose()
+  })
+
+  it('кусок пакета от мастера тоже считает его живым, даже без свежего снимка', async () => {
+    vi.useFakeTimers()
+    vi.stubGlobal('window', globalThis)
+    const bytes = new TextEncoder().encode('alive pack')
+    const hash = await sha256Hex(bytes)
+    const cache: JoinerPackCache = {
+      get: vi.fn(async () => null),
+      put: vi.fn(async () => undefined),
+      delete: vi.fn(async () => undefined),
+    }
+    const { session, transport, lobby } = makeSession({ cache })
+    const wire = chunkToWire(hash, splitChunks(bytes)[0]!)
+
+    transport.emit(snapshot())
+    await eventually(() => expect(lobby.at(-1)?.masterOffline).toBe(false))
+
+    // Долго нет снимка — без кусков мастер стал бы offline.
+    vi.advanceTimersByTime(PRESENCE_STALE_MS + PRESENCE_HEARTBEAT_MS)
+    expect(lobby.at(-1)?.masterOffline).toBe(true)
+
+    transport.emit(offer(hash, bytes.byteLength))
+    transport.emit({ type: 'packChunk', targetClientId: 'joiner', authorityToken: 'master-token', ...wire })
+    await eventually(() => expect(lobby.at(-1)?.masterOffline).toBe(false))
+
+    vi.advanceTimersByTime(PRESENCE_HEARTBEAT_MS)
+    expect(lobby.at(-1)?.masterOffline).toBe(false)
+    session.dispose()
+    vi.useRealTimers()
   })
 
   it('после позднего входа в идущую игру автоматически становится ready, когда пакет проверен', async () => {

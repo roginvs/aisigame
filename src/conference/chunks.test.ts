@@ -3,6 +3,7 @@ import { sha256Hex } from '../game/savedGame.ts'
 import {
   CHUNK_BYTES,
   CHUNK_WINDOW,
+  CHUNK_WINDOW_BYTES,
   base64ToBytes,
   bytesToBase64,
   chunkToWire,
@@ -60,8 +61,9 @@ describe('createSender window', () => {
     expect(sender.nextToSend()).toBe(1)
   })
 
-  it('окно по умолчанию — CHUNK_WINDOW кусков', () => {
-    const payload = new Uint8Array(CHUNK_BYTES * (CHUNK_WINDOW + 1))
+  it('окно по умолчанию ограничено и числом кусков, и байтами', () => {
+    const byCount = Math.min(CHUNK_WINDOW, Math.floor(CHUNK_WINDOW_BYTES / CHUNK_BYTES) || 1)
+    const payload = new Uint8Array(CHUNK_BYTES * (byCount + 2))
     const parts = splitChunks(payload)
     const sender = createSender(parts)
     const first: number[] = []
@@ -70,15 +72,28 @@ describe('createSender window', () => {
       if (index === null) break
       first.push(index)
     }
-    expect(first).toEqual([...Array(CHUNK_WINDOW).keys()])
-    expect(sender.inflight.size).toBe(CHUNK_WINDOW)
+    expect(first).toEqual([...Array(byCount).keys()])
+    expect(sender.inflight.size).toBe(byCount)
     expect(sender.nextToSend()).toBeNull()
 
     sender.onAck(2)
-    // Префикс до 2 закрыт, индекс 2 тоже снят с inflight — остаётся 3…WINDOW-1.
-    expect([...sender.inflight].sort((a, b) => a - b)).toEqual([...Array(CHUNK_WINDOW).keys()].slice(3))
+    // Префикс до 2 закрыт, индекс 2 тоже снят с inflight — остаётся 3…byCount-1.
+    expect([...sender.inflight].sort((a, b) => a - b)).toEqual([...Array(byCount).keys()].slice(3))
     const after = sender.nextToSend()
     expect(after).toBe(2)
+  })
+
+  it('не набирает больше CHUNK_WINDOW_BYTES сырых байтов в полёте', () => {
+    const parts = splitChunks(new Uint8Array(CHUNK_BYTES * 20))
+    const sender = createSender(parts, 100, CHUNK_BYTES * 3)
+    const indexes: number[] = []
+    for (;;) {
+      const index = sender.nextToSend()
+      if (index === null) break
+      indexes.push(index)
+    }
+    expect(indexes).toEqual([0, 1, 2])
+    expect(sender.nextToSend()).toBeNull()
   })
 })
 
