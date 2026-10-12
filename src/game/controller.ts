@@ -1119,7 +1119,7 @@ export function falseStartInstructions(context: GameContext): string {
   })
 }
 
-/** Через сколько мс пищать на окне кнопки. Только полные десять секунд, за две до конца. */
+/** Через сколько мс пищать на окне кнопки. Только полное первое окно (`buzzerMs`), за две до конца. */
 export function buzzerWarningDelay(durationMs: number): number | null {
   if (durationMs !== gameConfig.buzzerMs) return null
   const delay = durationMs - gameConfig.buzzerWarningMs

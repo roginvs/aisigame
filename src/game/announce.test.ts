@@ -238,7 +238,7 @@ describe('announceInstructions', () => {
     expect(line).not.toContain('никто не нажал')
   })
 
-  it('предупреждает за две секунды только на десятисекундном окне', () => {
+  it('предупреждает за две секунды только на полном первом окне кнопки', () => {
     expect(buzzerWarningDelay(gameConfig.buzzerMs)).toBe(gameConfig.buzzerMs - gameConfig.buzzerWarningMs)
     expect(buzzerWarningDelay(gameConfig.stealBuzzerMs)).toBeNull()
   })

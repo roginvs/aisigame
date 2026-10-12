@@ -395,7 +395,7 @@ describe('host audio completion', () => {
     })
   }
 
-  it('речь и сброс во время чтения сразу открывают десять секунд, не жёсткий предел', async () => {
+  it('речь и сброс во время чтения сразу открывают первое окно кнопки, не жёсткий предел', async () => {
     const { feed, sent } = open()
     const { actor, detach } = await reachReading(feed, sent)
     armRead(feed, actor.getSnapshot().context.questions.find((item) => item.id === 'history-100')?.text ?? '')
@@ -425,7 +425,7 @@ describe('host audio completion', () => {
     actor.stop()
   })
 
-  it('конец воспроизведения тоже сразу открывает десять секунд', async () => {
+  it('конец воспроизведения тоже сразу открывает первое окно кнопки', async () => {
     const { feed, sent } = open()
     const { actor, detach, text } = await reachReading(feed, sent)
     armRead(feed, text)

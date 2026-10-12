@@ -536,9 +536,9 @@ describe('game machine', () => {
     expect(announceInstructions(actor.getSnapshot().context)).not.toContain('Братство')
   })
 
-  it('речь без кнопки не останавливает десять секунд', () => {
+  it('речь без кнопки не останавливает первое окно кнопки', () => {
     const actor = reachBuzzing()
-    vi.advanceTimersByTime(8_000)
+    vi.advanceTimersByTime(gameConfig.buzzerMs - 2_000)
     actor.send({ type: 'UNBUTTONED_TALK' })
     expect(statePath(actor.getSnapshot().value)).toBe('buzzing.open')
     expect(actor.getSnapshot().context.spokeWithoutButton).toBe(true)
@@ -574,7 +574,7 @@ describe('game machine', () => {
 
   it('не меняет счёт, если кнопку никто не нажал', () => {
     const actor = reachBuzzing()
-    vi.advanceTimersByTime(10_000)
+    vi.advanceTimersByTime(gameConfig.buzzerMs)
     expect(playerScore(actor, 1)).toBe(0)
     expect(actor.getSnapshot().context.playedIds).toContain('history-100')
     expect(statePath(actor.getSnapshot().value)).toBe('announcing.speaking')
@@ -695,7 +695,7 @@ describe('game machine', () => {
 
   it('не открывает уже сыгранный вопрос', () => {
     const actor = reachBuzzing()
-    vi.advanceTimersByTime(10_000)
+    vi.advanceTimersByTime(gameConfig.buzzerMs)
     actor.send({ type: 'HOST_AUDIO_FINISHED', purpose: 'announce' })
     actor.send({ type: 'QUESTION_SELECTED', themeId: 'history', value: 100 })
     expect(statePath(actor.getSnapshot().value)).toBe('choosing.clarifying')
@@ -965,7 +965,7 @@ describe('game machine', () => {
     expect(actor.getSnapshot().context.activePlayerId).toBe(2)
   })
 
-  it('длинное чтение закрывает ячейку, когда десять секунд после ранней кнопки вышли', () => {
+  it('длинное чтение закрывает ячейку, когда buzzerMs после ранней кнопки вышли', () => {
     const actor = reachReading()
     vi.advanceTimersByTime(earlyMs(actor))
     expect(statePath(actor.getSnapshot().value)).toBe('reading.armed')
@@ -1350,7 +1350,7 @@ describe('game machine', () => {
     expect(actor.getSnapshot().context.spokeWithoutButton).toBe(false)
   })
 
-  it('монетка решает, съест ли реплика про фальстарт десять секунд', () => {
+  it('монетка решает, съест ли реплика про фальстарт первое окно кнопки', () => {
     falseStartCoin.flip = () => true
     const spoken = reachReading()
     spoken.send({ type: 'BUZZER_PRESSED', playerId: 1 })
@@ -1373,7 +1373,7 @@ describe('game machine', () => {
     expect(quiet.getSnapshot().context.sayFalseStart).toBe(false)
   })
 
-  it('без фальстарта монетку не бросает и сразу открывает десять секунд', () => {
+  it('без фальстарта монетку не бросает и сразу открывает первое окно кнопки', () => {
     falseStartCoin.flip = () => {
       throw new Error('монетку бросать не за чем')
     }
