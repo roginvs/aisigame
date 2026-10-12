@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { answerIsPublic, chatAnswerNote, stageMedia } from './reveal.ts'
+import { answerIsPublic, chatAnswerNote, publicAnswerHasPlayable, stageMedia } from './reveal.ts'
 import type { QuestionMedia } from './types.ts'
 
 describe('answerIsPublic', () => {
@@ -16,6 +16,39 @@ describe('answerIsPublic', () => {
     expect(answerIsPublic('silence', false)).toBe(false)
     expect(answerIsPublic('nobody', false)).toBe(false)
     expect(answerIsPublic('unclear', false)).toBe(false)
+  })
+})
+
+describe('publicAnswerHasPlayable', () => {
+  it('нужен публичный эталон и звук или ролик ответа', () => {
+    expect(
+      publicAnswerHasPlayable({
+        kind: 'nobody',
+        cellClosed: true,
+        answerMedia: [{ kind: 'audio', name: 'song.mp3', url: 'blob:1' }],
+      }),
+    ).toBe(true)
+    expect(
+      publicAnswerHasPlayable({
+        kind: 'nobody',
+        cellClosed: true,
+        answerMedia: [{ kind: 'video', name: 'clip.mp4', url: 'blob:2' }],
+      }),
+    ).toBe(true)
+    expect(
+      publicAnswerHasPlayable({
+        kind: 'nobody',
+        cellClosed: true,
+        answerMedia: [{ kind: 'image', name: 'art.png', url: 'blob:3' }],
+      }),
+    ).toBe(false)
+    expect(
+      publicAnswerHasPlayable({
+        kind: 'correct',
+        cellClosed: true,
+        answerMedia: [{ kind: 'audio', name: 'song.mp3', url: 'blob:1' }],
+      }),
+    ).toBe(false)
   })
 })
 

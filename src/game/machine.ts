@@ -5,6 +5,7 @@ import { earlyBuzzerMsFor } from './earlyBuzzer.ts'
 import { findQuestion, nextPlayableRound, questionById, questionsInRound } from './pack.ts'
 import { defaultPlayers, openingChooser } from './players.ts'
 import { demoPack } from './questions.ts'
+import { publicAnswerHasPlayable } from './reveal.ts'
 import { restoredMatch } from './savedGame.ts'
 import type { AnnounceKind, GameContext, GameEvent, JudgmentStatus, Player, PlayerId, QuestionPack } from './types.ts'
 
@@ -223,6 +224,14 @@ export function isReadingPath(path: string): boolean {
   return path === 'reading' || path.startsWith('reading.')
 }
 
+export function isAnnouncingPath(path: string): boolean {
+  return path === 'announcing' || path.startsWith('announcing.')
+}
+
+export function isAnnounceSpeakingPath(path: string): boolean {
+  return path === 'announcing' || path === 'announcing.speaking'
+}
+
 export function buttonsLive(path: string): boolean {
   return path.startsWith('buzzing') || path === 'reading.armed' || path === 'falseStartCue'
 }
@@ -267,6 +276,7 @@ export const gameMachine = setup({
     judgeMs: gameConfig.judgeMs,
     cellFlashMs: gameConfig.cellFlashMs,
     earlyLeft: ({ context }) => context.earlyLeftMs ?? gameConfig.earlyBuzzerMs,
+    answerMediaHoldMs: gameConfig.answerMediaHoldMs,
   },
   actions: {
     clearError: assign({ error: () => null }),
@@ -778,6 +788,22 @@ export const gameMachine = setup({
       event.purpose === 'announce' &&
       roundFinished(context) &&
       nextPlayableRound(context.rounds, context.questions, context.roundIndex) === -1,
+    announceMediaHold: ({ context, event }) => {
+      if (event.type !== 'HOST_AUDIO_FINISHED' || event.purpose !== 'announce') return false
+      const question = questionById(context.questions, context.activeQuestionId)
+      if (!question) return false
+      return publicAnswerHasPlayable({
+        kind: context.announceKind,
+        cellClosed: context.playedIds.includes(question.id),
+        answerMedia: question.answerMedia,
+      })
+    },
+    roundDoneHasNext: ({ context }) =>
+      roundFinished(context) &&
+      nextPlayableRound(context.rounds, context.questions, context.roundIndex) !== -1,
+    roundDoneNoNext: ({ context }) =>
+      roundFinished(context) &&
+      nextPlayableRound(context.rounds, context.questions, context.roundIndex) === -1,
     questionAvailable: ({ context, event }) => {
       if (event.type !== 'QUESTION_SELECTED') return false
       const question = findQuestion(
@@ -914,7 +940,16 @@ export const gameMachine = setup({
           actions: ['clearResume', 'startRestoredBuzzer'],
         },
         { guard: ({ context }) => context.resumePath === 'answering.waiting', target: 'answering.waiting', actions: 'clearResume' },
-        { guard: ({ context }) => context.resumePath === 'announcing', target: 'announcing', actions: 'clearResume' },
+        {
+          guard: ({ context }) => context.resumePath === 'announcing' || context.resumePath === 'announcing.speaking',
+          target: 'announcing',
+          actions: 'clearResume',
+        },
+        {
+          guard: ({ context }) => context.resumePath === 'announcing.holding',
+          target: 'announcing.holding',
+          actions: 'clearResume',
+        },
         { guard: ({ context }) => context.resumePath === 'bridging', target: 'bridging', actions: 'clearResume' },
         { guard: ({ context }) => context.resumePath === 'turnCue', target: 'turnCue', actions: 'clearResume' },
         { guard: ({ context }) => context.resumePath === 'finalBets.asking', target: 'finalBets.asking', actions: 'clearResume' },
@@ -1137,16 +1172,31 @@ export const gameMachine = setup({
       },
     },
     announcing: {
+      initial: 'speaking',
       entry: 'clearTimer',
-      on: {
-        HOST_AUDIO_FINISHED: [
-          { guard: 'samePlayerRepeats', target: 'answering', actions: 'rearmAnswer' },
-          { guard: 'moreFinalists', target: 'turnCue', actions: 'nextFinalist' },
-          { guard: 'othersCanAnswer', target: 'buzzing', actions: 'reopenBuzzers' },
-          { guard: 'roundOverAndNext', target: 'bridging', actions: 'advanceRound' },
-          { guard: 'roundOver', target: 'finished' },
-          { guard: 'purposeAnnounce', target: 'choosing' },
-        ],
+      states: {
+        speaking: {
+          on: {
+            HOST_AUDIO_FINISHED: [
+              { guard: 'samePlayerRepeats', target: '#game.answering', actions: 'rearmAnswer' },
+              { guard: 'moreFinalists', target: '#game.turnCue', actions: 'nextFinalist' },
+              { guard: 'othersCanAnswer', target: '#game.buzzing', actions: 'reopenBuzzers' },
+              { guard: 'announceMediaHold', target: 'holding' },
+              { guard: 'roundOverAndNext', target: '#game.bridging', actions: 'advanceRound' },
+              { guard: 'roundOver', target: '#game.finished' },
+              { guard: 'purposeAnnounce', target: '#game.choosing' },
+            ],
+          },
+        },
+        holding: {
+          after: {
+            answerMediaHoldMs: [
+              { guard: 'roundDoneHasNext', target: '#game.bridging', actions: 'advanceRound' },
+              { guard: 'roundDoneNoNext', target: '#game.finished' },
+              { target: '#game.choosing' },
+            ],
+          },
+        },
       },
     },
     stopped: {},
@@ -1167,7 +1217,16 @@ export const gameMachine = setup({
           { guard: ({ context }) => context.resumePath === 'answering.waiting', target: 'answering.waiting', actions: 'resumeClock' },
           { guard: ({ context }) => context.resumePath === 'answering.hearing', target: 'answering.hearing', actions: 'resumeClock' },
           { guard: ({ context }) => context.resumePath === 'judging', target: 'judging', actions: 'resumeClock' },
-          { guard: ({ context }) => context.resumePath === 'announcing', target: 'announcing', actions: 'resumeClock' },
+          {
+            guard: ({ context }) => context.resumePath === 'announcing' || context.resumePath === 'announcing.speaking',
+            target: 'announcing',
+            actions: 'resumeClock',
+          },
+          {
+            guard: ({ context }) => context.resumePath === 'announcing.holding',
+            target: 'announcing.holding',
+            actions: 'resumeClock',
+          },
           { guard: ({ context }) => context.resumePath === 'turnCue', target: 'turnCue', actions: 'resumeClock' },
           { guard: ({ context }) => context.resumePath === 'finalBets.asking', target: 'finalBets.asking', actions: 'resumeClock' },
           { guard: ({ context }) => context.resumePath === 'finalBets.hearing', target: 'finalBets.hearing', actions: 'resumeClock' },

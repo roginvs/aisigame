@@ -363,7 +363,7 @@ describe('attachController answer listening', () => {
     actor.send({ type: 'BUZZER_PRESSED', playerId: 1 })
     expect(statePath(actor.getSnapshot().value)).toBe('answering.waiting')
     await vi.advanceTimersByTimeAsync(gameConfig.answerMs)
-    expect(statePath(actor.getSnapshot().value)).toBe('announcing')
+    expect(statePath(actor.getSnapshot().value)).toBe('announcing.speaking')
     expect(actor.getSnapshot().context.announceKind).toBe('silence')
     expect(actor.getSnapshot().context.players.find((player) => player.id === 1)?.score).toBe(-400)
 

@@ -124,6 +124,8 @@ const canonicalPhases: Record<string, string> = {
   'answering.hearing': 'answering.waiting',
   judging: 'answering.waiting',
   announcing: 'announcing',
+  'announcing.speaking': 'announcing',
+  'announcing.holding': 'announcing',
   bridging: 'bridging',
   turnCue: 'turnCue',
   finalBets: 'finalBets.asking',

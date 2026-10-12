@@ -6,6 +6,7 @@ const speechPaths = new Set([
   'welcoming',
   'reading',
   'announcing',
+  'announcing.speaking',
   'finished',
   'bridging',
   'finalBets.asking',
@@ -27,6 +28,7 @@ export function hostMood(path: string, link: Pick<LinkStatus, 'host' | 'mic'>): 
   ) {
     return 'listen'
   }
+  if (path === 'announcing.holding') return 'think'
   if (speechPaths.has(path) || path.startsWith('reading.')) return 'speak'
   return 'think'
 }

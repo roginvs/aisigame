@@ -13,7 +13,14 @@ import { blurtGate, choiceGate, repeatsQuestion } from './heard.ts'
 import { judgmentChatText, settleJudgment } from './judgment.ts'
 import { currentRound, findQuestion, questionById, roundThemes } from './pack.ts'
 import { answerIsPublic, chatAnswerNote } from './reveal.ts'
-import { gameMachine, isReadingPath, phoneticRetryReason, statePath } from './machine.ts'
+import {
+  gameMachine,
+  isAnnounceSpeakingPath,
+  isAnnouncingPath,
+  isReadingPath,
+  phoneticRetryReason,
+  statePath,
+} from './machine.ts'
 import { falseStartLine, playerName } from './players.ts'
 import { spokenAnswerCue } from './spokenAnswer.ts'
 import type { AnnounceKind, GameContext, JudgmentStatus, SpeechPurpose } from './types.ts'
@@ -106,7 +113,7 @@ export function attachController(options: {
     dropAnnounceWait()
     if (!waiting) return
     held.push(() => {
-      if (statePath(actor.getSnapshot().value) === 'announcing') waiting.say()
+      if (isAnnounceSpeakingPath(statePath(actor.getSnapshot().value))) waiting.say()
     })
   }
 
@@ -120,11 +127,11 @@ export function attachController(options: {
       const path = statePath(actor.getSnapshot().value)
       if (path === 'paused') {
         held.push(() => {
-          if (statePath(actor.getSnapshot().value) === 'announcing') say()
+          if (isAnnounceSpeakingPath(statePath(actor.getSnapshot().value))) say()
         })
         return
       }
-      if (path !== 'announcing') return
+      if (!isAnnounceSpeakingPath(path)) return
       say()
     }, gameConfig.timeoutBeepMs)
     announceWait = { token, timer, say }
@@ -277,7 +284,7 @@ export function attachController(options: {
       }
       held.length = 0
     }
-    if (path !== 'announcing') dropAnnounceWait()
+    if (!isAnnouncingPath(path)) dropAnnounceWait()
     if (path === 'connecting') {
       const token = ++connectToken
       const apiKey = getApiKey().trim()
@@ -364,8 +371,8 @@ export function attachController(options: {
     if (path === 'answering.hearing') {
       client.setTranscriptionPrompt(answerListeningPrompt(questionById(context.questions, context.activeQuestionId)?.answers ?? []))
     }
-    if (path === 'announcing' || path.startsWith('answering')) expectingToolTurn = null
-    if (path === 'announcing') dropAnswerAttempt()
+    if (isAnnouncingPath(path) || path.startsWith('answering')) expectingToolTurn = null
+    if (isAnnounceSpeakingPath(path) && !isAnnouncingPath(from)) dropAnswerAttempt()
     if (path === 'judging') {
       client.setMicEnabled(false)
       void requestJudgment(context)
@@ -380,7 +387,7 @@ export function attachController(options: {
       client.setMicEnabled(true)
     }
     if (path === 'turnCue') speak('turn', turnInstructions(context))
-    if (path === 'announcing') {
+    if (isAnnounceSpeakingPath(path) && !isAnnouncingPath(from)) {
       const say = () => {
         const exact = verbatimAnnouncement(context)
         speak('announce', announceInstructions(context), exact ?? undefined, true, answerChatNote(context))
@@ -530,7 +537,7 @@ export function attachController(options: {
       path === 'falseStartCue' ||
       path.startsWith('buzzing') ||
       path.startsWith('answering') ||
-      path === 'announcing'
+      isAnnouncingPath(path)
     if (!relevant) return
     if (blurtGate(heard.text, durationMs) === 'ignore') {
       pushTrace('note', `короткий звук ${durationMs} мс, чтение не прерываю`)

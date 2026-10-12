@@ -24,6 +24,8 @@ describe('hostMood', () => {
     expect(hostMood('reading.sealed', talking)).toBe('speak')
     expect(hostMood('reading.sealed', quiet)).toBe('speak')
     expect(hostMood('announcing', quiet)).toBe('speak')
+    expect(hostMood('announcing.speaking', quiet)).toBe('speak')
+    expect(hostMood('announcing.holding', quiet)).toBe('think')
   })
 
   it('asks for a button instead of speech, and shows thinking otherwise', () => {

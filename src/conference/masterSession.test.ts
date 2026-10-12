@@ -651,7 +651,7 @@ describe('MasterSession resume', () => {
     const send = vi.spyOn(actor, 'send')
 
     vi.advanceTimersByTime(PRESENCE_STALE_MS)
-    expect(statePath(actor.getSnapshot().value)).toBe('announcing')
+    expect(statePath(actor.getSnapshot().value)).toBe('announcing.speaking')
     expect(actor.getSnapshot().context.chooserId).toBe(2)
     expect(send.mock.calls.some(([event]) => event.type === 'CHOOSER_OFFLINE')).toBe(false)
 

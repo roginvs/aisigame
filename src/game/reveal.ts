@@ -6,6 +6,18 @@ export function answerIsPublic(kind: AnnounceKind | null, cellClosed: boolean): 
   return kind === 'nobody' || kind === 'incorrect' || kind === 'silence' || kind === 'unclear'
 }
 
+/** Звук или ролик ответа на табло после публичного эталона — их нужно доиграть. */
+export function publicAnswerHasPlayable(input: {
+  kind: AnnounceKind | null
+  cellClosed: boolean
+  answerMedia?: readonly QuestionMedia[]
+}): boolean {
+  if (!answerIsPublic(input.kind, input.cellClosed)) return false
+  return (input.answerMedia ?? []).some(
+    (item) => (item.kind === 'audio' || item.kind === 'video') && Boolean(item.url),
+  )
+}
+
 export type StageMedia = {
   /** Звук вопроса и, если показ ответа без картинки и ролика, вся картинка и ролик вопроса. */
   question: QuestionMedia[]

@@ -33,6 +33,11 @@ export const matchTimings = {
   buzzerBeepMs: 1_000,
   /** Пауза перед речью, когда сигнал звучит уже после закрытия окна ответа. */
   timeoutBeepMs: 1_000,
+  /**
+   * После объявления ответа пакета, если у ячейки есть звук или ролик ответа:
+   * столько ещё держим табло, чтобы клип успел прозвучать.
+   */
+  answerMediaHoldMs: 4_000,
 } as const
 
 export const {
@@ -55,4 +60,5 @@ export const {
   buzzerWarningMs,
   buzzerBeepMs,
   timeoutBeepMs,
+  answerMediaHoldMs,
 } = matchTimings

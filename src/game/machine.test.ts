@@ -102,7 +102,7 @@ describe('game machine', () => {
       },
     })
     expect(playerScore(actor, 1)).toBe(100)
-    expect(statePath(actor.getSnapshot().value)).toBe('announcing')
+    expect(statePath(actor.getSnapshot().value)).toBe('announcing.speaking')
 
     actor.send({ type: 'HOST_AUDIO_FINISHED', purpose: 'announce' })
     actor.send({ type: 'QUESTION_SELECTED', themeId: 'space', value: 200 })
@@ -145,7 +145,7 @@ describe('game machine', () => {
     expect(actor.getSnapshot().context.playedIds).not.toContain('history-100')
     expect(actor.getSnapshot().context.missedIds).toEqual([2])
     expect(actor.getSnapshot().context.statusLine).toBe('Неверно')
-    expect(statePath(actor.getSnapshot().value)).toBe('announcing')
+    expect(statePath(actor.getSnapshot().value)).toBe('announcing.speaking')
 
     actor.send({ type: 'HOST_AUDIO_FINISHED', purpose: 'announce' })
     expect(statePath(actor.getSnapshot().value)).toBe('buzzing.open')
@@ -275,7 +275,7 @@ describe('game machine', () => {
     expect(actor.getSnapshot().context.playedIds).not.toContain('history-100')
     expect(statePath(actor.getSnapshot().value)).toBe('buzzing.open')
     vi.advanceTimersByTime(1)
-    expect(statePath(actor.getSnapshot().value)).toBe('announcing')
+    expect(statePath(actor.getSnapshot().value)).toBe('announcing.speaking')
     expect(actor.getSnapshot().context.announceKind).toBe('nobody')
   })
 
@@ -545,7 +545,7 @@ describe('game machine', () => {
     vi.advanceTimersByTime(1_999)
     expect(actor.getSnapshot().context.playedIds).not.toContain('history-100')
     vi.advanceTimersByTime(1)
-    expect(statePath(actor.getSnapshot().value)).toBe('announcing')
+    expect(statePath(actor.getSnapshot().value)).toBe('announcing.speaking')
     expect(actor.getSnapshot().context.announceKind).toBe('nobody')
     expect(actor.getSnapshot().context.spokeWithoutButton).toBe(true)
   })
@@ -577,7 +577,37 @@ describe('game machine', () => {
     vi.advanceTimersByTime(10_000)
     expect(playerScore(actor, 1)).toBe(0)
     expect(actor.getSnapshot().context.playedIds).toContain('history-100')
-    expect(statePath(actor.getSnapshot().value)).toBe('announcing')
+    expect(statePath(actor.getSnapshot().value)).toBe('announcing.speaking')
+  })
+
+  it('после эталона со звуком ответа держит табло answerMediaHoldMs', () => {
+    const pack: QuestionPack = {
+      ...demoPack,
+      questions: demoPack.questions.map((question) =>
+        question.id === 'history-100'
+          ? {
+              ...question,
+              answerMedia: [{ kind: 'audio', name: 'song.mp3', url: 'blob:song' }],
+            }
+          : question,
+      ),
+    }
+    const actor = createActor(gameMachine)
+    actor.start()
+    actor.send({ type: 'START_GAME', pack })
+    actor.send({ type: 'CONNECTED' })
+    actor.send({ type: 'HOST_AUDIO_FINISHED', purpose: 'welcome' })
+    actor.send({ type: 'QUESTION_SELECTED', themeId: 'history', value: 100 })
+    vi.advanceTimersByTime(gameConfig.cellFlashMs)
+    actor.send({ type: 'HOST_AUDIO_FINISHED', purpose: 'read' })
+    vi.advanceTimersByTime(gameConfig.buzzerMs)
+    expect(statePath(actor.getSnapshot().value)).toBe('announcing.speaking')
+    actor.send({ type: 'HOST_AUDIO_FINISHED', purpose: 'announce' })
+    expect(statePath(actor.getSnapshot().value)).toBe('announcing.holding')
+    vi.advanceTimersByTime(gameConfig.answerMediaHoldMs - 1)
+    expect(statePath(actor.getSnapshot().value)).toBe('announcing.holding')
+    vi.advanceTimersByTime(1)
+    expect(statePath(actor.getSnapshot().value)).toBe('choosing.listening')
   })
 
   it('списывает номинал за молчание и не штрафует, если речь уже началась', () => {
@@ -943,7 +973,7 @@ describe('game machine', () => {
     expect(statePath(actor.getSnapshot().value)).toBe('reading.armed')
     expect(actor.getSnapshot().context.playedIds).not.toContain('history-100')
     vi.advanceTimersByTime(1)
-    expect(statePath(actor.getSnapshot().value)).toBe('announcing')
+    expect(statePath(actor.getSnapshot().value)).toBe('announcing.speaking')
     expect(actor.getSnapshot().context.announceKind).toBe('nobody')
     expect(actor.getSnapshot().context.playedIds).toContain('history-100')
   })

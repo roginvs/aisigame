@@ -204,9 +204,10 @@ export function GameScreen(props: {
   const showQuestion = Boolean(question) && !flashing
   const showTimer = context.phaseStartedAt !== null && context.phaseDurationMs !== null
   const answerRevealed =
-    path === 'announcing' ||
+    path.startsWith('announcing') ||
     path === 'finished' ||
-    (paused && (context.resumePath === 'announcing' || context.resumePath === 'finished'))
+    (paused &&
+      (context.resumePath.startsWith('announcing') || context.resumePath === 'finished'))
   const showAnswer = Boolean(
     question &&
       answerRevealed &&
@@ -222,7 +223,11 @@ export function GameScreen(props: {
     held,
     finalRound,
   })
-  const answerLive = showAnswer && !held
+  /** Звук и ролик ответа — после речи ведущей, пока `announcing.holding`. */
+  const answerLive =
+    showAnswer &&
+    !held &&
+    (path === 'announcing.holding' || (paused && context.resumePath === 'announcing.holding'))
   const quietQuestion = showAnswer
     ? new Set(
         (questionMedia ?? [])
