@@ -290,10 +290,10 @@ export function findBridgeDataChannel(conference: unknown): RTCDataChannel | nul
   const pc =
     (rtc as { peerconnection?: RTCPeerConnection }).peerconnection ??
     (rtc as { _peerConnection?: RTCPeerConnection })._peerConnection
-  const list =
-    pc && typeof (pc as { getDataChannels?: () => RTCDataChannel[] }).getDataChannels === 'function'
-      ? (pc as { getDataChannels: () => RTCDataChannel[] }).getDataChannels()
-      : null
+  const getChannels = pc
+    ? (pc as unknown as { getDataChannels?: () => RTCDataChannel[] }).getDataChannels
+    : undefined
+  const list = typeof getChannels === 'function' ? getChannels.call(pc) : null
   const open = list?.find((channel) => channel.readyState === 'open')
   return open ?? null
 }
