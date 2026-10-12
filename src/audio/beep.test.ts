@@ -7,7 +7,7 @@ describe('playTimeoutBeep', () => {
     vi.resetModules()
   })
 
-  it('пи-пи-пи: три коротких гудка внутри секунды, контекст сам открывается', async () => {
+  it('бее-бее-бее: три гудка-блея внутри секунды, контекст сам открывается', async () => {
     const spans: Array<{ start: number; stop: number }> = []
     const now = 4
     let constructed = 0
@@ -64,8 +64,8 @@ describe('playTimeoutBeep', () => {
     expect(spans).toHaveLength(3)
     expect(spans[0].start).toBeCloseTo(now)
     for (const span of spans) {
-      expect(span.stop - span.start).toBeGreaterThan(0.05)
-      expect(span.stop - span.start).toBeLessThan(0.15)
+      expect(span.stop - span.start).toBeGreaterThan(0.12)
+      expect(span.stop - span.start).toBeLessThan(0.28)
       expect(span.stop).toBeLessThanOrEqual(now + buzzerBeepMs / 1000)
     }
     expect(spans[1].start - spans[0].stop).toBeGreaterThan(0.04)
@@ -81,6 +81,7 @@ describe('playTimeoutBeep', () => {
       value = 0
       setValueAtTime() {}
       linearRampToValueAtTime() {}
+      exponentialRampToValueAtTime() {}
     }
     class FakeNode {
       type = 'sine'
