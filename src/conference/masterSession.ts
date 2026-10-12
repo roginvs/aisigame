@@ -4,7 +4,9 @@ import { gameMachine } from '../game/machine.ts'
 import { statePath } from '../game/machine.ts'
 import type { GameContext, Player, QuestionPack } from '../game/types.ts'
 import { buildConferenceSnapshot, timerRemainingMs } from './buildSnapshot.ts'
+import { createPackPipeHub, type PackPipeLinkState } from './packPipe.ts'
 import { createPackTransferMaster, type PackTransferMaster } from './packTransfer.ts'
+import type { PackPhase } from './packProgress.ts'
 import {
   LOBBY_IDLE_INTERVAL_MS,
   LOBBY_SILENCE_BEFORE_SPEECH_MS,
@@ -44,6 +46,11 @@ export type MasterSessionOptions = {
   resumePlayers?: readonly Player[]
   /** Речь людей в комнате (без «Ведущей»): лобби ждёт тишину перед репликой. */
   isRoomSpeaking?: () => boolean
+  /**
+   * Раздача пакета по прямому WebRTC data channel (Jitsi только сигнализация).
+   * Broadcast-транспорт оставляет куски на общем канале.
+   */
+  usePackPipe?: boolean
 }
 
 export class MasterSession {
@@ -80,6 +87,8 @@ export class MasterSession {
   private senderClient = new Map<string, string>()
   /** Оценка скорости/ETA по packAck, отдельно для каждого клиента. */
   private transferPace = new Map<string, TransferPace>()
+  private packPipe: ReturnType<typeof createPackPipeHub> | null = null
+  private usePackPipe = false
 
   constructor(options: MasterSessionOptions) {
     clearRemoteDebug()
@@ -103,6 +112,28 @@ export class MasterSession {
       this.lobbyOpenedSpeech = true
     }
 
+    this.usePackPipe = options.usePackPipe === true
+    if (this.usePackPipe) {
+      this.packPipe = createPackPipeHub({
+        authorityToken: this.authorityToken,
+        sendSignal: (message) => this.transport.send(message),
+        onOpen: (clientId) => {
+          this.roster.updateProgress(clientId, { packPhase: 'downloading' })
+          this.packTransfer.pumpClient(clientId)
+          this.onRosterCb()
+        },
+        onInbound: (clientId, inbound) => {
+          if (inbound.kind === 'ack') this.applyPackAck(clientId, inbound.message.hash, inbound.message.nextIndex)
+        },
+        onState: (clientId, state) => {
+          // connecting mid-transfer не затирает «Загрузка N%» (sticky в roster);
+          // failed/closed → «Нет соединения · повтор…».
+          this.roster.updateProgress(clientId, { packPhase: pipeStateToPhase(state) })
+          this.onRosterCb()
+        },
+      })
+    }
+
     this.packTransfer = createPackTransferMaster({
       transport: this.transport,
       hash: this.packHash,
@@ -115,6 +146,15 @@ export class MasterSession {
           .allIncludingHidden()
           .filter((entry) => !entry.isMaster)
           .map((entry) => entry.clientId),
+      pipe: this.packPipe
+        ? {
+            ready: (clientId) => this.packPipe!.ready(clientId),
+            canSend: (clientId) => this.packPipe!.canSend(clientId),
+            sendOffer: (clientId, message) => this.packPipe!.sendOffer(clientId, message),
+            sendChunk: (clientId, hash, index, total, data) =>
+              this.packPipe!.sendChunk(clientId, hash, index, total, data),
+          }
+        : undefined,
     })
 
     this.unsub = this.transport.subscribe((message, senderId) => this.onMessage(message, senderId))
@@ -217,7 +257,25 @@ export class MasterSession {
     this.clearLobbySpeechTimer()
     this.machineSub?.unsubscribe()
     this.unsub()
+    this.packPipe?.dispose()
     this.packTransfer.dispose()
+  }
+
+  private applyPackAck(clientId: string, hash: string, nextIndex: number): void {
+    if (hash !== this.packHash) return
+    this.packTransfer.handleAck(clientId, nextIndex)
+    const { pace, view } = paceAfterAck(
+      this.transferPace.get(clientId),
+      nextIndex,
+      this.packBytes.byteLength,
+    )
+    if (pace) this.transferPace.set(clientId, pace)
+    else this.transferPace.delete(clientId)
+    this.roster.updateProgress(clientId, {
+      ...view,
+      packPhase: nextIndex > 0 ? 'downloading' : 'connecting',
+    })
+    this.onRosterCb()
   }
 
   private onMessage(message: ConferenceMessage, senderId: string): void {
@@ -228,7 +286,12 @@ export class MasterSession {
       if (this.gameStarted && message.clientId) {
         void this.addMidGamePlayer(message.clientId, message.name)
       }
-      if (!this.packOfferSent) {
+      if (this.packPipe) {
+        // Повторный hello (heartbeat) не сбрасывает percent/фазу — только поднимает peer при нужде.
+        // Новому гостю upsertHello уже ставит packPhase: connecting.
+        this.packPipe.ensure(message.clientId)
+        this.packOfferSent = true
+      } else if (!this.packOfferSent) {
         this.packOfferSent = true
         this.packTransfer.start()
       } else {
@@ -239,20 +302,21 @@ export class MasterSession {
       this.maybeLobbySpeech()
       return
     }
+    if (message.type === 'packPipeAnswer') {
+      if (!this.clientMatches(message.clientId, message.authToken, senderId)) return
+      this.packPipe?.handleSignal(message, message.clientId)
+      return
+    }
+    if (message.type === 'packPipeIce') {
+      if (!message.clientId || !message.authToken) return
+      if (!this.clientMatches(message.clientId, message.authToken, senderId)) return
+      this.packPipe?.handleSignal(message, message.clientId)
+      return
+    }
     if (!('clientId' in message) || !('authToken' in message)) return
     if (!this.clientMatches(message.clientId, message.authToken, senderId)) return
     if (message.type === 'packAck') {
-      if (message.hash !== this.packHash) return
-      this.packTransfer.handleAck(message.clientId, message.nextIndex)
-      const { pace, view } = paceAfterAck(
-        this.transferPace.get(message.clientId),
-        message.nextIndex,
-        this.packBytes.byteLength,
-      )
-      if (pace) this.transferPace.set(message.clientId, pace)
-      else this.transferPace.delete(message.clientId)
-      this.roster.updateProgress(message.clientId, view)
-      this.onRosterCb()
+      this.applyPackAck(message.clientId, message.hash, message.nextIndex)
       return
     }
     if (message.type === 'packVerified') {
@@ -494,6 +558,13 @@ export class MasterSession {
       this.senderClient.get(senderId) === clientId
     )
   }
+}
+
+function pipeStateToPhase(state: PackPipeLinkState): PackPhase {
+  if (state === 'open') return 'downloading'
+  if (state === 'failed') return 'failed'
+  if (state === 'closed') return 'failed'
+  return 'connecting'
 }
 
 function lobbyContext(pack: QuestionPack, masterName: string): GameContext {

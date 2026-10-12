@@ -10,6 +10,7 @@ function entry(partial: Partial<RosterEntry> & Pick<RosterEntry, 'clientId' | 'n
     percent: 0,
     downloadBps: null,
     etaSeconds: null,
+    packPhase: 'connecting',
     ready: false,
     hashOk: false,
     lastSeen: Date.now(),
@@ -34,6 +35,7 @@ describe('ConferencePlayersRow lobby', () => {
             name: 'kekeke',
             isMaster: false,
             percent: 100,
+            packPhase: 'ready',
             ready: true,
             hashOk: true,
           }),
@@ -42,6 +44,7 @@ describe('ConferencePlayersRow lobby', () => {
             name: 'Мобилка',
             isMaster: false,
             percent: 42,
+            packPhase: 'downloading',
             downloadBps: 120_000,
             etaSeconds: 40,
             ready: false,
@@ -52,6 +55,7 @@ describe('ConferencePlayersRow lobby', () => {
             name: 'Ира',
             isMaster: false,
             percent: 100,
+            packPhase: 'verified',
             ready: false,
             hashOk: true,
           }),
@@ -60,6 +64,7 @@ describe('ConferencePlayersRow lobby', () => {
             name: 'Петя',
             isMaster: false,
             percent: 0,
+            packPhase: 'connecting',
             ready: false,
             hashOk: false,
           }),
@@ -84,7 +89,7 @@ describe('ConferencePlayersRow lobby', () => {
     expect(html).toContain('Пакет сверен · готов')
     expect(html).toContain('Пакет сверен')
     expect(html).toContain('Загрузка 42%')
-    expect(html).toContain('Загрузка 0%')
+    expect(html).toContain('Устанавливаю соединение')
     expect(html).toContain('roster-tag">мастер')
     expect(html).toContain('player-lobby-progress is-ready')
     // У мастера нет полоски прогресса гостя, только spacer.

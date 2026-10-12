@@ -30,6 +30,7 @@ export function buildConferenceSnapshot(input: {
     percent: entry.percent,
     downloadBps: entry.downloadBps,
     etaSeconds: entry.etaSeconds,
+    packPhase: entry.packPhase,
     ready: entry.ready,
     hashOk: entry.hashOk,
   }))

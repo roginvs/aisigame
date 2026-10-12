@@ -112,7 +112,10 @@ export type ChunkPushInput = {
   hash: string
   index: number
   total: number
-  dataBase64: string
+  /** Wire через Jitsi Bridge (base64). */
+  dataBase64?: string
+  /** Прямой data channel — сырые байты без base64. */
+  dataBytes?: Uint8Array
 }
 
 export type ChunkReceiver = {
@@ -158,7 +161,10 @@ export function createReceiver(): ChunkReceiver {
       if (chunk.index < 0 || chunk.index >= chunk.total) {
         return { nextIndex: contiguousPrefix(), bytes: tryAssemble() }
       }
-      received.set(chunk.index, base64ToBytes(chunk.dataBase64))
+      const payload =
+        chunk.dataBytes ??
+        (typeof chunk.dataBase64 === 'string' && chunk.dataBase64 ? base64ToBytes(chunk.dataBase64) : null)
+      if (payload) received.set(chunk.index, payload)
       const nextIndex = contiguousPrefix()
       return { nextIndex, bytes: tryAssemble() }
     },

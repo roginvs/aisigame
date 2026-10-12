@@ -59,6 +59,7 @@ import {
 } from './realtime/models.ts'
 import { createVoice } from './realtime/voice.ts'
 import type { ConferenceChatLine, ConferenceSnapshot } from './conference/messages.ts'
+import type { PackPhase } from './conference/packProgress.ts'
 import type { RosterEntry } from './conference/roster.ts'
 import { GameScreen } from './ui/GameScreen.tsx'
 import { JoinConfirmScreen } from './ui/JoinConfirmScreen.tsx'
@@ -136,6 +137,7 @@ export default function App() {
     percent: 0,
     packName: '',
     rosterNames: [] as string[],
+    packPhase: 'waiting' as PackPhase,
   })
   const [joinerPack, setJoinerPack] = useState<QuestionPack | null>(null)
   const [conferenceError, setConferenceError] = useState<string | null>(null)
@@ -827,6 +829,7 @@ export default function App() {
         },
         isRoomSpeaking: () => conferenceHandleRef.current?.anyoneSpeaking() ?? false,
         resumePlayers: restoringGame ? resume?.saved.players : undefined,
+        usePackPipe: !useBroadcast,
       })
       masterSessionRef.current = session
       const initialRoster = session.rosterList()
@@ -924,6 +927,7 @@ export default function App() {
         clientId: readJoinClientId(),
         authToken: readJoinAuthToken(),
         name,
+        usePackPipe: !useBroadcast,
         callbacks: {
           onSnapshot: (snap) => {
             setJoinerSnapshot(snap)
@@ -1155,21 +1159,27 @@ export default function App() {
 
   const joinerRoster: RosterEntry[] = (joinerSnapshot?.presence ?? [])
     .filter((entry) => !entry.hidden)
-    .map((entry) => ({
-      clientId: entry.clientId,
-      name: entry.name,
-      playerId: entry.playerId,
-      percent: entry.percent,
-      downloadBps: entry.downloadBps ?? null,
-      etaSeconds: entry.etaSeconds ?? null,
-      ready: entry.ready,
-      hashOk: entry.hashOk,
-      // Последний снимок замирает без мастера: локальный masterOffline серит карточку.
-      stale: entry.stale || (joinerLobby.masterOffline && entry.isMaster),
-      hidden: entry.hidden,
-      isMaster: entry.isMaster,
-      lastSeen: 0,
-    }))
+    .map((entry) => {
+      const isSelf = entry.clientId === (conferenceRole === 'joiner' ? readJoinClientId() : '')
+      return {
+        clientId: entry.clientId,
+        name: entry.name,
+        playerId: entry.playerId,
+        percent: isSelf ? joinerLobby.percent : entry.percent,
+        downloadBps: entry.downloadBps ?? null,
+        etaSeconds: entry.etaSeconds ?? null,
+        packPhase: (isSelf
+          ? joinerLobby.packPhase
+          : entry.packPhase ?? (entry.hashOk ? (entry.ready ? 'ready' : 'verified') : 'downloading')) as RosterEntry['packPhase'],
+        ready: entry.ready,
+        hashOk: isSelf ? joinerLobby.hashOk : entry.hashOk,
+        // Последний снимок замирает без мастера: локальный masterOffline серит карточку.
+        stale: entry.stale || (joinerLobby.masterOffline && entry.isMaster),
+        hidden: entry.hidden,
+        isMaster: entry.isMaster,
+        lastSeen: 0,
+      }
+    })
   const hiddenConferenceClientIds = new Set(
     (conferenceRole === 'master'
       ? masterRosterAll
@@ -1296,6 +1306,7 @@ export default function App() {
                     ready: joinerLobby.readySent,
                     downloadBps: joinerSelfPresence?.downloadBps ?? null,
                     etaSeconds: joinerSelfPresence?.etaSeconds ?? null,
+                    packPhase: joinerLobby.packPhase,
                   }
                 : undefined,
               packName:

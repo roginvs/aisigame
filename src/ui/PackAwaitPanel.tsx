@@ -1,8 +1,9 @@
-import { packProgressLabel, type PackProgressView } from '../conference/packProgress.ts'
+import { packProgressLabel, type PackPhase, type PackProgressView } from '../conference/packProgress.ts'
 
 export type PackAwaitProgress = PackProgressView & {
   hashOk: boolean
   ready: boolean
+  packPhase?: PackPhase
 }
 
 /** Место табло, пока у joiner партия уже в снимке, а пакет ещё не готов. */

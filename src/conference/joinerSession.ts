@@ -2,6 +2,8 @@ import { masterBuildMismatchMessage } from './buildMatch.ts'
 import { decidePackGate } from './packGate.ts'
 import { deletePack, getPack, putPack } from './packDb.ts'
 import type { ConferenceMessage, ConferenceSnapshot, PackOfferMessage } from './messages.ts'
+import { createPackPipeJoiner, type PackPipeInbound } from './packPipe.ts'
+import { derivePackPhase, type PackPhase } from './packProgress.ts'
 import { CHUNK_BYTES, createPackReceiver } from './packTransfer.ts'
 import type { ConferenceTransport } from './transport.ts'
 import { PRESENCE_HEARTBEAT_MS, PRESENCE_STALE_MS } from './presence.ts'
@@ -24,6 +26,7 @@ export type JoinerLobbyState = {
   readySent: boolean
   packName: string
   rosterNames: string[]
+  packPhase: PackPhase
 }
 
 export type JoinerPackCache = {
@@ -71,6 +74,11 @@ export class JoinerSession {
   private masterAuthorityToken: string | null = null
   private masterSenderId: string | null = null
   private buildRejected = false
+  private usePackPipe = false
+  private packPipe: ReturnType<typeof createPackPipeJoiner> | null = null
+  private pipeState: PackPhase | 'idle' | 'open' | 'closed' = 'idle'
+  /** Последняя отданная UI фаза — чтобы flap pipe не откатывал «Загрузка» в connecting. */
+  private lastPackPhase: PackPhase = 'waiting'
   constructor(input: {
     transport: ConferenceTransport
     clientId: string
@@ -78,6 +86,8 @@ export class JoinerSession {
     name: string
     callbacks: JoinerSessionCallbacks
     packCache?: JoinerPackCache
+    /** Прямой data channel для пакета; Jitsi — только сигнализация. */
+    usePackPipe?: boolean
   }) {
     this.transport = input.transport
     this.clientId = input.clientId
@@ -85,6 +95,33 @@ export class JoinerSession {
     this.name = input.name
     this.callbacks = input.callbacks
     this.packCache = input.packCache ?? defaultPackCache
+    this.usePackPipe = input.usePackPipe === true
+    if (this.usePackPipe) {
+      this.pipeState = 'connecting'
+      this.packPipe = createPackPipeJoiner({
+        clientId: this.clientId,
+        authToken: this.authToken,
+        sendSignal: (message) => this.transport.send(message),
+        onOpen: () => {
+          this.pipeState = 'open'
+          this.noteMasterAlive()
+          this.emitLobby()
+        },
+        onState: (state) => {
+          this.pipeState = state
+          this.emitLobby()
+        },
+        onInbound: (inbound) => {
+          this.messageQueue = this.messageQueue
+            .then(() => (this.disposed ? undefined : this.onPipeInbound(inbound)))
+            .catch((error: unknown) => {
+              if (this.disposed) return
+              const detail = error instanceof Error ? error.message : String(error)
+              this.callbacks.onError(`Не удалось принять пакет: ${detail}`)
+            })
+        },
+      })
+    }
     this.unsub = this.transport.subscribe((message, senderId) => {
       this.messageQueue = this.messageQueue
         .then(() => (this.disposed ? undefined : this.onMessage(message, senderId)))
@@ -140,6 +177,7 @@ export class JoinerSession {
     this.disposed = true
     window.clearInterval(this.heartbeatTimer)
     window.clearInterval(this.debugTimer)
+    this.packPipe?.dispose()
     this.unsub()
     this.transport.close()
   }
@@ -149,6 +187,15 @@ export class JoinerSession {
   }
 
   private emitLobby(): void {
+    const packPhase = derivePackPhase({
+      waitingMaster: this.waitingMaster,
+      pipeState: this.usePackPipe ? this.pipeState : 'open',
+      percent: this.lobbyPercent,
+      hashOk: this.hashOk,
+      ready: this.readySent,
+      previousPhase: this.lastPackPhase,
+    })
+    this.lastPackPhase = packPhase
     this.callbacks.onLobby({
       waitingMaster: this.waitingMaster,
       masterOffline: this.masterOffline,
@@ -157,11 +204,50 @@ export class JoinerSession {
       readySent: this.readySent,
       packName: this.packName,
       rosterNames: this.lastSnapshot?.presence.filter((entry) => !entry.hidden).map((entry) => entry.name) ?? [],
+      packPhase,
     })
+  }
+
+  private async onPipeInbound(inbound: PackPipeInbound): Promise<void> {
+    if (this.buildRejected || this.disposed) return
+    this.noteMasterAlive()
+    if (inbound.kind === 'offer') {
+      if (!this.acceptMasterBuild(inbound.message.commit)) return
+      await this.handlePackOffer(inbound.message)
+      return
+    }
+    if (inbound.kind === 'chunk') {
+      await this.handlePackChunkMessage(inbound.message)
+      return
+    }
+    if (inbound.kind === 'binaryChunk') {
+      if (this.readyPackHash === inbound.hash) {
+        this.sendPackAck(inbound.hash, inbound.total)
+        return
+      }
+      const ack = this.packReceiver.handleBinaryChunk(inbound)
+      await this.finishPackAck(ack)
+    }
   }
 
   private async onMessage(message: ConferenceMessage, senderId: string): Promise<void> {
     if (this.buildRejected || this.disposed) return
+    if (message.type === 'packPipeOffer' || message.type === 'packPipeIce') {
+      if (message.type === 'packPipeOffer') {
+        if (message.targetClientId !== this.clientId) return
+        if (!this.acceptMaster(message.authorityToken, senderId, true)) return
+      } else if (message.authorityToken) {
+        if (message.targetClientId && message.targetClientId !== this.clientId) return
+        if (!this.acceptMaster(message.authorityToken, senderId, false)) return
+      } else {
+        return
+      }
+      this.noteMasterAlive()
+      this.pipeState = this.pipeState === 'open' ? 'open' : 'connecting'
+      this.packPipe?.handleSignal(message)
+      this.emitLobby()
+      return
+    }
     if (
       (message.type === 'packOffer' || message.type === 'packChunk') &&
       message.targetClientId &&
@@ -169,6 +255,8 @@ export class JoinerSession {
     ) {
       return
     }
+    // В режиме pipe куски идут только по DC; по Bridge их игнорируем.
+    if (this.usePackPipe && (message.type === 'packOffer' || message.type === 'packChunk')) return
     if (message.type === 'snapshot' || message.type === 'packOffer') {
       if (!this.acceptMaster(message.authorityToken, senderId, true)) return
       if (!this.acceptMasterBuild(message.commit)) return
@@ -193,34 +281,50 @@ export class JoinerSession {
     }
     if (message.type === 'packChunk') {
       this.noteMasterAlive()
-      if (this.readyPackHash === message.hash) {
-        this.sendPackAck(message.hash, message.total)
-        return
-      }
-      const ack = this.packReceiver.handle(message)
-      if (ack) {
-        this.sendPackAck(ack.hash, ack.nextIndex)
-        if (ack.bytes) {
-          const offer = this.packReceiver.state()
-          if (offer) {
-            const gate = await decidePackGate(ack.bytes, offer.hash, offer.expectedSize)
-            if (gate.ready) {
-              await this.acceptPack(ack.bytes, offer.hash, gate.store)
-              this.sendPackAck(offer.hash, ack.nextIndex)
-            } else {
-              this.hashOk = false
-              this.readySent = false
-              this.readyPackHash = null
-              this.callbacks.onError('Пакет повредился при передаче. Загружаем заново.')
-              this.packReceiver.restart()
-              await this.deleteCachedPack(offer.hash)
-              this.sendPackAck(offer.hash, 0)
-            }
-          }
+      await this.handlePackChunkMessage(message)
+    }
+  }
+
+  private async handlePackChunkMessage(message: {
+    hash: string
+    index: number
+    total: number
+    dataBase64?: string
+    authorityToken?: string
+    type?: string
+  }): Promise<void> {
+    if (this.readyPackHash === message.hash) {
+      this.sendPackAck(message.hash, message.total)
+      return
+    }
+    const ack = this.packReceiver.handle(message as ConferenceMessage)
+    await this.finishPackAck(ack)
+  }
+
+  private async finishPackAck(
+    ack: { hash: string; nextIndex: number; bytes?: Uint8Array } | null,
+  ): Promise<void> {
+    if (!ack) return
+    this.sendPackAck(ack.hash, ack.nextIndex)
+    if (ack.bytes) {
+      const offer = this.packReceiver.state()
+      if (offer) {
+        const gate = await decidePackGate(ack.bytes, offer.hash, offer.expectedSize)
+        if (gate.ready) {
+          await this.acceptPack(ack.bytes, offer.hash, gate.store)
+          this.sendPackAck(offer.hash, ack.nextIndex)
+        } else {
+          this.hashOk = false
+          this.readySent = false
+          this.readyPackHash = null
+          this.callbacks.onError('Пакет повредился при передаче. Загружаем заново.')
+          this.packReceiver.restart()
+          await this.deleteCachedPack(offer.hash)
+          this.sendPackAck(offer.hash, 0)
         }
-        this.emitLobby()
       }
     }
+    this.emitLobby()
   }
 
   private async handlePackOffer(message: PackOfferMessage): Promise<void> {
@@ -321,7 +425,15 @@ export class JoinerSession {
   }
 
   private sendPackAck(hash: string, nextIndex: number): void {
-    this.transport.send({ type: 'packAck', clientId: this.clientId, authToken: this.authToken, hash, nextIndex })
+    const message = {
+      type: 'packAck' as const,
+      clientId: this.clientId,
+      authToken: this.authToken,
+      hash,
+      nextIndex,
+    }
+    if (this.packPipe?.sendAck(message)) return
+    this.transport.send(message)
   }
 
   private sendHello(): void {

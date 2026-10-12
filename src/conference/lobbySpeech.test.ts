@@ -12,6 +12,7 @@ function entry(patch: Partial<RosterEntry> & Pick<RosterEntry, 'clientId' | 'nam
     percent: 0,
     downloadBps: null,
     etaSeconds: null,
+    packPhase: 'connecting',
     ready: false,
     hashOk: false,
     lastSeen: 0,

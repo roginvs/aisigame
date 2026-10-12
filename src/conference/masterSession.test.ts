@@ -204,6 +204,92 @@ describe('MasterSession resume', () => {
     actor.stop()
   })
 
+  it('повторный hello при packPipe не сбрасывает прогресс в connecting/0%', () => {
+    class FakeDc {
+      bufferedAmount = 0
+      bufferedAmountLowThreshold = 0
+      binaryType = 'arraybuffer'
+      readyState = 'connecting'
+      onopen: (() => void) | null = null
+      onclose: (() => void) | null = null
+      onerror: (() => void) | null = null
+      onmessage: ((event: MessageEvent) => void) | null = null
+      onbufferedamountlow: (() => void) | null = null
+      send(): void {}
+      close(): void {}
+    }
+    class FakePc {
+      connectionState = 'new'
+      localDescription: { type: string; sdp: string } | null = null
+      onicecandidate: ((event: { candidate: null }) => void) | null = null
+      onconnectionstatechange: (() => void) | null = null
+      createDataChannel(): FakeDc {
+        return new FakeDc()
+      }
+      async createOffer(): Promise<{ type: string; sdp: string }> {
+        return { type: 'offer', sdp: 'v=0' }
+      }
+      async setLocalDescription(desc: { type: string; sdp: string }): Promise<void> {
+        this.localDescription = desc
+      }
+      close(): void {}
+    }
+    vi.stubGlobal('RTCPeerConnection', FakePc)
+
+    const actor = createActor(gameMachine)
+    actor.start()
+    const transport = new MemoryTransport()
+    const packBytes = new Uint8Array(CHUNK_BYTES * 10)
+    const session = new MasterSession({
+      transport,
+      client: { requestSpeech: vi.fn() } as unknown as GameVoice,
+      actor,
+      masterClientId: 'master-client',
+      masterName: 'Мастер',
+      pack: demoPack,
+      packBytes,
+      packHash: 'hash',
+      authorityToken: 'master-token',
+      onRoster: () => {},
+      getChat: () => [],
+      setChat: () => {},
+      usePackPipe: true,
+    })
+
+    const hello = { type: 'hello', clientId: 'guest-client', authToken: 'guest-token', name: 'Мобилка' } as const
+    transport.receive(hello)
+    expect(session.rosterList().find((entry) => entry.clientId === 'guest-client')?.packPhase).toBe(
+      'connecting',
+    )
+
+    transport.receive({
+      type: 'packAck',
+      clientId: 'guest-client',
+      authToken: 'guest-token',
+      hash: 'hash',
+      nextIndex: 4,
+    })
+    expect(session.rosterList().find((entry) => entry.clientId === 'guest-client')).toMatchObject({
+      percent: 40,
+      packPhase: 'downloading',
+    })
+
+    transport.receive(hello)
+    transport.receive(hello)
+    expect(session.rosterList().find((entry) => entry.clientId === 'guest-client')).toMatchObject({
+      percent: 40,
+      packPhase: 'downloading',
+    })
+    expect(lastSnapshot(transport)?.presence.find((entry) => entry.clientId === 'guest-client')).toMatchObject({
+      percent: 40,
+      packPhase: 'downloading',
+    })
+
+    session.dispose()
+    actor.stop()
+    vi.unstubAllGlobals()
+  })
+
   it('не перезапускает речь ведущей на каждом проценте загрузки', () => {
     const actor = createActor(gameMachine)
     actor.start()

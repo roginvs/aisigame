@@ -13,6 +13,16 @@ export type PackProgressView = {
   etaSeconds: number | null
 }
 
+/** Фаза доставки пакета (локально у joiner и в presence мастера). */
+export type PackPhase =
+  | 'waiting'
+  | 'connecting'
+  | 'downloading'
+  | 'verifying'
+  | 'verified'
+  | 'ready'
+  | 'failed'
+
 /** Обновляет оценку скорости по ACK (nextIndex — первый ещё не принятый кусок). */
 export function paceAfterAck(
   previous: TransferPace | undefined,
@@ -78,6 +88,61 @@ export function formatEta(seconds: number | null | undefined): string {
   return rest > 0 ? `~${hours} ч ${rest} мин` : `~${hours} ч`
 }
 
+/**
+ * Фаза для UI: percent/hash важнее краткого flap pipe.
+ * «connecting» только до первого прогресса; failed показывается всегда.
+ */
+export function derivePackPhase(input: {
+  waitingMaster?: boolean
+  pipeState?: PackPhase | 'idle' | 'open' | 'closed' | string
+  percent: number
+  hashOk: boolean
+  ready: boolean
+  /** Уже была загрузка/сверка — не откатываем в connecting при percent === 0 без явного рестарта. */
+  previousPhase?: PackPhase | null
+}): PackPhase {
+  if (input.hashOk) return input.ready ? 'ready' : 'verified'
+  if (input.waitingMaster) return 'waiting'
+  if (input.pipeState === 'failed' || input.pipeState === 'closed') return 'failed'
+  if (input.percent >= 99) return 'verifying'
+  if (input.percent > 0 || input.pipeState === 'open') return 'downloading'
+  const prev = input.previousPhase
+  if (prev === 'downloading' || prev === 'verifying') return prev
+  if (input.pipeState === 'connecting' || input.pipeState === 'idle') return 'connecting'
+  return 'connecting'
+}
+
+/**
+ * Не даёт mid-transfer откатиться в connecting, если процент уже есть
+ * или фаза уже downloading/verifying, а percent не сбросили явно в 0.
+ */
+export function stickyPackPhase(input: {
+  previous: PackPhase
+  next: PackPhase
+  percent: number
+  hashOk: boolean
+  ready: boolean
+  /** В патче явно обнулили percent (рестарт передачи). */
+  percentExplicitlyZero?: boolean
+}): PackPhase {
+  if (input.hashOk) return input.ready ? 'ready' : 'verified'
+  if (input.next === 'failed') return 'failed'
+  if (input.next === 'waiting') return 'waiting'
+  if (input.percent >= 99) return 'verifying'
+  if (input.percent > 0) {
+    if (input.next === 'verified' || input.next === 'ready') return input.next
+    return 'downloading'
+  }
+  if (
+    input.next === 'connecting' &&
+    !input.percentExplicitlyZero &&
+    (input.previous === 'downloading' || input.previous === 'verifying')
+  ) {
+    return input.previous
+  }
+  return input.next
+}
+
 /** Строка статуса загрузки на карточке лобби. */
 export function packProgressLabel(input: {
   percent: number
@@ -85,9 +150,30 @@ export function packProgressLabel(input: {
   ready: boolean
   downloadBps?: number | null
   etaSeconds?: number | null
+  packPhase?: PackPhase | null
+  waitingMaster?: boolean
 }): string {
-  if (input.hashOk) return input.ready ? 'Пакет сверен · готов' : 'Пакет сверен'
-  if (input.percent >= 99) return 'Сверка…'
+  const raw =
+    input.packPhase ??
+    derivePackPhase({
+      waitingMaster: input.waitingMaster,
+      percent: input.percent,
+      hashOk: input.hashOk,
+      ready: input.ready,
+    })
+  const phase = stickyPackPhase({
+    previous: raw,
+    next: raw,
+    percent: input.percent,
+    hashOk: input.hashOk,
+    ready: input.ready,
+  })
+  if (phase === 'waiting') return 'Ждём мастер-игрока'
+  if (phase === 'connecting') return 'Устанавливаю соединение'
+  if (phase === 'failed') return 'Нет соединения · повтор…'
+  if (phase === 'ready' || (input.hashOk && input.ready)) return 'Пакет сверен · готов'
+  if (phase === 'verified' || input.hashOk) return 'Пакет сверен'
+  if (phase === 'verifying' || input.percent >= 99) return 'Сверка…'
   const parts = [`Загрузка ${input.percent}%`]
   const speed = formatSpeed(input.downloadBps)
   const eta = formatEta(input.etaSeconds)

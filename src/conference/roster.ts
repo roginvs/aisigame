@@ -10,6 +10,7 @@ import {
   type PresenceEntry,
 } from './presence.ts'
 import type { Player } from '../game/types.ts'
+import { stickyPackPhase, type PackPhase } from './packProgress.ts'
 
 export type RosterEntry = {
   clientId: string
@@ -20,6 +21,8 @@ export type RosterEntry = {
   downloadBps: number | null
   /** Оценка оставшегося времени передачи, секунды. */
   etaSeconds: number | null
+  /** Фаза доставки пакета (соединение / загрузка / сверка). */
+  packPhase: PackPhase
   ready: boolean
   hashOk: boolean
   lastSeen: number
@@ -51,6 +54,7 @@ export class ConferenceRoster {
       percent: 100,
       downloadBps: null,
       etaSeconds: null,
+      packPhase: 'ready',
       ready: true,
       hashOk: true,
       lastSeen: now,
@@ -86,6 +90,7 @@ export class ConferenceRoster {
       percent: 0,
       downloadBps: null,
       etaSeconds: null,
+      packPhase: 'connecting',
       ready: false,
       hashOk: false,
       lastSeen: now,
@@ -99,17 +104,30 @@ export class ConferenceRoster {
 
   updateProgress(
     clientId: string,
-    patch: Partial<Pick<RosterEntry, 'percent' | 'downloadBps' | 'etaSeconds' | 'ready' | 'hashOk'>>,
+    patch: Partial<
+      Pick<RosterEntry, 'percent' | 'downloadBps' | 'etaSeconds' | 'ready' | 'hashOk' | 'packPhase'>
+    >,
     now = Date.now(),
   ): void {
     const entry = this.entries.get(clientId)
     if (!entry) return
     touch(clientId, now)
     const next = { ...entry, ...patch, lastSeen: now }
+    const percentExplicitlyZero = patch.percent === 0 && entry.percent > 0
     if (next.hashOk || next.percent >= 100) {
       next.downloadBps = null
       next.etaSeconds = null
       if (next.percent < 100 && next.hashOk) next.percent = 100
+      if (next.hashOk) next.packPhase = next.ready ? 'ready' : 'verified'
+    } else {
+      next.packPhase = stickyPackPhase({
+        previous: entry.packPhase,
+        next: next.packPhase,
+        percent: next.percent,
+        hashOk: next.hashOk,
+        ready: next.ready,
+        percentExplicitlyZero,
+      })
     }
     this.entries.set(clientId, this.withPresence(next, now))
   }

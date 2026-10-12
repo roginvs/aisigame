@@ -38,6 +38,11 @@ export type ConferenceSnapshotPresence = {
   downloadBps?: number | null
   /** Секунды до конца передачи по оценке мастера. */
   etaSeconds?: number | null
+  /**
+   * Фаза доставки пакета: connecting / downloading / verifying / …
+   * Старые снимки могут не слать поле.
+   */
+  packPhase?: string
   ready: boolean
   hashOk: boolean
 }
@@ -120,6 +125,32 @@ export type PackAckMessage = {
   nextIndex: number
 }
 
+/** Сигнализация прямого WebRTC data channel для раздачи пакета (через Jitsi endpoint). */
+export type PackPipeOfferMessage = {
+  type: 'packPipeOffer'
+  authorityToken: string
+  targetClientId: string
+  sdp: string
+}
+
+export type PackPipeAnswerMessage = {
+  type: 'packPipeAnswer'
+  clientId: string
+  authToken: string
+  sdp: string
+}
+
+export type PackPipeIceMessage = {
+  type: 'packPipeIce'
+  /** Мастер → joiner */
+  authorityToken?: string
+  targetClientId?: string
+  /** Joiner → мастер */
+  clientId?: string
+  authToken?: string
+  candidate: RTCIceCandidateInit | null
+}
+
 export type ReadyMessage = {
   type: 'ready'
   clientId: string
@@ -180,6 +211,9 @@ export type ConferenceMessage =
   | PackOfferMessage
   | PackChunkMessage
   | PackAckMessage
+  | PackPipeOfferMessage
+  | PackPipeAnswerMessage
+  | PackPipeIceMessage
   | PackVerifiedMessage
   | ReadyMessage
   | BuzzMessage
@@ -217,6 +251,18 @@ export function isConferenceMessage(value: unknown): value is ConferenceMessage 
       )
     case 'packAck':
       return client() && shortString(value.hash, 128) && integer(value.nextIndex, 0)
+    case 'packPipeOffer':
+      return (
+        authority(value) &&
+        shortString(value.targetClientId, 200) &&
+        typeof value.sdp === 'string' &&
+        value.sdp.length > 0 &&
+        value.sdp.length <= 100_000
+      )
+    case 'packPipeAnswer':
+      return client() && typeof value.sdp === 'string' && value.sdp.length > 0 && value.sdp.length <= 100_000
+    case 'packPipeIce':
+      return validPackPipeIce(value)
     case 'packVerified':
       return client() && shortString(value.hash, 128)
     case 'ready':
@@ -279,6 +325,18 @@ function authority(value: Record<string, unknown>): boolean {
   return shortString(value.authorityToken, 300)
 }
 
+function validPackPipeIce(value: Record<string, unknown>): boolean {
+  const fromMaster = shortString(value.authorityToken, 300) && shortString(value.targetClientId, 200)
+  const fromJoiner = shortString(value.clientId, 200) && shortString(value.authToken, 300)
+  if (!fromMaster && !fromJoiner) return false
+  if (value.candidate === null) return true
+  if (!isRecord(value.candidate)) return false
+  // candidate string can be empty for some end-of-candidates shapes; allow missing.
+  if (value.candidate.candidate !== undefined && typeof value.candidate.candidate !== 'string') return false
+  if (value.candidate.candidate !== undefined && (value.candidate.candidate as string).length > 8_000) return false
+  return true
+}
+
 function validSnapshot(value: Record<string, unknown>): boolean {
   if (!optionalString(value.commit, 80)) return false
   if (!shortString(value.phase, 100) || !Array.isArray(value.players) || !Array.isArray(value.presence)) return false
@@ -313,7 +371,8 @@ function validPresence(value: unknown): boolean {
     typeof value.hidden === 'boolean' && Number.isFinite(value.percent) && typeof value.ready === 'boolean' &&
     typeof value.hashOk === 'boolean' &&
     (value.downloadBps === undefined || value.downloadBps === null || Number.isFinite(value.downloadBps)) &&
-    (value.etaSeconds === undefined || value.etaSeconds === null || Number.isFinite(value.etaSeconds))
+    (value.etaSeconds === undefined || value.etaSeconds === null || Number.isFinite(value.etaSeconds)) &&
+    (value.packPhase === undefined || (typeof value.packPhase === 'string' && value.packPhase.length <= 40))
 }
 
 function validConversationLine(value: unknown): boolean {
