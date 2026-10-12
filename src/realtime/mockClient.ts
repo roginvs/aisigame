@@ -31,7 +31,7 @@ export class MockRealtimeClient implements GameVoice {
   onFailure: (message: string) => void = () => {}
   onAudioFinished: (info: { purpose: string; turn: number }) => void = () => {}
   onToolCall: (call: ToolCall | null, purpose: string, turn: number) => void = () => {}
-  onSpeechStarted: () => void = () => {}
+  onSpeechStarted: (info?: { itemId: string | null }) => void = () => {}
   onSpeechStopped: (info: { durationMs: number; itemId: string | null }) => void = () => {}
 
   private transcriptionPrompt = ''
@@ -40,6 +40,7 @@ export class MockRealtimeClient implements GameVoice {
   private itemSeq = 0
   private callSeq = 0
   private transcripts = new Map<string, StoredTranscript>()
+  private transcriptWaiters = new Map<string, Array<(line: StoredTranscript) => void>>()
   private hostOutputContext: AudioContext | null = null
 
   async connect(_apiKey: string, _options?: { captureMic?: boolean }): Promise<void> {
@@ -88,11 +89,48 @@ export class MockRealtimeClient implements GameVoice {
 
   waitForTranscript(
     itemId: string | null,
-    _timeoutMs: number,
+    timeoutMs: number,
   ): Promise<{ text: string; arrived: boolean; confidence: number | null }> {
-    const line = itemId ? this.transcripts.get(itemId) : undefined
-    if (!line) return Promise.resolve({ text: '', arrived: false, confidence: null })
-    return Promise.resolve({ text: line.text, arrived: true, confidence: line.confidence })
+    if (!itemId) return Promise.resolve({ text: '', arrived: false, confidence: null })
+    const ready = this.transcripts.get(itemId)
+    if (ready) return Promise.resolve({ text: ready.text, arrived: true, confidence: ready.confidence })
+    return new Promise((resolve) => {
+      const timer = window.setTimeout(() => {
+        this.removeTranscriptWaiter(itemId, finish)
+        const late = this.transcripts.get(itemId)
+        resolve(
+          late
+            ? { text: late.text, arrived: true, confidence: late.confidence }
+            : { text: '', arrived: false, confidence: null },
+        )
+      }, timeoutMs)
+      const finish = (line: StoredTranscript) => {
+        window.clearTimeout(timer)
+        resolve({ text: line.text, arrived: true, confidence: line.confidence })
+      }
+      const bucket = this.transcriptWaiters.get(itemId) ?? []
+      bucket.push(finish)
+      this.transcriptWaiters.set(itemId, bucket)
+    })
+  }
+
+  /** Тесты: положить транскрипт после speech_stopped, как запоздавший OpenAI. */
+  deliverTranscript(itemId: string, text: string, confidence: number | null = null): void {
+    if (this.transcripts.has(itemId)) return
+    const line = { text, confidence }
+    this.transcripts.set(itemId, line)
+    if (!echoesChoicePrompt(text, this.transcriptionPrompt) && !echoesAnswerPrompt(text, this.transcriptionPrompt)) {
+      pushPlayerLine(text || 'речь не распознана')
+    }
+    const matched = this.transcriptWaiters.get(itemId) ?? []
+    this.transcriptWaiters.delete(itemId)
+    for (const waiter of matched) waiter(line)
+  }
+
+  private removeTranscriptWaiter(itemId: string, finish: (line: StoredTranscript) => void): void {
+    const left = (this.transcriptWaiters.get(itemId) ?? []).filter((waiter) => waiter !== finish)
+    if (left.length) this.transcriptWaiters.set(itemId, left)
+    else this.transcriptWaiters.delete(itemId)
   }
 
   interruptSpeech(): void {
@@ -148,11 +186,28 @@ export class MockRealtimeClient implements GameVoice {
     if (!echoesChoicePrompt(text, this.transcriptionPrompt) && !echoesAnswerPrompt(text, this.transcriptionPrompt)) {
       pushPlayerLine(text || 'речь не распознана')
     }
-    this.onSpeechStarted()
+    this.onSpeechStarted({ itemId })
     window.setTimeout(() => {
       const elapsed = Math.max(1, Date.now() - started)
       this.onSpeechStopped({ durationMs: Math.min(durationMs, elapsed), itemId })
     }, speechPauseMs)
+  }
+
+  /** Тесты: только конец речи с известным itemId, без started (запоздавший VAD). */
+  emitSpeechStopped(itemId: string, durationMs: number): void {
+    this.onSpeechStopped({ durationMs, itemId })
+  }
+
+  /** Тесты: started/stopped сразу, транскрипт позже через deliverTranscript. */
+  hearDeferred(durationMs = 1000): string {
+    const itemId = `mock-item-${++this.itemSeq}`
+    const started = Date.now()
+    this.onSpeechStarted({ itemId })
+    window.setTimeout(() => {
+      const elapsed = Math.max(1, Date.now() - started)
+      this.onSpeechStopped({ durationMs: Math.min(durationMs, elapsed), itemId })
+    }, speechPauseMs)
+    return itemId
   }
 }
 
@@ -174,6 +229,12 @@ function hostLine(purpose: string, instructions = ''): string {
       /обратись к\s+(.+?)\s+по имени/i.exec(instructions)?.[1]?.trim() ||
       /выбирает вопрос[\s\S]*?([А-ЯA-Z][^\s,]+)/.exec(instructions)?.[1]?.trim()
     return name ? `${name}, включи микрофон.` : 'Микрофон выключен.'
+  }
+  if (purpose === 'chooserHandoff') {
+    const left = /что\s+(.+?)\s+отключился/i.exec(instructions)?.[1]?.trim()
+    const next = /назови\s+(.+?)\s+как нового/i.exec(instructions)?.[1]?.trim()
+    if (left && next) return `${left} отключился. ${next}, выбирайте.`
+    return 'Игрок отключился. Выбирайте.'
   }
   if (purpose === 'falseStart') {
     const line = [...instructions.matchAll(/«([^»]+)»/g)].map((match) => match[1]?.trim() ?? '').find(Boolean)

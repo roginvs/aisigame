@@ -135,20 +135,27 @@ describe('attachController choice', () => {
     actor.stop()
   })
 
-  it('дословно объявляет передачу выбора после отключения', async () => {
+  it('свободно объявляет передачу выбора после отключения', async () => {
     const client = new MockRealtimeClient()
     const requestSpeech = vi.spyOn(client, 'requestSpeech')
     const { actor, stop } = await boot(client)
 
     actor.send({ type: 'CHOOSER_OFFLINE', fromPlayerId: 2, toPlayerId: 1 })
+    const cue = String(requestSpeech.mock.calls.at(-1)?.[2] ?? '')
     expect(requestSpeech).toHaveBeenLastCalledWith(
       'chooserHandoff',
       expect.any(Number),
-      expect.any(String),
-      'Игрок 2 отключился. Игрок 1, выбирайте вопрос.',
-      false,
+      cue,
+      undefined,
+      true,
       undefined,
     )
+    expect(cue).toContain('Ситуация:')
+    expect(cue).toContain('Игрок 2')
+    expect(cue).toContain('Игрок 1')
+    expect(cue).toContain('отключился')
+    expect(cue).toContain('выбирает вопрос')
+    expect(cue).not.toContain('Игрок 2 отключился. Игрок 1, выбирайте вопрос.')
     await vi.advanceTimersByTimeAsync(80)
     expect(statePath(actor.getSnapshot().value)).toBe('choosing.listening')
     expect(actor.getSnapshot().context.chooserId).toBe(1)
@@ -204,13 +211,13 @@ describe('attachController answer listening', () => {
     expect(statePath(actor.getSnapshot().value)).toBe('answering.waiting')
 
     actions().remindMutedAnswerer('Игрок 1')
-    expect(requestSpeech).toHaveBeenLastCalledWith(
-      'micWarning',
-      expect.any(Number),
-      expect.any(String),
-      'Игрок 1, микрофон-то выключен.',
-      true,
-    )
+    const cue = String(requestSpeech.mock.calls.at(-1)?.[2] ?? '')
+    expect(requestSpeech).toHaveBeenLastCalledWith('micWarning', expect.any(Number), cue, undefined, true)
+    expect(cue).toContain('Игрок 1')
+    expect(cue).toContain('Ситуация:')
+    expect(cue).toContain('отвечает')
+    expect(cue).toContain('микрофон выключен')
+    expect(cue).not.toContain('микрофон-то выключен')
     await vi.advanceTimersByTimeAsync(80)
     expect(statePath(actor.getSnapshot().value)).toBe('answering.waiting')
 
@@ -308,6 +315,103 @@ describe('attachController answer listening', () => {
     client.hear('ответ', 800)
     expect(interrupt).toHaveBeenCalled()
     expect(statePath(actor.getSnapshot().value)).toBe('answering.hearing')
+
+    stop()
+    actor.stop()
+  })
+
+  it('не принимает запоздавшую речь прошлой попытки за ответ следующего игрока', async () => {
+    vi.stubGlobal(
+      'AudioContext',
+      class {
+        state = 'running'
+        currentTime = 0
+        destination = {}
+        resume() {
+          return Promise.resolve()
+        }
+        createOscillator() {
+          return {
+            type: 'sine',
+            frequency: { value: 0 },
+            connect() {},
+            start() {},
+            stop() {},
+          }
+        }
+        createGain() {
+          return {
+            gain: {
+              value: 0,
+              setValueAtTime() {},
+              linearRampToValueAtTime() {},
+            },
+            connect() {},
+          }
+        }
+        close() {
+          return Promise.resolve()
+        }
+      },
+    )
+    const client = new MockRealtimeClient()
+    const { actor, stop } = await boot(client)
+    actor.send({ type: 'QUESTION_SELECTED', themeId: 'p', value: 400 })
+    await vi.advanceTimersByTimeAsync(gameConfig.cellFlashMs + 80)
+    expect(statePath(actor.getSnapshot().value)).toBe('buzzing.open')
+
+    actor.send({ type: 'BUZZER_PRESSED', playerId: 1 })
+    expect(statePath(actor.getSnapshot().value)).toBe('answering.waiting')
+    await vi.advanceTimersByTimeAsync(gameConfig.answerMs)
+    expect(statePath(actor.getSnapshot().value)).toBe('announcing')
+    expect(actor.getSnapshot().context.announceKind).toBe('silence')
+    expect(actor.getSnapshot().context.players.find((player) => player.id === 1)?.score).toBe(-400)
+
+    await vi.advanceTimersByTimeAsync(gameConfig.timeoutBeepMs + 80)
+    expect(statePath(actor.getSnapshot().value)).toBe('buzzing.open')
+
+    actor.send({ type: 'BUZZER_PRESSED', playerId: 2 })
+    expect(statePath(actor.getSnapshot().value)).toBe('answering.waiting')
+    const scoreBefore = actor.getSnapshot().context.players.find((player) => player.id === 2)?.score ?? 0
+
+    client.deliverTranscript('late-masha', 'ответ')
+    // durationMs больше возраста попытки Васи → речь началась ещё у Маши.
+    client.emitSpeechStopped('late-masha', 8_000)
+    await vi.advanceTimersByTimeAsync(80)
+
+    expect(statePath(actor.getSnapshot().value)).toBe('answering.waiting')
+    expect(actor.getSnapshot().context.players.find((player) => player.id === 2)?.score).toBe(scoreBefore)
+    expect(actor.getSnapshot().context.activePlayerId).toBe(2)
+    expect(
+      getTrace().some((entry) => entry.kind === 'note' && String(entry.title).includes('поздняя речь ответа')),
+    ).toBe(true)
+
+    client.hear('ответ', 800)
+    await vi.advanceTimersByTimeAsync(120)
+    expect(actor.getSnapshot().context.players.find((player) => player.id === 2)?.score).toBe(scoreBefore + 400)
+
+    stop()
+    actor.stop()
+  })
+
+  it('после смены выбирающего не открывает ячейку по запоздавшему транскрипту', async () => {
+    const client = new MockRealtimeClient()
+    const { actor, stop } = await boot(client)
+    expect(statePath(actor.getSnapshot().value)).toBe('choosing.listening')
+
+    const itemId = client.hearDeferred(800)
+    await vi.advanceTimersByTimeAsync(80)
+    expect(statePath(actor.getSnapshot().value)).toBe('choosing.listening')
+
+    actor.send({ type: 'CHOOSER_OFFLINE', fromPlayerId: 2, toPlayerId: 1 })
+    await vi.advanceTimersByTimeAsync(80)
+    expect(statePath(actor.getSnapshot().value)).toBe('choosing.listening')
+    expect(actor.getSnapshot().context.chooserId).toBe(1)
+
+    client.deliverTranscript(itemId, 'ПЦ 400.')
+    await vi.advanceTimersByTimeAsync(80)
+    expect(statePath(actor.getSnapshot().value)).toBe('choosing.listening')
+    expect(actor.getSnapshot().context.activeQuestionId).toBeNull()
 
     stop()
     actor.stop()

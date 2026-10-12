@@ -53,8 +53,20 @@ export function attachController(options: {
   let toolTurn = 0
   /** Пока ждём select/judge: поздний response.done с другим turn не принимаем. */
   let expectingToolTurn: number | null = null
-  let choiceToken = 0
+  /** Инвалидирует in-flight разбор выбора (в т.ч. после CHOOSER_OFFLINE). */
+  let choiceEpoch = 0
+  /** Инвалидирует in-flight разбор ставки при смене финалиста. */
+  let betEpoch = 0
+  /** Инвалидирует фразу без кнопки после смены окна buzzing. */
+  let buzzEpoch = 0
+  /** Инвалидирует talkover после нового чтения. */
+  let readEpoch = 0
   let choiceHeard = ''
+  /** Попытка, для которой сейчас принимаем речь ответа. */
+  let liveAttemptId: number | null = null
+  /** Когда открыли эту попытку: речь, начавшаяся раньше, отбрасывается. */
+  let answerArmedAt = 0
+  let liveSpeechItemId: string | null = null
   let answerItemId: string | null = null
   let answerTranscript = ''
   let answerConfidence: number | null = null
@@ -139,7 +151,7 @@ export function attachController(options: {
     }
     finish()
   }
-  client.onSpeechStarted = () => {
+  client.onSpeechStarted = (info) => {
     const path = statePath(actor.getSnapshot().value)
     if (path === 'stopped' || path === 'paused') return
     if (isReadingPath(path) || path === 'falseStartCue') {
@@ -151,13 +163,14 @@ export function attachController(options: {
       actor.send({ type: 'PLAYER_SPEECH_STARTED' })
       return
     }
-    if (path === 'answering.waiting') {
+    if (path === 'answering.waiting' || path === 'answering.hearing') {
+      if (!answerAttemptLive()) {
+        pushTrace('note', 'поздний старт речи ответа отброшен: чужая попытка')
+        return
+      }
+      liveSpeechItemId = info?.itemId ?? liveSpeechItemId
       // Подсказка про выключенный микрофон не должна звучать поверх ответа.
-      client.interruptSpeech()
-      actor.send({ type: 'PLAYER_SPEECH_STARTED' })
-      return
-    }
-    if (path === 'answering.hearing') {
+      if (path === 'answering.waiting') client.interruptSpeech()
       actor.send({ type: 'PLAYER_SPEECH_STARTED' })
     }
   }
@@ -176,7 +189,9 @@ export function attachController(options: {
       return
     }
     if (path === 'answering.waiting' || path === 'answering.hearing') {
-      answerItemId = itemId
+      if (!acceptAnswerSpeech(durationMs, itemId)) return
+      answerItemId = itemId ?? liveSpeechItemId
+      liveSpeechItemId = answerItemId
       actor.send({ type: 'PLAYER_SPEECH_FINISHED' })
       return
     }
@@ -291,13 +306,14 @@ export function attachController(options: {
     if (path === 'welcoming') speak('welcome', welcomeInstructions(context), undefined, true)
     if (path === 'bridging') speak('bridge', bridgeInstructions(context), undefined, true)
     if (path === 'chooserHandoff') {
-      const line = context.clarifyReason
-      speak('chooserHandoff', verbatimSpeech(line), line)
+      choiceEpoch += 1
+      speak('chooserHandoff', chooserHandoffCue(context), undefined, true)
     }
     if (path === 'choosing.listening' || path === 'choosing.clarifying' || path === 'chooserHandoff') {
       expectingToolTurn = null
     }
     if (path === 'choosing.listening') {
+      choiceEpoch += 1
       client.setSpeechSpeed(gameConfig.speechSpeed)
       client.setTranscriptionPrompt(listeningPrompt(context))
       client.setMicEnabled(true)
@@ -316,6 +332,7 @@ export function attachController(options: {
       client.setMicEnabled(false)
     }
     if (path === 'reading.sealed') {
+      readEpoch += 1
       const question = questionById(context.questions, context.activeQuestionId)
       const text = question ? questionSpeech(question) : ''
       speak('read', readInstructions(text), text)
@@ -327,27 +344,38 @@ export function attachController(options: {
       armBuzzerWarning(context.phaseDurationMs ?? gameConfig.buzzerMs)
     }
     if (path === 'falseStartCue') {
+      readEpoch += 1
       speak('falseStart', falseStartInstructions(context))
       // Как на чтении: микрофон открыт, чтобы запомнить перебивание для лекции про кнопку.
       client.setMicEnabled(true)
     }
     if ((from.startsWith('reading') || from === 'falseStartCue') && path.startsWith('answering')) client.interruptSpeech()
     if (path === 'buzzing.open') {
+      buzzEpoch += 1
       openBuzzerEar()
       if (from !== 'paused' && from !== 'reading.armed') armBuzzerWarning(context.phaseDurationMs ?? gameConfig.buzzerMs)
     }
     if (path !== 'paused' && !buzzerChimeLive(path)) clearBuzzerWarning()
-    if (path === 'answering.waiting' || path === 'answering.hearing') {
+    if (path === 'answering.waiting') {
+      armAnswerAttempt(context.attemptId)
+      client.setTranscriptionPrompt(answerListeningPrompt(questionById(context.questions, context.activeQuestionId)?.answers ?? []))
+      client.setMicEnabled(true)
+    }
+    if (path === 'answering.hearing') {
       client.setTranscriptionPrompt(answerListeningPrompt(questionById(context.questions, context.activeQuestionId)?.answers ?? []))
     }
-    if (path === 'answering.waiting') client.setMicEnabled(true)
     if (path === 'announcing' || path.startsWith('answering')) expectingToolTurn = null
+    if (path === 'announcing') dropAnswerAttempt()
     if (path === 'judging') {
       client.setMicEnabled(false)
       void requestJudgment(context)
     }
-    if (path === 'finalBets.asking') speak('bet', betInstructions(context))
+    if (path === 'finalBets.asking') {
+      betEpoch += 1
+      speak('bet', betInstructions(context))
+    }
     if (path === 'finalBets.hearing') {
+      betEpoch += 1
       client.setTranscriptionPrompt('Игрок называет ставку числом или говорит ва-банк.')
       client.setMicEnabled(true)
     }
@@ -370,6 +398,47 @@ export function attachController(options: {
     buzzerEarAt = Date.now()
     client.setTranscriptionPrompt('Человек говорит, пока нужно нажать кнопку. Это ещё не ответ на вопрос.')
     client.setMicEnabled(true)
+  }
+
+  function armAnswerAttempt(attemptId: number): void {
+    liveAttemptId = attemptId
+    answerArmedAt = Date.now()
+    liveSpeechItemId = null
+    answerItemId = null
+    answerTranscript = ''
+    answerConfidence = null
+    judgeToken += 1
+  }
+
+  function dropAnswerAttempt(): void {
+    liveAttemptId = null
+    liveSpeechItemId = null
+    answerItemId = null
+    answerTranscript = ''
+    answerConfidence = null
+    judgeToken += 1
+  }
+
+  function answerAttemptLive(): boolean {
+    return liveAttemptId !== null && actor.getSnapshot().context.attemptId === liveAttemptId
+  }
+
+  /** Речь ответа только своей попытки и только если она началась после открытия попытки. */
+  function acceptAnswerSpeech(durationMs: number, itemId: string | null): boolean {
+    if (!answerAttemptLive()) {
+      pushTrace('note', 'поздняя речь ответа отброшена: чужая попытка')
+      return false
+    }
+    const startedAt = Date.now() - Math.max(0, durationMs)
+    if (startedAt < answerArmedAt - 100) {
+      pushTrace('note', 'поздняя речь ответа отброшена: началась до попытки')
+      return false
+    }
+    if (liveSpeechItemId && itemId && liveSpeechItemId !== itemId) {
+      pushTrace('note', 'поздняя речь ответа отброшена: чужой item')
+      return false
+    }
+    return true
   }
 
   function speakWhileListening(purpose: SpeechPurpose, instructions: string, expect?: string): void {
@@ -398,9 +467,9 @@ export function attachController(options: {
   }
 
   async function considerChoice(durationMs: number, itemId: string | null): Promise<void> {
-    const token = ++choiceToken
+    const epoch = choiceEpoch
     const heard = await client.waitForTranscript(itemId, 2200)
-    if (token !== choiceToken) return
+    if (epoch !== choiceEpoch) return
     if (statePath(actor.getSnapshot().value) !== 'choosing.listening') return
     if (echoesChoicePrompt(heard.text, listeningPrompt(actor.getSnapshot().context))) {
       pushTrace('note', 'распознавание повторило подсказку тем, это не выбор')
@@ -438,9 +507,9 @@ export function attachController(options: {
   async function considerBlurt(durationMs: number, itemId: string | null): Promise<void> {
     const startedAt = Date.now() - durationMs
     if (startedAt < buzzerEarAt) return
-    const token = ++choiceToken
+    const epoch = buzzEpoch
     const heard = await client.waitForTranscript(itemId, 2200)
-    if (token !== choiceToken) return
+    if (epoch !== buzzEpoch) return
     if (statePath(actor.getSnapshot().value) !== 'buzzing.open') return
     if (blurtGate(heard.text, durationMs) === 'ignore') {
       pushTrace('note', `короткий звук ${durationMs} мс, кнопку не трогаю`)
@@ -452,9 +521,9 @@ export function attachController(options: {
   }
 
   async function considerTalkover(durationMs: number, itemId: string | null): Promise<void> {
-    const token = ++choiceToken
+    const epoch = readEpoch
     const heard = await client.waitForTranscript(itemId, 2200)
-    if (token !== choiceToken) return
+    if (epoch !== readEpoch) return
     const path = statePath(actor.getSnapshot().value)
     const relevant =
       isReadingPath(path) ||
@@ -477,9 +546,9 @@ export function attachController(options: {
   }
 
   async function considerBet(itemId: string | null): Promise<void> {
-    const token = ++choiceToken
+    const epoch = betEpoch
     const heard = await client.waitForTranscript(itemId, 2200)
-    if (token !== choiceToken) return
+    if (epoch !== betEpoch) return
     const snapshot = actor.getSnapshot()
     if (statePath(snapshot.value) !== 'finalBets.resolving') return
     if (!heard.arrived) pushPlayerLine('речь не распознана')
@@ -495,8 +564,14 @@ export function attachController(options: {
 
   async function requestJudgment(context: GameContext): Promise<void> {
     const token = ++judgeToken
-    const heard = await client.waitForTranscript(answerItemId, 2200)
+    const attempt = context.attemptId
+    const itemId = answerItemId
+    // Без itemId не ждём «любой» следующий транскрипт — только пустую реплику этой попытки.
+    const heard = itemId
+      ? await client.waitForTranscript(itemId, 2200)
+      : { text: '', arrived: false, confidence: null as number | null }
     if (token !== judgeToken) return
+    if (liveAttemptId !== attempt || actor.getSnapshot().context.attemptId !== attempt) return
     if (statePath(actor.getSnapshot().value) !== 'judging') return
     const live = actor.getSnapshot().context
     const answerPrompt = answerListeningPrompt(questionById(live.questions, live.activeQuestionId)?.answers ?? [])
@@ -638,8 +713,7 @@ export function attachController(options: {
   onActions?.({
     remindMutedAnswerer(playerName) {
       if (statePath(actor.getSnapshot().value) !== 'answering.waiting') return
-      const line = `${playerName}, микрофон-то выключен.`
-      speakWhileListening('micWarning', verbatimSpeech(line), line)
+      speakWhileListening('micWarning', mutedAnswerMicCue(playerName))
     },
     remindMutedChooser(playerName) {
       if (statePath(actor.getSnapshot().value) !== 'choosing.listening') return
@@ -790,6 +864,37 @@ export function mutedMicCue(playerName: string): string {
     constraints: [
       boardSecrets,
       'Ячейку не выбирай. Правильный ответ не произноси.',
+    ],
+  })
+}
+
+/** Подсказка отвечающему: один раз за попытку, формулировку модель выбирает сама. */
+export function mutedAnswerMicCue(playerName: string): string {
+  const name = playerName.trim() || 'Игрок'
+  return hostCue({
+    situation: `${name} сейчас отвечает после кнопки, но микрофон выключен — ведущая реплику не слышит.`,
+    goal: `Коротко обратись к ${name} по имени и напомни, что микрофон выключен.`,
+    constraints: [
+      boardSecrets,
+      'Одна короткая фраза. Таймер ответа словами не останавливай и попытку не закрывай. Правильный ответ не произноси. Тёплый тон ведущей.',
+    ],
+  })
+}
+
+/** Передача выбора после отключения: ясно назвать ушедшего и нового выбирающего, без готовой фразы. */
+export function chooserHandoffCue(context: GameContext): string {
+  const left =
+    context.clarifyReason.match(/^(.+?)\s+отключился/)?.[1]?.trim() ||
+    'Игрок'
+  const next = playerName(context.players, context.chooserId) || 'Игрок'
+  const finalTheme = currentRound(context, context.roundIndex)?.kind === 'final'
+  const what = finalTheme ? 'тему финала' : 'вопрос'
+  return hostCue({
+    situation: `${left} отключился во время выбора. Сейчас выбирает ${next}: нужно выбрать ${what}.`,
+    goal: `Ясно объяви, что ${left} отключился, и назови ${next} как нового выбирающего — пусть выбирает ${what}.`,
+    constraints: [
+      boardSecrets,
+      'Формулировку выбери сама. Одна-две короткие фразы. Ответ пакета не называй. Ячейку сама не открывай.',
     ],
   })
 }
@@ -984,9 +1089,8 @@ export function verbatimAnnouncement(context: GameContext): string | null {
   if (forms.length !== 1) return null
   const answer = forms[0] ?? ''
   if (!answer) return null
-  if (kind === 'nobody' && (context.spokeWithoutButton || context.talkedDuringRead)) {
-    return `${answer}. Ответ называют только после кнопки.`
-  }
+  // Хвост про кнопку — свободная реплика; дословно остаётся только эталон.
+  if (kind === 'nobody' && (context.spokeWithoutButton || context.talkedDuringRead)) return null
   return answer
 }
 

@@ -131,7 +131,7 @@ export class RealtimeClient {
   onFailure: (message: string) => void = () => {}
   onAudioFinished: (info: { purpose: string; turn: number }) => void = () => {}
   onToolCall: (call: ToolCall | null, purpose: string, turn: number) => void = () => {}
-  onSpeechStarted: () => void = () => {}
+  onSpeechStarted: (info?: { itemId: string | null }) => void = () => {}
   onSpeechStopped: (info: { durationMs: number; itemId: string | null }) => void = () => {}
 
   constructor(options: { model?: string; wire?: VoiceWire | null } = {}) {
@@ -733,7 +733,7 @@ export class RealtimeClient {
     if (type === 'input_audio_buffer.speech_started') {
       this.inputStartedAt = performance.now()
       this.inputItemId = readItemId(event)
-      this.onSpeechStarted()
+      this.onSpeechStarted({ itemId: this.inputItemId })
     }
     if (type === 'input_audio_buffer.speech_stopped') {
       const started = this.inputStartedAt
