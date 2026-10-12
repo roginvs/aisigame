@@ -132,6 +132,8 @@ export default function App() {
     hashOk: false,
     readySent: false,
     percent: 0,
+    packName: '',
+    rosterNames: [] as string[],
   })
   const [joinerPack, setJoinerPack] = useState<QuestionPack | null>(null)
   const [conferenceError, setConferenceError] = useState<string | null>(null)
@@ -1200,6 +1202,10 @@ export default function App() {
           )
         : null
   const joinerSelfId = conferenceRole === 'joiner' ? readJoinClientId() : masterClientId
+  const joinerGameStarted = Boolean(joinerSnapshot && joinerSnapshot.phase !== 'lobby')
+  const joinerPackReady = Boolean(joinerPack) && joinerLobby.hashOk
+  const joinerAwaitingPack = conferenceRole === 'joiner' && joinerGameStarted && !joinerPackReady
+  const joinerSelfPresence = joinerRoster.find((entry) => entry.clientId === joinerSelfId)
 
   return (
     <GameScreen
@@ -1261,7 +1267,21 @@ export default function App() {
               lobby:
                 conferenceRole === 'master'
                   ? conferenceLobby
-                  : !joinerSnapshot || joinerSnapshot.phase === 'lobby',
+                  : !joinerGameStarted,
+              awaitingPack: joinerAwaitingPack,
+              packProgress: joinerAwaitingPack
+                ? {
+                    percent: joinerLobby.percent,
+                    hashOk: joinerLobby.hashOk,
+                    ready: joinerLobby.readySent,
+                    downloadBps: joinerSelfPresence?.downloadBps ?? null,
+                    etaSeconds: joinerSelfPresence?.etaSeconds ?? null,
+                  }
+                : undefined,
+              packName:
+                conferenceRole === 'joiner'
+                  ? joinerLobby.packName || joinerPack?.name || undefined
+                  : pack?.name,
               roster: conferenceRole === 'master' ? masterRoster : joinerRoster,
               isMaster: conferenceRole === 'master',
               masterOffline:

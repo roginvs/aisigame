@@ -19,7 +19,10 @@ import { ConferenceVideoStrip } from './ConferenceVideoStrip.tsx'
 import { AirStatus } from './airStatus.tsx'
 import { buzzKeyLabel, isKeyboardPlayer, playerFromBuzzKey } from './buzzKeys.ts'
 import { ConversationChat } from './DebugChat.tsx'
+import { packProgressLabel } from '../conference/packProgress.ts'
+import { conferencePlayerLabel } from './conferencePlayerLabel.ts'
 import { canBuzzPlayer, canPickCell, conferenceSoloListenHint, conferenceTurnTitle } from './conferenceTurn.ts'
+import { PackAwaitPanel, type PackAwaitProgress } from './PackAwaitPanel.tsx'
 import { HostPresence } from './HostPresence.tsx'
 import { InviteDialog } from './InviteDialog.tsx'
 import { QuestionClip, QuestionMedia } from './QuestionMedia.tsx'
@@ -115,6 +118,10 @@ export function GameScreen(props: {
   conference?: {
     layout: boolean
     lobby: boolean
+    /** Партия в снимке уже идёт, а пакет у этого клиента ещё не готов. */
+    awaitingPack?: boolean
+    packProgress?: PackAwaitProgress
+    packName?: string
     roster: RosterEntry[]
     isMaster: boolean
     masterOffline: boolean
@@ -194,14 +201,15 @@ export function GameScreen(props: {
     context.chooserId,
     context.players,
   )
-  const turnTitle = conferenceTurnTitle(
-    path,
-    Boolean(conference?.layout),
-    context,
-  )
-  const soloListenHint = conferenceSoloListenHint(path, Boolean(conference?.layout))
+  const hasMatchData = Boolean(!conference?.layout || conference.isMaster || conference.remoteContext)
+  const turnTitle = conference?.awaitingPack
+    ? null
+    : conferenceTurnTitle(path, Boolean(conference?.layout), context)
+  const soloListenHint = conference?.awaitingPack
+    ? null
+    : conferenceSoloListenHint(path, Boolean(conference?.layout))
   const flashing = path === 'flashing' || (paused && context.resumePath === 'flashing')
-  const showQuestion = Boolean(question) && !flashing
+  const showQuestion = Boolean(question) && !flashing && !conference?.awaitingPack
   const showTimer = context.phaseStartedAt !== null && context.phaseDurationMs !== null
   const answerRevealed =
     path.startsWith('announcing') ||
@@ -289,9 +297,11 @@ export function GameScreen(props: {
         <div>
           <p className="eyebrow model-line">
             <span>
-              {conference?.lobby
-                ? [context.packName, 'Лобби'].filter(Boolean).join(' · ')
-                : [context.packName, round?.name].filter(Boolean).join(' · ') || 'Раунд'}
+              {conference?.awaitingPack
+                ? [conference.packName || context.packName, 'Загрузка'].filter(Boolean).join(' · ')
+                : conference?.lobby
+                  ? [context.packName || conference.packName, 'Лобби'].filter(Boolean).join(' · ')
+                  : [context.packName, round?.name].filter(Boolean).join(' · ') || 'Раунд'}
             </span>
             {conference && !conference.isMaster ? null : (
               <>
@@ -366,7 +376,9 @@ export function GameScreen(props: {
       <section className="layout">
         <div className="play">
         <div className="stage">
-        {showQuestion && question ? (
+        {conference?.awaitingPack && conference.packProgress ? (
+          <PackAwaitPanel progress={conference.packProgress} packName={conference.packName} />
+        ) : showQuestion && question ? (
           <article className="question">
             <p className="eyebrow">
               {question.themeName} · {question.value}
@@ -500,10 +512,11 @@ export function GameScreen(props: {
         )}
         </div>
 
-      {conference?.lobby ? null : (
+      {conference?.lobby || conference?.awaitingPack ? null : (
       <section className="players">
         {visiblePlayers.map((player) => {
           const playerId = player.id
+          const label = conferencePlayerLabel(player.name, hasMatchData)
           const active = context.activePlayerId === playerId
           const missed = context.missedIds.includes(playerId)
           const chooses = path.startsWith('choosing') && context.chooserId === playerId
@@ -521,11 +534,11 @@ export function GameScreen(props: {
                 .filter(Boolean)
                 .join(' ')}
               role="group"
-              aria-label={`${player.name}: ${player.score}`}
+              aria-label={`${label}: ${hasMatchData ? player.score : '—'}`}
             >
               <div className="player-meta">
-                <strong>{player.name}</strong>
-                <span>{player.score}</span>
+                <strong>{label}</strong>
+                <span>{hasMatchData ? player.score : '—'}</span>
               </div>
               <button
                 type="button"
@@ -539,7 +552,7 @@ export function GameScreen(props: {
                 disabled={displayOnly || cooling || ((missed || !buttonsOpen) && !canFalseStart)}
                 onClick={() => onBuzz(playerId)}
               >
-                {chooses ? 'выбирайте вопрос' : missed ? 'Уже отвечал' : player.name}
+                {chooses ? 'выбирайте вопрос' : missed ? 'Уже отвечал' : label}
                 {earlyLive ? <span className="visually-hidden">, вопрос ещё читается</span> : null}
               </button>
               <p className="key-hint">{key ? (earlyLive ? `${key} · уже можно` : key) : isSelf ? 'Пробел' : ''}</p>
@@ -556,11 +569,13 @@ export function GameScreen(props: {
             title={turnTitle}
             titleHint={soloListenHint}
             status={
-              conference?.lobby
-                ? conference.waitingMaster
-                  ? 'Ждём мастер-игрока'
-                  : 'Ждём начала игры'
-                : context.statusLine
+              conference?.awaitingPack && conference.packProgress
+                ? packProgressLabel(conference.packProgress)
+                : conference?.lobby
+                  ? conference.waitingMaster
+                    ? 'Ждём мастер-игрока'
+                    : 'Ждём начала игры'
+                  : context.statusLine
             }
             error={conference?.mediaError ?? context.error}
             conferenceSpeaking={conference?.hostSpeaking}

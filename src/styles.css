@@ -217,6 +217,11 @@ h1, h2, p { margin: 0; }
   overflow: hidden;
 }
 
+.pack-await .roster-bar {
+  margin: 16px 0 8px;
+  height: 8px;
+}
+
 .roster-bar > span {
   display: block;
   height: 100%;
