@@ -19,9 +19,27 @@ describe('ConferenceVideoTile', () => {
       }),
     )
 
-    expect(html).toContain('video-tile mic-live speaking')
+    expect(html).toContain('video-tile local mic-live speaking')
     expect(html).toContain('<video autoPlay="" playsInline="" muted=""')
     expect(html).not.toContain('aria-label="Следующая камера"')
+  })
+
+  it('does not mark remote tiles as local', () => {
+    const html = renderToStaticMarkup(
+      createElement(ConferenceVideoTile, {
+        tile: {
+          id: 'remote',
+          name: 'Вася',
+          isLocal: false,
+          micLive: true,
+          cameraOn: true,
+          speaking: false,
+        },
+        bindVideo: vi.fn(),
+      }),
+    )
+    expect(html).toContain('video-tile mic-live')
+    expect(html).not.toContain('video-tile local')
   })
 
   it('shows the full name when the camera is off', () => {

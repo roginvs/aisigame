@@ -572,6 +572,11 @@ h1, h2, p { margin: 0; }
   background: #0f1620;
 }
 
+/* Только своя камера: как в зеркале. Чужие плитки и исходящий поток не трогаем. */
+.video-tile.local video {
+  transform: scaleX(-1);
+}
+
 .video-placeholder {
   color: #d7b15e;
   max-width: 90%;
@@ -1582,13 +1587,29 @@ button.buzzer.chooser:disabled {
   line-height: 1.35;
 }
 
-.bubble span {
-  display: block;
+.bubble-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 8px;
   margin-bottom: 4px;
+}
+
+.bubble-role {
   color: #d7b15e;
   font-size: 0.72rem;
   letter-spacing: 0.04em;
   text-transform: uppercase;
+  min-width: 0;
+}
+
+.bubble-time {
+  color: #8a9bb0;
+  font-size: 0.72rem;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 0.02em;
+  flex: none;
+  text-transform: none;
 }
 
 .bubble-note {

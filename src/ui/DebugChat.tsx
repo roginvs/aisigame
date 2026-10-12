@@ -2,6 +2,7 @@ import { useEffect, useLayoutEffect, useRef, useState, useSyncExternalStore, typ
 import { getTrace, subscribeTrace, type ChatRole, type TraceEntry } from '../debug/trace.ts'
 import type { ConferenceChatLine, ConferenceConversationLine } from '../conference/messages.ts'
 import { chatPinKey, isAtTail, pinColumn } from './chatScroll.ts'
+import { formatChatTime } from './chatTime.ts'
 import { mergeConversationStream, type VoiceStreamLine } from './conversationStream.ts'
 
 export function ConversationChat(props?: {
@@ -41,7 +42,7 @@ export function ConversationChat(props?: {
           {stream.map((item) =>
             item.kind === 'typed' ? (
               <p key={item.key} className="bubble from-player bubble-typed">
-                <span>Чат · {item.name}</span>
+                <BubbleHead label={`Чат · ${item.name}`} at={item.at} />
                 {item.text}
               </p>
             ) : (
@@ -163,10 +164,24 @@ function Bubble(props: { entry: TraceEntry }) {
   const note = role === 'host' ? chatNote(props.entry.detail) : ''
   return (
     <p className={`bubble ${bubbleClass(role)}`}>
-      <span>{roleLabel(role)}</span>
+      <BubbleHead label={roleLabel(role)} at={props.entry.at} />
       {text}
       {note ? <small className="bubble-note">{note}</small> : null}
     </p>
+  )
+}
+
+function BubbleHead(props: { label: string; at?: string }) {
+  const time = formatChatTime(props.at)
+  return (
+    <span className="bubble-head">
+      <span className="bubble-role">{props.label}</span>
+      {time ? (
+        <time className="bubble-time" dateTime={props.at}>
+          {time}
+        </time>
+      ) : null}
+    </span>
   )
 }
 

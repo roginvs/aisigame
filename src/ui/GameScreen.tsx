@@ -144,7 +144,7 @@ export function GameScreen(props: {
     bindVideo?: (participantId: string, element: HTMLVideoElement | null) => void
     mediaError?: string | null
     onSendChat?: (text: string) => void
-    chatLines?: { name: string; text: string }[]
+    chatLines?: { name: string; text: string; at?: string }[]
     onConferenceExit?: () => void
     hiddenClientIds?: ReadonlySet<string>
     /** Только мастер: галка «Меньше слышать» (вне хода — глухо). */

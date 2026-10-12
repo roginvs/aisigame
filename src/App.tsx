@@ -58,7 +58,7 @@ import {
   writeVoiceModelId,
 } from './realtime/models.ts'
 import { createVoice } from './realtime/voice.ts'
-import type { ConferenceSnapshot } from './conference/messages.ts'
+import type { ConferenceChatLine, ConferenceSnapshot } from './conference/messages.ts'
 import type { RosterEntry } from './conference/roster.ts'
 import { GameScreen } from './ui/GameScreen.tsx'
 import { JoinConfirmScreen } from './ui/JoinConfirmScreen.tsx'
@@ -125,7 +125,7 @@ export default function App() {
   const [masterRoster, setMasterRoster] = useState<RosterEntry[]>([])
   const [masterRosterAll, setMasterRosterAll] = useState<RosterEntry[]>([])
   const [masterParticipantIds, setMasterParticipantIds] = useState<Record<string, string>>({})
-  const [conferenceChat, setConferenceChat] = useState<{ name: string; text: string }[]>(() => readSavedGame()?.chat ?? [])
+  const [conferenceChat, setConferenceChat] = useState<ConferenceChatLine[]>(() => readSavedGame()?.chat ?? [])
   const conferenceChatRef = useRef(conferenceChat)
   const [joinerSnapshot, setJoinerSnapshot] = useState<ConferenceSnapshot | null>(null)
   const [joinerLobby, setJoinerLobby] = useState({

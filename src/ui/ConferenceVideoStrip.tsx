@@ -33,7 +33,12 @@ export function ConferenceVideoTile(props: {
 
   return (
     <div
-      className={['video-tile', tile.micLive ? 'mic-live' : 'mic-off', tile.speaking ? 'speaking' : '']
+      className={[
+        'video-tile',
+        tile.isLocal ? 'local' : '',
+        tile.micLive ? 'mic-live' : 'mic-off',
+        tile.speaking ? 'speaking' : '',
+      ]
         .filter(Boolean)
         .join(' ')}
     >
