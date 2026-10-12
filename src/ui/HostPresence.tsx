@@ -28,13 +28,16 @@ export function HostPresence(props: {
   const paused = props.path === 'paused'
   const stopped = props.path === 'stopped'
   const mood = paused || stopped ? 'think' : hostMood(props.path, props.link)
+  const listenHint = props.titleHint?.trim() || ''
+  // titleHint из конференции важнее шаблонного hint настроения («Слышу вас…» на buzz),
+  // иначе при «Меньше слышать» в окне кнопки врёт «засчитаю только после кнопки».
   const copy = props.title
-    ? { title: props.title, hint: props.titleHint?.trim() || '' }
+    ? { title: props.title, hint: listenHint }
     : stopped
-    ? { title: 'Остановлена', hint: 'Сессия закрыта, ведущая не ждёт' }
-    : paused
-      ? { title: 'Пауза', hint: 'Микрофон выключен, ведущая не ждёт' }
-      : hostCopy[mood]
+      ? { title: 'Остановлена', hint: listenHint || 'Сессия закрыта, ведущая не ждёт' }
+      : paused
+        ? { title: 'Пауза', hint: listenHint || 'Микрофон выключен, ведущая не ждёт' }
+        : { title: hostCopy[mood].title, hint: listenHint || hostCopy[mood].hint }
   const caption = hostCaption({ title: copy.title, hint: copy.hint, status: props.title ? '' : props.status })
   const classes = [
     'host',

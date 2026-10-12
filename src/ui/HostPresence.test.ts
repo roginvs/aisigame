@@ -25,6 +25,23 @@ describe('HostPresence', () => {
     expect(speaking).toContain('host host-think speaking')
   })
 
+  it('prefers conference listen hint over buzz mood copy when hear-turn-only is on', () => {
+    const html = renderToStaticMarkup(
+      createElement(HostPresence, {
+        path: 'buzzing.open',
+        link: { host: 'idle', mic: 'live' },
+        status: 'Жмите свою кнопку',
+        titleHint: 'Ничего не слышу',
+        hearTurnOnly: true,
+        onHearTurnOnlyChange: () => {},
+      }),
+    )
+
+    expect(html).toContain('Жмите кнопку')
+    expect(html).toContain('Ничего не слышу')
+    expect(html).not.toContain('Слышу вас, засчитаю только после кнопки')
+  })
+
   it('shows hear-turn-only checkbox only when the master callback is passed', () => {
     const plain = renderToStaticMarkup(
       createElement(HostPresence, {
