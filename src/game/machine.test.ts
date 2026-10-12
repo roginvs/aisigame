@@ -491,7 +491,7 @@ describe('game machine', () => {
     expect(actor.getSnapshot().context.wrongHeard).toEqual(['Братство кольца', 'Хоббит'])
     expect(playerScore(actor, 3)).toBe(-100)
     const line = announceInstructions(actor.getSnapshot().context)
-    expect(line.indexOf('Братство кольца')).toBeLessThan(line.indexOf('время на ответ вышло'))
+    expect(line.indexOf('Братство кольца')).toBeLessThan(line.indexOf('ничего не услышала'))
   })
 
   it('верный ответ чужую ошибку вслух не поднимает', () => {
