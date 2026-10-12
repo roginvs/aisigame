@@ -14,13 +14,13 @@ import type { ConferenceSnapshot } from '../conference/messages.ts'
 import type { RosterEntry } from '../conference/roster.ts'
 import { copyDebugDump, formatDebugSize } from '../debug/trace.ts'
 import type { ConferenceTile } from '../conference/media.ts'
-import { ConferenceRosterPanel } from './ConferenceRosterPanel.tsx'
-import { ConferenceVideoStrip } from './ConferenceVideoStrip.tsx'
+import { ConferenceLobbyStatus } from './ConferenceLobbyStatus.tsx'
+import { ConferenceMediaControls } from './ConferenceVideoStrip.tsx'
+import { ConferencePlayersRow } from './ConferencePlayersRow.tsx'
 import { AirStatus } from './airStatus.tsx'
 import { buzzKeyLabel, isKeyboardPlayer, playerFromBuzzKey } from './buzzKeys.ts'
 import { ConversationChat } from './DebugChat.tsx'
 import { packProgressLabel } from '../conference/packProgress.ts'
-import { conferencePlayerLabel } from './conferencePlayerLabel.ts'
 import { canBuzzPlayer, canPickCell, conferenceSoloListenHint, conferenceTurnTitle } from './conferenceTurn.ts'
 import { PackAwaitPanel, type PackAwaitProgress } from './PackAwaitPanel.tsx'
 import { HostPresence } from './HostPresence.tsx'
@@ -431,14 +431,9 @@ export function GameScreen(props: {
             ) : null}
           </article>
         ) : conference?.lobby ? (
-          <ConferenceRosterPanel
-            roster={conference.roster}
-            masterOffline={conference.masterOffline}
-            isMaster={conference.isMaster}
-            onStart={conference.onLobbyStart}
-            onReady={conference.onReady}
-            readyDisabled={conference.readyDisabled}
+          <ConferenceLobbyStatus
             waitingMaster={conference.waitingMaster}
+            masterOffline={conference.masterOffline}
           />
         ) : (
         <div className="board" role="grid" aria-label="Игровое поле">
@@ -512,54 +507,74 @@ export function GameScreen(props: {
         )}
         </div>
 
-      {conference?.lobby || conference?.awaitingPack ? null : (
-      <section className="players">
-        {visiblePlayers.map((player) => {
-          const playerId = player.id
-          const label = conferencePlayerLabel(player.name, hasMatchData)
-          const active = context.activePlayerId === playerId
-          const missed = context.missedIds.includes(playerId)
-          const chooses = path.startsWith('choosing') && context.chooserId === playerId
-          const flareAt = context.falseStarts[playerId]
-          const cooling = falseStartCooling(flareAt, penaltyClock)
-          const conferenceButton = Boolean(conference?.layout)
-          const canControl = canBuzzPlayer(conferenceButton, conference?.selfClientId, player)
-          const isSelf = conferenceButton && canControl
-          const displayOnly = conferenceButton && !canControl
-          const key = conferenceButton ? '' : isKeyboardPlayer(playerId) ? buzzKeyLabel[playerId] : ''
-          return (
-            <div
-              key={playerId}
-              className={['player', active ? 'active' : '', isSelf ? 'self' : '', displayOnly ? 'display-only' : '']
-                .filter(Boolean)
-                .join(' ')}
-              role="group"
-              aria-label={`${label}: ${hasMatchData ? player.score : '—'}`}
-            >
-              <div className="player-meta">
-                <strong>{label}</strong>
-                <span>{hasMatchData ? player.score : '—'}</span>
-              </div>
-              <button
-                type="button"
-                key={cooling ? 'penalty' : 'ready'}
-                className={['buzzer', chooses ? 'chooser' : '', cooling ? 'false-start' : ''].filter(Boolean).join(' ')}
-                style={
-                  cooling
-                    ? { animationDuration: `${falseStartMs}ms`, animationPlayState: paused ? 'paused' : 'running' }
-                    : undefined
-                }
-                disabled={displayOnly || cooling || ((missed || !buttonsOpen) && !canFalseStart)}
-                onClick={() => onBuzz(playerId)}
+      {conference?.layout ? (
+        <ConferencePlayersRow
+          mode={conference.lobby || conference.awaitingPack ? 'lobby' : 'match'}
+          tiles={conference.tiles ?? []}
+          bindVideo={conference.bindVideo ?? ignoreConferenceVideoBinding}
+          selfClientId={conference.selfClientId}
+          roster={conference.roster}
+          players={visiblePlayers}
+          hasMatchData={hasMatchData}
+          path={path}
+          activePlayerId={context.activePlayerId}
+          chooserId={context.chooserId}
+          missedIds={context.missedIds}
+          falseStarts={context.falseStarts}
+          penaltyClock={penaltyClock}
+          paused={paused}
+          buttonsOpen={buttonsOpen}
+          canFalseStart={canFalseStart}
+          earlyLive={earlyLive}
+          onBuzz={onBuzz}
+          layout
+        />
+      ) : (
+        <section className="players">
+          {visiblePlayers.map((player) => {
+            const playerId = player.id
+            const active = context.activePlayerId === playerId
+            const missed = context.missedIds.includes(playerId)
+            const chooses = path.startsWith('choosing') && context.chooserId === playerId
+            const flareAt = context.falseStarts[playerId]
+            const cooling = falseStartCooling(flareAt, penaltyClock)
+            const key = isKeyboardPlayer(playerId) ? buzzKeyLabel[playerId] : ''
+            return (
+              <div
+                key={playerId}
+                className={['player', active ? 'active' : ''].filter(Boolean).join(' ')}
+                role="group"
+                aria-label={`${player.name}: ${player.score}`}
               >
-                {chooses ? 'выбирайте вопрос' : missed ? 'Уже отвечал' : label}
-                {earlyLive ? <span className="visually-hidden">, вопрос ещё читается</span> : null}
-              </button>
-              <p className="key-hint">{key ? (earlyLive ? `${key} · уже можно` : key) : isSelf ? 'Пробел' : ''}</p>
-            </div>
-          )
-        })}
-      </section>
+                <div className="player-meta">
+                  <strong>{player.name}</strong>
+                  <span>{player.score}</span>
+                </div>
+                <button
+                  type="button"
+                  key={cooling ? 'penalty' : 'ready'}
+                  className={['buzzer', chooses ? 'chooser' : '', cooling ? 'false-start' : '']
+                    .filter(Boolean)
+                    .join(' ')}
+                  style={
+                    cooling
+                      ? {
+                          animationDuration: `${falseStartMs}ms`,
+                          animationPlayState: paused ? 'paused' : 'running',
+                        }
+                      : undefined
+                  }
+                  disabled={cooling || ((missed || !buttonsOpen) && !canFalseStart)}
+                  onClick={() => onBuzz(playerId)}
+                >
+                  {chooses ? 'выбирайте вопрос' : missed ? 'Уже отвечал' : player.name}
+                  {earlyLive ? <span className="visually-hidden">, вопрос ещё читается</span> : null}
+                </button>
+                <p className="key-hint">{key ? (earlyLive ? `${key} · уже можно` : key) : ''}</p>
+              </div>
+            )
+          })}
+        </section>
       )}
         </div>
         <aside className="talk">
@@ -584,18 +599,37 @@ export function GameScreen(props: {
             conversation={conference?.remoteSnapshot?.conversation}
             chat={conference?.chatLines ?? conference?.remoteSnapshot?.chat}
             onSendChat={conference?.onSendChat}
+            aboveComposer={
+              conference?.layout ? (
+                <>
+                  {conference.lobby && !conference.awaitingPack && conference.isMaster && conference.onLobbyStart ? (
+                    <button type="button" className="primary chat-lobby-start" onClick={conference.onLobbyStart}>
+                      Начать игру
+                    </button>
+                  ) : null}
+                  {conference.lobby && !conference.awaitingPack && !conference.isMaster && conference.onReady ? (
+                    <button
+                      type="button"
+                      className="primary chat-lobby-start"
+                      disabled={conference.readyDisabled}
+                      onClick={conference.onReady}
+                    >
+                      Я готов
+                    </button>
+                  ) : null}
+                  <ConferenceMediaControls
+                    micLive={Boolean((conference.tiles ?? []).find((tile) => tile.isLocal)?.micLive)}
+                    cameraOn={Boolean((conference.tiles ?? []).find((tile) => tile.isLocal)?.cameraOn)}
+                    mediaBusy={conference.mediaBusy}
+                    onToggleMic={() => conference.onToggleMic?.()}
+                    onToggleCamera={() => conference.onToggleCamera?.()}
+                    onNextCamera={() => conference.onNextCamera?.()}
+                  />
+                </>
+              ) : null
+            }
           />
         </aside>
-        {conference?.layout ? (
-          <ConferenceVideoStrip
-            tiles={conference.tiles ?? []}
-            mediaBusy={conference.mediaBusy}
-            onToggleMic={() => conference.onToggleMic?.()}
-            onToggleCamera={() => conference.onToggleCamera?.()}
-            onNextCamera={() => conference.onNextCamera?.()}
-            bindVideo={conference.bindVideo ?? ignoreConferenceVideoBinding}
-          />
-        ) : null}
       </section>
       {inviteOpen && conference?.inviteUrl && conference.onCopyInvite ? (
         <InviteDialog

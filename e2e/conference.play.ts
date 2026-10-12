@@ -216,6 +216,38 @@ test.describe('конференция на BroadcastChannel', () => {
     await joiner.getByRole('button', { name: 'Подключиться' }).click()
     await expect(joiner.getByRole('button', { name: 'Я готов' })).toBeDisabled({ timeout: 60_000 })
   })
+
+  test('в лобби у гостя виден статус загрузки/готовности, не обрезан рядом игроков', async ({ browser }) => {
+    const context = await browser.newContext()
+    await context.grantPermissions(['clipboard-read', 'clipboard-write'])
+    const master = await context.newPage()
+    const joiner = await context.newPage()
+    await master.goto('/?mock=1&transport=broadcast')
+    await master.getByLabel('Модель').selectOption('mock')
+    await master.getByRole('radio', { name: 'Конференция' }).check()
+    await master.getByLabel('Пакет вопросов').selectOption('demo')
+    await master.getByLabel('Ваше имя').fill('Мастер')
+    await master.getByRole('button', { name: 'Начать игру' }).click()
+    await expect(master.getByRole('button', { name: 'Начать игру' })).toBeVisible()
+
+    const invite = await copyInvite(master)
+    const localInvite = localInviteUrl(invite)
+    const joinerUrl = localInvite.includes('mock=1')
+      ? localInvite
+      : `${localInvite}${localInvite.includes('?') ? '&' : '?'}mock=1`
+    await joiner.goto(joinerUrl)
+    await joiner.getByLabel('Ваше имя').fill('Гость')
+    await joiner.getByRole('button', { name: 'Подключиться' }).click()
+    await expect(joiner.getByRole('button', { name: 'Я готов' })).toBeEnabled({ timeout: 60_000 })
+
+    const guestProgress = master.locator('.conference-player .player-lobby-progress').filter({ hasText: /Пакет|Загрузка/ })
+    await expect(guestProgress.first()).toBeVisible({ timeout: 30_000 })
+    const box = await guestProgress.first().boundingBox()
+    expect(box?.height ?? 0).toBeGreaterThan(8)
+
+    await joiner.getByRole('button', { name: 'Я готов' }).click()
+    await expect(master.getByText('Пакет сверен · готов')).toBeVisible({ timeout: 15_000 })
+  })
 })
 
 async function hear(page: Page, text: string): Promise<void> {

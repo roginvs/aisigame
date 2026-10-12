@@ -1,4 +1,4 @@
-import { useEffect, useLayoutEffect, useRef, useState, useSyncExternalStore } from 'react'
+import { useEffect, useLayoutEffect, useRef, useState, useSyncExternalStore, type ReactNode } from 'react'
 import { getTrace, subscribeTrace, type ChatRole, type TraceEntry } from '../debug/trace.ts'
 import type { ConferenceChatLine, ConferenceConversationLine } from '../conference/messages.ts'
 import { chatPinKey, isAtTail, pinColumn } from './chatScroll.ts'
@@ -9,6 +9,8 @@ export function ConversationChat(props?: {
   chat?: ConferenceChatLine[]
   onSendChat?: (text: string) => void
   composerLabel?: string
+  /** Над медиа-рядом и compose — например «Начать игру». */
+  aboveComposer?: ReactNode
 }) {
   const entries = useSyncExternalStore(subscribeTrace, getTrace, getTrace)
   const voiceLines: VoiceStreamLine[] =
@@ -61,35 +63,40 @@ export function ConversationChat(props?: {
           )}
         </div>
       </div>
-      {props?.onSendChat ? (
-        <form
-          className="chat-compose"
-          onSubmit={(event) => {
-            event.preventDefault()
-            const text = draft.trim()
-            if (!text) return
-            props.onSendChat?.(text)
-            setDraft('')
-          }}
-        >
-          <label className="visually-hidden" htmlFor="chat-compose">
-            {props.composerLabel ?? 'Сообщение в чат'}
-          </label>
-          <input
-            id="chat-compose"
-            type="text"
-            value={draft}
-            placeholder="Сообщение в чат…"
-            autoComplete="off"
-            enterKeyHint="send"
-            maxLength={500}
-            onChange={(event) => setDraft(event.target.value)}
-          />
-          <button type="submit" className="ghost">
-            <span aria-hidden="true">&#8593;</span>
-            <span>Отправить</span>
-          </button>
-        </form>
+      {props?.aboveComposer || props?.onSendChat ? (
+        <div className="chat-footer">
+          {props?.aboveComposer}
+          {props?.onSendChat ? (
+            <form
+              className="chat-compose"
+              onSubmit={(event) => {
+                event.preventDefault()
+                const text = draft.trim()
+                if (!text) return
+                props.onSendChat?.(text)
+                setDraft('')
+              }}
+            >
+              <label className="visually-hidden" htmlFor="chat-compose">
+                {props.composerLabel ?? 'Сообщение в чат'}
+              </label>
+              <input
+                id="chat-compose"
+                type="text"
+                value={draft}
+                placeholder="Сообщение в чат…"
+                autoComplete="off"
+                enterKeyHint="send"
+                maxLength={500}
+                onChange={(event) => setDraft(event.target.value)}
+              />
+              <button type="submit" className="ghost">
+                <span aria-hidden="true">&#8593;</span>
+                <span>Отправить</span>
+              </button>
+            </form>
+          ) : null}
+        </div>
       ) : null}
     </aside>
   )

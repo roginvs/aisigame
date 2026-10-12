@@ -169,7 +169,34 @@ h1, h2, p { margin: 0; }
 }
 
 .conference-layout .layout {
-  grid-template-columns: minmax(0, 1fr) minmax(320px, 420px) minmax(120px, 180px);
+  grid-template-columns: minmax(0, 1fr) minmax(320px, 420px);
+  min-height: 0;
+  overflow: hidden;
+}
+
+.conference-layout .talk {
+  overflow: hidden;
+}
+
+.conference-layout .talk .chat-column {
+  flex: 1 1 0;
+  min-height: 0;
+}
+
+.conference-lobby-status {
+  display: grid;
+  gap: 12px;
+  width: 100%;
+  padding: 24px 16px;
+  align-content: center;
+  justify-items: center;
+  text-align: center;
+}
+
+.lobby-status-line {
+  margin: 0;
+  font-size: clamp(1.1rem, 2.4vw, 1.45rem);
+  font-weight: 600;
 }
 
 .conference-roster {
@@ -238,7 +265,7 @@ h1, h2, p { margin: 0; }
   display: grid;
   grid-template-columns: 1fr auto;
   gap: 8px;
-  margin: 0 8px 8px;
+  margin: 0 8px;
   padding: 5px;
   background: #1a2430;
   border: 1px solid #3d5168;
@@ -299,6 +326,204 @@ h1, h2, p { margin: 0; }
   min-width: 0;
 }
 
+.conference-layout .play {
+  /* Ряд по высоте контента — не резервируем пустые 34% под одну карточку. */
+  grid-template-rows: minmax(0, 1fr) auto;
+}
+
+.conference-players {
+  justify-content: safe center;
+  align-items: stretch;
+  align-content: start;
+  max-height: 100%;
+  min-height: 0;
+  overflow-x: auto;
+  overflow-y: hidden;
+}
+
+.conference-player {
+  display: grid;
+  /* Кадр задаёт высоту сам (aspect-ratio), низ — счёт/buzzer. */
+  grid-template-rows: auto auto;
+  min-width: 0;
+  min-height: 0;
+  width: 100%;
+  height: auto;
+  max-height: 100%;
+  gap: 6px;
+  padding: 10px;
+  align-content: start;
+  overflow: hidden;
+}
+
+.conference-player.stale {
+  opacity: 0.45;
+  filter: grayscale(0.85);
+}
+
+.conference-player.stale .buzzer {
+  filter: none;
+}
+
+.conference-player .video-tile {
+  display: block;
+  min-height: 0;
+  padding: 0;
+  background: transparent;
+  border: 0;
+}
+
+.conference-player .video-frame {
+  position: relative;
+  width: 100%;
+  aspect-ratio: 4 / 3;
+  height: auto;
+  /* Без max-height: иначе ширина 100% + потолок высоты даёт плоскую полоску. */
+  min-height: 0;
+  max-height: none;
+  margin-inline: 0;
+  border: 1px solid #3d5168;
+  background: #0f1620;
+}
+
+.conference-player .video-placeholder {
+  font-size: clamp(0.85rem, 1.5vw, 1.15rem);
+}
+
+.conference-player .video-placeholder-muted {
+  color: #8091a4;
+  font-size: 0.85rem;
+  font-weight: 500;
+}
+
+.conference-player .video-meta {
+  position: absolute;
+  right: 0;
+  bottom: 0;
+  left: 0;
+  justify-content: space-between;
+  gap: 6px;
+  padding: 4px 8px;
+  background: linear-gradient(transparent, rgb(0 0 0 / 55%));
+  pointer-events: none;
+}
+
+.conference-player .video-name {
+  color: #f4efe4;
+  font-size: 0.78rem;
+  font-weight: 600;
+}
+
+.conference-player.speaking .video-frame,
+.conference-player .video-tile.speaking .video-frame {
+  animation: conference-speaker-pulse 520ms ease-in-out infinite alternate;
+}
+
+.conference-player .buzzer {
+  min-height: 48px;
+  font-size: clamp(0.75rem, 1.4vw, 1.05rem);
+}
+
+.conference-player .player-meta {
+  font-size: clamp(0.85rem, 1.4vw, 1.1rem);
+}
+
+.player-lobby-progress {
+  display: grid;
+  gap: 4px;
+  flex: none;
+  min-height: 2.4rem;
+}
+
+.player-lobby-progress .roster-bar {
+  margin-top: 0;
+}
+
+.player-lobby-progress .status-line {
+  font-size: 0.78rem;
+  margin: 0;
+  line-height: 1.25;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.player-lobby-progress.is-ready .status-line {
+  color: #8fd6a8;
+  font-weight: 600;
+}
+
+.player-game-slot {
+  display: grid;
+  gap: 6px;
+  flex: none;
+  min-width: 0;
+}
+
+.player-lobby-note {
+  margin: 0;
+  color: #d5dbe3;
+  font-size: 0.85rem;
+}
+
+.chat-footer {
+  flex: none;
+  display: grid;
+  gap: 10px;
+  padding: 8px 0 max(8px, env(safe-area-inset-bottom));
+  background: #121920;
+  border-top: 1px solid #3d5168;
+}
+
+.chat-lobby-start {
+  width: calc(100% - 16px);
+  margin: 0 8px;
+  min-height: 48px;
+}
+
+.chat-media-controls {
+  display: grid;
+  gap: 10px;
+  margin: 0 8px;
+}
+
+.chat-media-controls.pair {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.chat-media-controls.with-next {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+.chat-media-controls .video-btn {
+  display: inline-flex;
+  gap: 8px;
+  align-items: center;
+  justify-content: center;
+  min-height: 44px;
+  padding-inline: 10px;
+  font-size: 0.8rem;
+}
+
+.video-btn-icon {
+  display: inline-grid;
+  width: 1.2rem;
+  height: 1.2rem;
+  flex: none;
+  place-items: center;
+}
+
+.video-btn-icon svg {
+  display: block;
+  width: 1.2rem;
+  height: 1.2rem;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 2;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
 .video-tile {
   display: grid;
   gap: 6px;
@@ -324,6 +549,12 @@ h1, h2, p { margin: 0; }
   animation: conference-speaker-pulse 520ms ease-in-out infinite alternate;
 }
 
+.conference-player .video-tile.speaking {
+  animation: none;
+  border: 0;
+  box-shadow: none;
+}
+
 .video-frame {
   aspect-ratio: 4 / 3;
   border-radius: 8px;
@@ -336,7 +567,9 @@ h1, h2, p { margin: 0; }
 .video-frame video {
   width: 100%;
   height: 100%;
-  object-fit: cover;
+  /* Целиком в кадр: чёрные поля по краям, без обрезки лиц. */
+  object-fit: contain;
+  background: #0f1620;
 }
 
 .video-placeholder {
@@ -395,6 +628,7 @@ h1, h2, p { margin: 0; }
 
 @media (prefers-reduced-motion: reduce) {
   .video-tile.speaking,
+  .conference-player .video-tile.speaking .video-frame,
   .host.speaking {
     animation: none;
     border-color: #fff0ae;
@@ -408,6 +642,27 @@ h1, h2, p { margin: 0; }
   }
   .conference-layout .layout {
     grid-template-columns: 1fr;
+    overflow: visible;
+  }
+  .conference-layout .conference-players {
+    display: flex;
+    flex-direction: row;
+    flex-wrap: nowrap;
+    align-items: stretch;
+    gap: 10px;
+    padding-bottom: 4px;
+    max-height: none;
+    overflow-x: auto;
+    overflow-y: visible;
+    scroll-snap-type: x proximity;
+    scrollbar-width: thin;
+  }
+  .conference-layout .conference-player {
+    flex: 0 0 clamp(180px, 48vw, 320px);
+    max-width: min(320px, 85vw);
+    height: auto;
+    max-height: none;
+    scroll-snap-align: start;
   }
   .video-strip {
     flex-direction: row;
@@ -420,6 +675,10 @@ h1, h2, p { margin: 0; }
   .video-tile {
     flex: 0 0 clamp(140px, 38vw, 190px);
     scroll-snap-align: start;
+  }
+  .chat-media-controls.pair,
+  .chat-media-controls.with-next {
+    grid-template-columns: 1fr;
   }
 }
 
@@ -735,8 +994,10 @@ button.continue-with-file .continue-file {
   display: grid;
   grid-template-columns: minmax(0, 1fr) minmax(380px, 480px);
   gap: 12px;
+  height: 100%;
   min-height: 0;
   min-width: 0;
+  overflow: hidden;
 }
 
 .layout > * { min-width: 0; }
@@ -766,9 +1027,13 @@ button.continue-with-file .continue-file {
   gap: 10px;
   min-width: 0;
   min-height: 0;
+  overflow: hidden;
 }
 
-.talk .chat-column { flex: 1; }
+.talk .chat-column {
+  flex: 1 1 0;
+  min-height: 0;
+}
 .play .players { grid-row: 2; }
 
 .board {
@@ -1058,6 +1323,24 @@ button.continue-with-file .continue-file {
   gap: 12px;
 }
 
+/*
+  Мало игроков — карточки широкие (до ~400px, вдвое против прежних 200).
+  Много — делят ряд поровну и сжимаются до min, при переполнении горизонтальный скролл.
+*/
+.players.conference-players {
+  display: flex;
+  flex-flow: row nowrap;
+  justify-content: safe center;
+  align-items: stretch;
+  gap: 12px;
+}
+
+.players.conference-players > .conference-player {
+  flex: 1 1 0;
+  min-width: min(160px, 100%);
+  max-width: min(400px, 100%);
+}
+
 .player { display: grid; gap: 10px; min-width: 0; }
 .player.active { outline: 3px solid #e2c27a; }
 
@@ -1226,24 +1509,58 @@ button.buzzer.chooser:disabled {
 }
 
 @media (max-width: 1100px) {
+  /* Узкий экран / планшет: страница снова вертикально скроллится, без locked viewport. */
   .table {
     grid-template-rows: auto auto;
     height: auto;
     min-height: 100dvh;
     overflow: visible;
   }
-  .layout, .play, .status { grid-template-columns: 1fr; }
+  .layout,
+  .conference-layout .layout {
+    grid-template-columns: 1fr;
+    height: auto;
+    overflow: visible;
+  }
   .layout,
   .play,
   .stage,
-  .talk {
+  .talk,
+  .conference-layout .talk {
     min-height: auto;
+    overflow: visible;
   }
-  .play {
+  .play,
+  .conference-layout .play {
     grid-template-rows: auto auto;
+  }
+  .conference-layout .talk .chat-column {
+    flex: none;
+    min-height: min(360px, 52dvh);
+  }
+  .conference-players {
+    max-height: none;
+    height: auto;
+    overflow-x: auto;
+    overflow-y: visible;
+  }
+  .conference-player {
+    height: auto;
+    max-height: none;
+    overflow: visible;
+    grid-template-rows: auto auto;
+  }
+  .conference-player .video-tile {
+    grid-template-rows: auto auto;
+  }
+  .conference-player .video-frame {
+    height: auto;
+    aspect-ratio: 4 / 3;
+    max-height: none;
   }
   .board {
     min-height: min(560px, 68dvh);
+    height: auto;
   }
   .question {
     min-height: min(520px, 68dvh);
@@ -1415,35 +1732,35 @@ button.buzzer.chooser:disabled {
     padding: 10px;
   }
 
-  .chat-compose {
+  .chat-footer {
     position: sticky;
     bottom: 0;
-    margin: 0 6px max(6px, env(safe-area-inset-bottom));
+    z-index: 2;
   }
 
-  .conference-roster {
-    align-content: start;
-    padding: 4px;
+  .chat-compose {
+    margin: 0 6px;
   }
 
-  .conference-roster .primary {
-    width: 100%;
-    min-height: 48px;
+  .conference-lobby-status {
+    padding: 16px 8px;
   }
 
-  .video-strip {
+  .conference-layout .conference-players {
     margin-inline: -2px;
   }
 
-  .video-tile {
-    flex-basis: min(42vw, 160px);
+  .conference-layout .conference-player {
+    flex-basis: min(52vw, 220px);
+    max-width: min(220px, 70vw);
   }
 
-  .video-controls {
-    grid-template-columns: 1fr;
+  .chat-lobby-start,
+  .chat-media-controls {
+    margin-inline: 6px;
   }
 
-  .video-btn {
+  .chat-media-controls .video-btn {
     min-height: 40px;
   }
 
@@ -1483,7 +1800,8 @@ button.buzzer.chooser:disabled {
     padding-inline: 8px;
   }
 
-  .video-tile {
-    flex-basis: 46vw;
+  .conference-layout .conference-player {
+    flex-basis: min(70vw, 280px);
+    max-width: 85vw;
   }
 }

@@ -1,6 +1,6 @@
 import { expect, test, type Page } from '@playwright/test'
 
-test('joiner на телефоне не обрезан и управляется без горизонтального скролла страницы', async ({ browser }) => {
+test('joiner на телефоне скроллит страницу и дотягивается до чата без бокового скролла', async ({ browser }) => {
   const context = await browser.newContext({ viewport: { width: 390, height: 844 } })
   const master = await context.newPage()
   const joiner = await context.newPage()
@@ -26,14 +26,34 @@ test('joiner на телефоне не обрезан и управляется
   await expect(joiner.getByText('Введите ключ и начните игру', { exact: true })).toHaveCount(0)
 
   await expectNoPageSideScroll(joiner)
-  await expect(joiner.locator('[data-air]')).toHaveCount(0)
-  await expect(joiner.getByText('Введите ключ и начните игру', { exact: true })).toHaveCount(0)
-  await expect(joiner.getByPlaceholder('Сообщение в чат…')).toBeVisible()
-  await expect(joiner.getByRole('button', { name: 'Отправить' })).toBeVisible()
-  await expect(joiner.locator('.video-strip')).toBeVisible()
+  await expectPageCanScrollVertically(joiner)
+
+  const compose = joiner.getByPlaceholder('Сообщение в чат…')
+  const send = joiner.getByRole('button', { name: 'Отправить' })
+  const ready = joiner.getByRole('button', { name: 'Я готов' })
+  const mic = joiner.getByRole('button', { name: 'Включить микрофон' })
+  await expect(joiner.getByRole('region', { name: 'Участники' })).toBeVisible()
+  await ready.scrollIntoViewIfNeeded()
+  await expect(ready).toBeVisible()
+  await mic.scrollIntoViewIfNeeded()
+  await expect(mic).toBeVisible()
+  await compose.scrollIntoViewIfNeeded()
+  await expect(compose).toBeVisible()
+  await expect(send).toBeVisible()
+  const composeBox = await compose.boundingBox()
+  expect(composeBox).not.toBeNull()
+  if (composeBox) {
+    expect(composeBox.y + composeBox.height).toBeGreaterThan(0)
+    expect(composeBox.y).toBeLessThan(844)
+  }
+
   await joiner.getByRole('button', { name: 'Включить камеру' }).click()
-  await expect(joiner.getByRole('button', { name: 'Следующая камера' })).toBeVisible()
-  await joiner.getByRole('button', { name: 'Следующая камера' }).click()
+  // «Следующая камера» только при >1 videoinput — в headless часто одна/ноль.
+  const nextCam = joiner.getByRole('button', { name: 'Следующая камера' })
+  if (await nextCam.count()) {
+    await expect(nextCam).toBeVisible()
+    await nextCam.click()
+  }
 
   await joiner.getByRole('button', { name: 'Я готов' }).click()
   await master.getByRole('button', { name: 'Начать игру' }).click()
@@ -56,12 +76,40 @@ test('joiner на телефоне не обрезан и управляется
   await context.close()
 })
 
+test('на планшете страница тоже скроллится и кнопки чата доступны', async ({ browser }) => {
+  const context = await browser.newContext({ viewport: { width: 768, height: 1024 } })
+  const page = await context.newPage()
+  await page.goto('/?mock=1&transport=broadcast')
+  await page.getByLabel('Модель').selectOption('mock')
+  await page.getByRole('radio', { name: 'Конференция' }).check()
+  await page.getByLabel('Пакет вопросов').selectOption('demo')
+  await page.getByLabel('Ваше имя').fill('Мастер')
+  await page.getByRole('button', { name: 'Начать игру' }).click()
+  await expect(page.getByRole('button', { name: 'Начать игру' })).toBeVisible()
+  await expectPageCanScrollVertically(page)
+  await page.getByPlaceholder('Сообщение в чат…').scrollIntoViewIfNeeded()
+  await expect(page.getByPlaceholder('Сообщение в чат…')).toBeVisible()
+  await expect(page.getByRole('button', { name: 'Включить микрофон' })).toBeVisible()
+  await expectNoPageSideScroll(page)
+  await context.close()
+})
+
 async function expectNoPageSideScroll(page: Page): Promise<void> {
   const sizes = await page.evaluate(() => ({
     client: document.documentElement.clientWidth,
     scroll: document.documentElement.scrollWidth,
   }))
   expect(sizes.scroll).toBeLessThanOrEqual(sizes.client + 1)
+}
+
+async function expectPageCanScrollVertically(page: Page): Promise<void> {
+  const sizes = await page.evaluate(() => ({
+    client: document.documentElement.clientHeight,
+    scroll: document.documentElement.scrollHeight,
+    overflowY: getComputedStyle(document.querySelector('main.table')!).overflowY,
+  }))
+  // Контент выше окна или хотя бы страница не locked (overflow не hidden у main).
+  expect(sizes.overflowY === 'visible' || sizes.overflowY === 'auto' || sizes.scroll > sizes.client).toBe(true)
 }
 
 function localInviteUrl(invite: string): string {

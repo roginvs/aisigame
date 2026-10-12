@@ -13,7 +13,7 @@ import { nextCameraDeviceId } from './camera.ts'
 import { createSpeakerActivity } from './speakerActivity.ts'
 import { conferenceAudioStream, createConferenceAudioOutput } from './conferenceAudio.ts'
 import { PACK_CHANNEL_HIGH_WATER_BYTES, PACK_CHANNEL_LOW_WATER_BYTES } from './chunks.ts'
-import { mediaStreamTrackFromJitsi, micTrackIsDead } from './micTrack.ts'
+import { jitsiVideoLive, mediaStreamTrackFromJitsi, micTrackIsDead } from './micTrack.ts'
 import { pushTrace } from '../debug/trace.ts'
 
 type JitsiMeetJS = {
@@ -484,7 +484,7 @@ export async function connectJitsiConference(input: {
         name,
         isLocal: false,
         micLive: Boolean(remoteAudio.get(id) && !remoteAudio.get(id)?.isMuted?.()),
-        cameraOn: remoteVideo.has(id),
+        cameraOn: jitsiVideoLive(remoteVideo.get(id)),
         speaking: speakerActivity.has(id),
       })
     }
@@ -499,7 +499,7 @@ export async function connectJitsiConference(input: {
   function attachVideo(id: string): void {
     const element = videoBindings.get(id)
     const track = id === localId() ? localVideo : remoteVideo.get(id)
-    if (!element || !track) return
+    if (!element || !track || !jitsiVideoLive(track)) return
     track.attach(element)
     void element.play().catch(() => undefined)
   }
@@ -689,6 +689,15 @@ export async function connectJitsiConference(input: {
     const jitsiTrack = track as JitsiTrack
     const userId = jitsiTrack.isLocal() ? localId() : jitsiTrack.getParticipantId?.()
     if (userId && jitsiTrack.isMuted?.()) speakerActivity.clear(userId)
+    // Mute видео оставляет <video> на последнем кадре — снимаем дорожку и даём UI placeholder.
+    if (userId && jitsiTrack.getType() === 'video') {
+      const el = videoBindings.get(userId)
+      if (jitsiTrack.isMuted?.()) {
+        if (el) jitsiTrack.detach(el)
+      } else {
+        attachVideo(userId)
+      }
+    }
     emitTiles()
   })
 
