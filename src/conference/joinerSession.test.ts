@@ -1,4 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
+import { buildCommit } from '../buildInfo.ts'
 import { sha256Hex } from '../game/savedGame.ts'
 import { chunkToWire, splitChunks } from './chunks.ts'
 import { JoinerSession, type JoinerPackCache, type JoinerLobbyState } from './joinerSession.ts'
@@ -48,6 +49,7 @@ function makeSession(input: {
   const transport = new TestTransport()
   const lobby: JoinerLobbyState[] = []
   const errors: string[] = []
+  const fatals: string[] = []
   const onReady = vi.fn(input.onReady ?? (() => undefined))
   const session = new JoinerSession({
     transport,
@@ -60,16 +62,18 @@ function makeSession(input: {
       onLobby: (state) => lobby.push(state),
       onPackReady: onReady,
       onError: (message) => errors.push(message),
+      onFatalError: (message) => fatals.push(message),
     },
   })
-  return { session, transport, lobby, errors, onReady }
+  return { session, transport, lobby, errors, fatals, onReady }
 }
 
-function offer(hash: string, size: number): PackOfferMessage {
+function offer(hash: string, size: number, commit = buildCommit()): PackOfferMessage {
   return {
     type: 'packOffer',
     authorityToken: 'master-token',
     targetClientId: 'joiner',
+    commit,
     hash,
     size,
     name: 'Пакет',
@@ -77,10 +81,11 @@ function offer(hash: string, size: number): PackOfferMessage {
   }
 }
 
-function snapshot(phase = 'lobby'): SnapshotMessage {
+function snapshot(phase = 'lobby', commit = buildCommit()): SnapshotMessage {
   return {
     type: 'snapshot',
     authorityToken: 'master-token',
+    commit,
     phase,
     players: [{ id: 1, name: 'Мастер', score: 0, clientId: 'master' }],
     presence: [
@@ -351,5 +356,27 @@ describe('JoinerSession pack cache and transfer', () => {
       expect(transport.sent.some((message) => message.type === 'ready')).toBe(true)
     })
     session.dispose()
+  })
+
+  it('отказывается при чужом commit мастера и больше не принимает пакет', async () => {
+    vi.stubGlobal('window', globalThis)
+    const bytes = new TextEncoder().encode('wrong build pack')
+    const hash = await sha256Hex(bytes)
+    const cache: JoinerPackCache = {
+      get: vi.fn(async () => bytes),
+      put: vi.fn(async () => undefined),
+      delete: vi.fn(async () => undefined),
+    }
+    const { transport, fatals, onReady } = makeSession({ cache })
+
+    transport.emit(snapshot('lobby', 'other-commit'))
+    await eventually(() => {
+      expect(fatals[0]).toMatch(/Версия не совпадает с мастером/)
+      expect(fatals[0]).toContain('other-commit')
+      expect(fatals[0]).toContain(buildCommit())
+    })
+    transport.emit(offer(hash, bytes.byteLength, 'other-commit'))
+    await Promise.resolve()
+    expect(onReady).not.toHaveBeenCalled()
   })
 })

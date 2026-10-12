@@ -1,3 +1,4 @@
+import { buildCommit } from '../buildInfo.ts'
 import type { GameContext } from '../game/types.ts'
 import type { ConferenceChatLine, ConferenceSnapshot, ConferenceSnapshotPresence } from './messages.ts'
 import type { RosterEntry } from './roster.ts'
@@ -29,6 +30,7 @@ export function buildConferenceSnapshot(input: {
   }))
 
   return {
+    commit: buildCommit(),
     phase: input.phase,
     players: input.context.players.map((player) => ({
       id: player.id,

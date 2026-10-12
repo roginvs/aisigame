@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest'
+import { buildCommit } from '../buildInfo.ts'
 import type { ConferenceMessage } from './messages.ts'
 import { CHUNK_BYTES, createPackTransferMaster } from './packTransfer.ts'
 import type { ConferenceTransport } from './transport.ts'
@@ -28,6 +29,7 @@ describe('createPackTransferMaster', () => {
 
     const offers = messages.filter((message) => message.type === 'packOffer')
     expect(offers.map((message) => message.targetClientId)).toEqual(['first', 'second'])
+    expect(offers.every((message) => message.commit === buildCommit())).toBe(true)
     const chunks = messages.filter((message) => message.type === 'packChunk')
     expect(chunks.map((message) => message.targetClientId)).toEqual(['first', 'second'])
   })

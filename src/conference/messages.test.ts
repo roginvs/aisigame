@@ -33,6 +33,30 @@ describe('isConferenceMessage', () => {
     ).toBe(false)
   })
 
+  it('принимает packOffer и snapshot с commit и без него', () => {
+    expect(
+      isConferenceMessage({
+        type: 'packOffer',
+        authorityToken: 'master',
+        commit: 'abc1234',
+        hash: 'hash',
+        size: 10,
+        name: 'Пакет',
+        summary: '',
+      }),
+    ).toBe(true)
+    expect(
+      isConferenceMessage({
+        type: 'packOffer',
+        authorityToken: 'master',
+        hash: 'hash',
+        size: 10,
+        name: 'Пакет',
+        summary: '',
+      }),
+    ).toBe(true)
+  })
+
   it('проверяет отдельное подтверждение сверки пакета', () => {
     expect(
       isConferenceMessage({

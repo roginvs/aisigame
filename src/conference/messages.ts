@@ -40,6 +40,8 @@ export type ConferenceSnapshotPresence = {
 }
 
 export type ConferenceSnapshot = {
+  /** Хеш коммита сборки мастера (`buildCommit`); joiner сверяет со своим. Старые мастера могут не слать. */
+  commit?: string
   phase: string
   players: ConferenceSnapshotPlayer[]
   presence: ConferenceSnapshotPresence[]
@@ -87,6 +89,8 @@ export type PackOfferMessage = {
   authorityToken: string
   /** Пусто у старых клиентов; иначе пакет предназначен только этому клиенту. */
   targetClientId?: string
+  /** Хеш коммита сборки мастера; joiner сверяет до загрузки пакета. Старые мастера могут не слать. */
+  commit?: string
   hash: string
   size: number
   name: string
@@ -191,6 +195,7 @@ export function isConferenceMessage(value: unknown): value is ConferenceMessage 
       return (
         authority(value) &&
         optionalString(value.targetClientId, 200) &&
+        optionalString(value.commit, 80) &&
         shortString(value.hash, 128) &&
         integer(value.size, 0) && (value.size as number) <= 120 * 1024 * 1024 &&
         shortString(value.name, 300) &&
@@ -272,6 +277,7 @@ function authority(value: Record<string, unknown>): boolean {
 }
 
 function validSnapshot(value: Record<string, unknown>): boolean {
+  if (!optionalString(value.commit, 80)) return false
   if (!shortString(value.phase, 100) || !Array.isArray(value.players) || !Array.isArray(value.presence)) return false
   if (value.players.length > 1_000 || value.presence.length > 1_000) return false
   if (!value.players.every(validPlayer) || !value.presence.every(validPresence)) return false

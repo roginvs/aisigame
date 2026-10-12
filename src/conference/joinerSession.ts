@@ -1,3 +1,4 @@
+import { masterBuildMismatchMessage } from './buildMatch.ts'
 import { decidePackGate } from './packGate.ts'
 import { deletePack, getPack, putPack } from './packDb.ts'
 import type { ConferenceMessage, ConferenceSnapshot, PackOfferMessage } from './messages.ts'
@@ -11,6 +12,8 @@ export type JoinerSessionCallbacks = {
   onLobby: (state: JoinerLobbyState) => void
   onPackReady: (bytes: Uint8Array, hash: string) => void | Promise<void>
   onError: (message: string) => void
+  /** Чужой commit мастера: joiner не продолжает, App рвёт комнату. */
+  onFatalError: (message: string) => void
 }
 
 export type JoinerLobbyState = {
@@ -67,6 +70,7 @@ export class JoinerSession {
   private readyPackHash: string | null = null
   private masterAuthorityToken: string | null = null
   private masterSenderId: string | null = null
+  private buildRejected = false
   constructor(input: {
     transport: ConferenceTransport
     clientId: string
@@ -157,6 +161,7 @@ export class JoinerSession {
   }
 
   private async onMessage(message: ConferenceMessage, senderId: string): Promise<void> {
+    if (this.buildRejected || this.disposed) return
     if (
       (message.type === 'packOffer' || message.type === 'packChunk') &&
       message.targetClientId &&
@@ -166,6 +171,7 @@ export class JoinerSession {
     }
     if (message.type === 'snapshot' || message.type === 'packOffer') {
       if (!this.acceptMaster(message.authorityToken, senderId, true)) return
+      if (!this.acceptMasterBuild(message.commit)) return
     } else if (message.type === 'packChunk') {
       if (!this.acceptMaster(message.authorityToken, senderId, false)) return
     } else {
@@ -357,6 +363,16 @@ export class JoinerSession {
     this.waitingMaster = false
     this.masterOffline = false
     this.lastMasterAliveAt = Date.now()
+  }
+
+  private acceptMasterBuild(masterCommit: string | undefined): boolean {
+    if (this.buildRejected) return false
+    const mismatch = masterBuildMismatchMessage(masterCommit)
+    if (!mismatch) return true
+    this.buildRejected = true
+    this.callbacks.onFatalError(mismatch)
+    this.dispose()
+    return false
   }
 
   private acceptMaster(authorityToken: string, senderId: string, canRebind: boolean): boolean {

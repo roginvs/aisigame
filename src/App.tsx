@@ -923,6 +923,7 @@ export default function App() {
             setLoadedPackHash(hash)
           },
           onError: (message) => setConferenceError(message),
+          onFatalError: conferenceConnectionFailed,
         },
       })
       if (sessionStorage.getItem('aisigame.tamperPack') === '1') joiner.setTamperPack(true)

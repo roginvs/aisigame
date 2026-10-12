@@ -1,5 +1,6 @@
 import { createActor } from 'xstate'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { buildCommit } from '../buildInfo.ts'
 import { gameMachine, statePath } from '../game/machine.ts'
 import { demoPack } from '../game/questions.ts'
 import type { SavedMatch } from '../game/types.ts'
@@ -116,6 +117,7 @@ describe('MasterSession resume', () => {
 
     expect(statePath(actor.getSnapshot().value)).toBe('choosing.listening')
     expect(lastSnapshot(transport)?.phase).toBe('choosing.listening')
+    expect(lastSnapshot(transport)?.commit).toBe(buildCommit())
     expect(lastSnapshot(transport)?.players.find((player) => player.clientId === 'guest-client')).toMatchObject({
       id: 2,
       score: 300,

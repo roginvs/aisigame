@@ -1,3 +1,4 @@
+import { buildCommit } from '../buildInfo.ts'
 import {
   CHUNK_BYTES,
   chunkToWire,
@@ -61,6 +62,7 @@ export function createPackTransferMaster(input: {
       type: 'packOffer',
       authorityToken: input.authorityToken,
       targetClientId: clientId,
+      commit: buildCommit(),
       hash: input.hash,
       size: input.bytes.byteLength,
       name: input.name,

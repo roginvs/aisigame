@@ -9,6 +9,7 @@ import {
   persistMatch,
   readMatchMode,
   readSavedGame,
+  savedGameVersion,
   decideResumeFile,
   resumeFileName,
   resumeNeedsFile,
@@ -98,7 +99,7 @@ function context(patch: Partial<GameContext> = {}): GameContext {
 
 function sample(patch: Partial<SavedGame> = {}): SavedGame {
   return {
-    version: 1,
+    version: savedGameVersion,
     packId: 'demo',
     packFile: 'demo.siq',
     packName: 'Демо',
@@ -273,13 +274,16 @@ describe('saved game', () => {
     expect(readSavedGame(memory())).toBeNull()
     storage.setItem(gameStorageKey, '{')
     expect(readSavedGame(storage)).toBeNull()
-    storage.setItem(gameStorageKey, JSON.stringify({ ...sample(), apiKey: 'sk-live', version: 1 }))
+    storage.setItem(gameStorageKey, JSON.stringify({ ...sample(), apiKey: 'sk-live', version: savedGameVersion }))
     const raw = storage.getItem(gameStorageKey) ?? ''
     expect(raw).toContain('sk-live')
     const cleaned = readSavedGame(storage)
     expect(cleaned).not.toBeNull()
     expect(JSON.stringify(cleaned)).not.toContain('sk-live')
     expect(JSON.stringify(cleaned)).not.toContain('apiKey')
+    expect(cleaned?.version).toBe(savedGameVersion)
+    storage.setItem(gameStorageKey, JSON.stringify({ ...sample(), version: savedGameVersion + 1 }))
+    expect(readSavedGame(storage)).toBeNull()
   })
 
   it('возвращает в сохранённую фазу только если вопрос ещё есть в пакете', () => {

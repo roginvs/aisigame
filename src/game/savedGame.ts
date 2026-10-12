@@ -14,8 +14,14 @@ import type {
 /** Снимок партии. Не путать с `aisigame.openaiApiKey`. */
 export const gameStorageKey = 'aisigame.game'
 
+/**
+ * Схема снимка `aisigame.game`. Не commit сборки: поднимать только при
+ * несовместимом изменении формата. Чужой номер `readSavedGame` отбрасывает.
+ */
+export const savedGameVersion = 1 as const
+
 export type SavedGame = SavedMatch & {
-  version: 1
+  version: typeof savedGameVersion
   packId: string
   packFile: string
   packName: string
@@ -51,7 +57,7 @@ export function persistConferenceLobby(
   storage: Storage = localStorage,
 ): SavedGame | null {
   const game = sanitize({
-    version: 1,
+    version: savedGameVersion,
     packId: input.packId,
     packFile: input.packFile,
     packName: input.pack.name,
@@ -255,7 +261,7 @@ export function persistMatch(
       : '')
   const conference = conferenceForSave(input.conference, previous)
   const game = sanitize({
-    version: 1,
+    version: savedGameVersion,
     packId: input.packId,
     packFile: input.packFile,
     packName: input.context.packName,
@@ -418,7 +424,7 @@ function statusFor(
 function sanitize(value: unknown): SavedGame | null {
   if (!value || typeof value !== 'object') return null
   const record = value as Record<string, unknown>
-  if (record.version !== 1) return null
+  if (record.version !== savedGameVersion) return null
   if (typeof record.packId !== 'string' || !record.packId.trim()) return null
   if (typeof record.packFile !== 'string') return null
   if (typeof record.packName !== 'string') return null
@@ -465,7 +471,7 @@ function sanitize(value: unknown): SavedGame | null {
   if (judgmentStatus === undefined) return null
   const conference = normalizeConference(record)
   return {
-    version: 1,
+    version: savedGameVersion,
     packId: record.packId,
     packFile: record.packFile,
     packName: record.packName,
