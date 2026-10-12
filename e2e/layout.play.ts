@@ -63,11 +63,13 @@ test('экран вопроса без скроллбаров и с нормал
       nodes.map((node) => ({
         gutter: node.offsetWidth - node.clientWidth,
         sideways: node.scrollWidth - node.clientWidth,
+        tall: node.scrollHeight - node.clientHeight,
       })),
     )
     for (const bar of bars) {
       expect(bar.gutter).toBe(0)
       expect(bar.sideways).toBeLessThanOrEqual(1)
+      if (selector === '.question') expect(bar.tall).toBeLessThanOrEqual(2)
     }
   }
 
@@ -81,6 +83,20 @@ test('экран вопроса без скроллбаров и с нормал
   expect(imageBox.y).toBeGreaterThanOrEqual(questionBox.y - 1)
   expect(imageBox.y + imageBox.height).toBeLessThanOrEqual(questionBox.y + questionBox.height + 2)
   expect(answererBox.y + answererBox.height).toBeLessThanOrEqual(questionBox.y + questionBox.height + 2)
+  const imageFit = await image.evaluate((node) => {
+    const media = node.closest('.question-media')
+    const style = getComputedStyle(node)
+    return {
+      objectFit: style.objectFit,
+      mediaHeight: media instanceof HTMLElement ? media.clientHeight : 0,
+      mediaWidth: media instanceof HTMLElement ? media.clientWidth : 0,
+    }
+  })
+  expect(imageFit.objectFit).toBe('contain')
+  expect(imageFit.mediaHeight).toBeGreaterThan(80)
+  expect(imageBox.height).toBeGreaterThan(40)
+  expect(imageBox.height).toBeLessThanOrEqual(imageFit.mediaHeight + 2)
+  expect(imageBox.width).toBeLessThanOrEqual(imageFit.mediaWidth + 2)
 
   await expect(page.locator('.tech-column')).toHaveCount(0)
   const copyDebug = page.locator('.debug-copy')

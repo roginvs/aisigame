@@ -1021,7 +1021,7 @@ button.continue-with-file .continue-file {
 .stage > .question,
 .stage > .conference-lobby-status,
 .stage > .pack-await {
-  flex: 1 1 auto;
+  flex: 1 1 0;
   width: 100%;
   min-height: 0;
 }
@@ -1128,14 +1128,31 @@ button.continue-with-file .continue-file {
   position: relative;
   display: flex;
   flex-direction: column;
-  justify-content: safe center;
+  justify-content: flex-start;
   gap: 12px;
   min-height: 0;
-  overflow: auto;
+  height: 100%;
+  /* Медиа в оставшейся высоте; без скролла и без обрезки верхушки картинки. */
+  overflow: hidden;
   scrollbar-width: none;
 }
 
-.question h2 { font-size: clamp(2rem, 3.4vw, 3rem); line-height: 1.2; }
+.question .eyebrow,
+.question .choices,
+.question .answerer,
+.question .etalon,
+.question .timer-bar,
+.question > p {
+  flex: 0 0 auto;
+}
+
+.question h2 {
+  flex: 0 1 auto;
+  min-height: 0;
+  font-size: clamp(1.35rem, 3.4vw, 3rem);
+  line-height: 1.2;
+  overflow-wrap: anywhere;
+}
 
 .choices {
   display: grid;
@@ -1187,20 +1204,23 @@ button.continue-with-file .continue-file {
 }
 
 .question-media {
-  display: grid;
-  flex: 1 1 auto;
-  gap: 8px;
-  min-height: 120px;
-  place-items: center;
+  position: relative;
+  flex: 1 1 0;
+  align-self: stretch;
+  /* Запас, чтобы при эталоне картинка не схлопнулась в полоску. */
+  min-height: min(140px, 28%);
+  overflow: hidden;
 }
 
 .question-media img,
 .question-media video {
-  width: auto;
-  max-width: 100%;
-  height: auto;
-  max-height: min(340px, 38dvh);
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  margin: auto;
   object-fit: contain;
+  object-position: center;
   background: #121920;
   border-radius: 12px;
 }
@@ -1586,12 +1606,21 @@ button.buzzer.chooser:disabled {
 @media (max-height: 860px) {
   .host { grid-template-columns: 112px minmax(0, 1fr); }
   .host img { width: 112px; height: 128px; }
-  .question-media { min-height: 96px; }
-  .question-media img,
-  .question-media video { max-height: min(220px, 30dvh); }
+  .question h2 { font-size: clamp(1.2rem, 3vw, 2.4rem); }
+  .question-media { min-height: min(110px, 24%); }
 }
 
 @media (max-width: 1100px) {
+  /* Узкий экран: высота карточки по контенту — медиа снова в потоке, иначе absolute даёт 0. */
+  .question {
+    height: auto;
+    overflow: visible;
+  }
+  .question-media {
+    flex: 0 0 auto;
+    height: min(340px, 42dvh);
+    min-height: 120px;
+  }
   /* Узкий экран / планшет: страница снова вертикально скроллится, без locked viewport. */
   .table {
     grid-template-rows: auto auto;
