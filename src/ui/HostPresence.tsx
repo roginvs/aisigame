@@ -16,11 +16,14 @@ export function HostPresence(props: {
   status: string
   /** Персональный статус хода в конференции, например «Вася выбирает вопрос». */
   title?: string | null
-  /** Строка под персональным ходом, например «Никого другого не слушаю». */
+  /** Строка под персональным ходом, например «Слушаю Вася» / «Ничего не слышу». */
   titleHint?: string | null
   error?: string | null
   /** В онлайн-режиме: речь бота «Ведущая» по уровню Jitsi — золотая пульсация рамки. */
   conferenceSpeaking?: boolean
+  /** Только мастер: вне хода модель глуха, на выборе/ответе — один игрок. */
+  hearTurnOnly?: boolean
+  onHearTurnOnlyChange?: (value: boolean) => void
 }) {
   const paused = props.path === 'paused'
   const stopped = props.path === 'stopped'
@@ -38,6 +41,7 @@ export function HostPresence(props: {
     `host-${mood}`,
     stopped ? 'host-stopped' : '',
     props.conferenceSpeaking ? 'speaking' : '',
+    props.onHearTurnOnlyChange ? 'host-with-hear-less' : '',
   ]
     .filter(Boolean)
     .join(' ')
@@ -53,6 +57,25 @@ export function HostPresence(props: {
         ))}
         {props.error ? <span className="host-line host-error">{props.error}</span> : null}
       </figcaption>
+      {props.onHearTurnOnlyChange ? (
+        <label
+          className={['host-hear-less', props.hearTurnOnly ? 'is-on' : ''].filter(Boolean).join(' ')}
+          title="В партии вне выбора и ответа модель ничего не слышит; на ходе — только этого игрока"
+        >
+          <span className="host-hear-less-label">Меньше слышать</span>
+          <input
+            type="checkbox"
+            className="visually-hidden"
+            role="switch"
+            aria-checked={Boolean(props.hearTurnOnly)}
+            checked={Boolean(props.hearTurnOnly)}
+            onChange={(event) => props.onHearTurnOnlyChange?.(event.target.checked)}
+          />
+          <span className="host-hear-less-track" aria-hidden="true">
+            <span className="host-hear-less-thumb" />
+          </span>
+        </label>
+      ) : null}
     </figure>
   )
 }

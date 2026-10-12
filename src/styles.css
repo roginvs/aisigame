@@ -1278,6 +1278,84 @@ button.continue-with-file .continue-file {
   background: #121920;
   border: 2px solid #3d5168;
   border-radius: 16px;
+  position: relative;
+}
+
+.host-with-hear-less {
+  padding-bottom: 32px;
+}
+
+.host-hear-less {
+  position: absolute;
+  right: 10px;
+  bottom: 8px;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0;
+  padding: 3px 4px 3px 8px;
+  border-radius: 999px;
+  background: rgba(15, 22, 30, 0.72);
+  border: 1px solid #2a3a4c;
+  color: #9aabbd;
+  font-size: 0.7rem;
+  letter-spacing: 0.01em;
+  line-height: 1.2;
+  cursor: pointer;
+  user-select: none;
+  transition:
+    color 160ms ease,
+    border-color 160ms ease,
+    background 160ms ease;
+}
+
+.host-hear-less:hover {
+  border-color: #3d5168;
+  color: #c5d2e0;
+}
+
+.host-hear-less.is-on {
+  color: #b9d7f5;
+  border-color: #4a6f94;
+  background: rgba(30, 48, 68, 0.85);
+}
+
+.host-hear-less:has(input:focus-visible) {
+  outline: 2px solid #7eb6e8;
+  outline-offset: 2px;
+}
+
+.host-hear-less-track {
+  position: relative;
+  width: 32px;
+  height: 18px;
+  flex: 0 0 auto;
+  border-radius: 999px;
+  background: #243142;
+  box-shadow: inset 0 0 0 1px #1a2430;
+  transition: background 160ms ease;
+}
+
+.host-hear-less.is-on .host-hear-less-track {
+  background: #3d7eb8;
+  box-shadow: inset 0 0 0 1px #2f628f;
+}
+
+.host-hear-less-thumb {
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  background: #d7e3ef;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.35);
+  transition: transform 160ms ease, background 160ms ease;
+}
+
+.host-hear-less.is-on .host-hear-less-thumb {
+  transform: translateX(14px);
+  background: #f2f7fc;
 }
 
 .host img {

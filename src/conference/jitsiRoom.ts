@@ -431,7 +431,7 @@ export async function connectJitsiConference(input: {
   const conferenceAudio = createConferenceAudioOutput()
   let modelMixer: MicMixer | null = null
   /** `null` — модель слышит всех; иначе только этот Jitsi participant id. */
-  let modelHearOnlyId: string | null = null
+  let modelHearOnlyId: string | null | false = null
   const tileListeners = new Set<(tiles: ConferenceTile[]) => void>()
   const hostSpeakingListeners = new Set<(speaking: boolean) => void>()
   let lastHostSpeaking = false

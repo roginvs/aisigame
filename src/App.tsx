@@ -120,6 +120,8 @@ export default function App() {
   const [conferenceRole, setConferenceRole] = useState<'master' | 'joiner' | null>(null)
   const [conferenceRoomId, setConferenceRoomId] = useState<string | null>(null)
   const [conferenceLobby, setConferenceLobby] = useState(false)
+  /** Мастер: вне выбора/ответа модель глуха; на ходе — только этот игрок. */
+  const [hearTurnOnly, setHearTurnOnly] = useState(false)
   const [masterRoster, setMasterRoster] = useState<RosterEntry[]>([])
   const [masterRosterAll, setMasterRosterAll] = useState<RosterEntry[]>([])
   const [masterParticipantIds, setMasterParticipantIds] = useState<Record<string, string>>({})
@@ -318,9 +320,9 @@ export default function App() {
     const handle = conferenceHandleRef.current
     if (!handle) return
     handle.setModelHearOnly(
-      focusedModelParticipantId(path, chooserParticipantId, answererParticipantId),
+      focusedModelParticipantId(path, chooserParticipantId, answererParticipantId, hearTurnOnly),
     )
-  }, [answererParticipantId, chooserParticipantId, conferenceRole, path])
+  }, [answererParticipantId, chooserParticipantId, conferenceRole, hearTurnOnly, path])
 
   useEffect(() => {
     if (
@@ -1315,6 +1317,8 @@ export default function App() {
               chatLines: conferenceRole === 'master' ? conferenceChat : undefined,
               onConferenceExit: conferenceRole === 'joiner' ? leaveConferenceToMenu : exitToMenu,
               hiddenClientIds: hiddenConferenceClientIds,
+              hearTurnOnly: conferenceRole === 'master' ? hearTurnOnly : undefined,
+              onHearTurnOnlyChange: conferenceRole === 'master' ? setHearTurnOnly : undefined,
             }
           : undefined
       }

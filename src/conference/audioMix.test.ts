@@ -66,7 +66,18 @@ describe('focusedModelParticipantId', () => {
     expect(focusedModelParticipantId('choosing.listening', null, 'answerer')).toBeNull()
     expect(focusedModelParticipantId('answering.waiting', 'chooser', null)).toBeNull()
   })
+
+  it('с «Меньше слышать» глушит партию вне выбора и ответа, лобби оставляет общим', () => {
+    expect(focusedModelParticipantId('buzzing.open', 'chooser', 'answerer', true)).toBe(false)
+    expect(focusedModelParticipantId('reading.sealed', 'chooser', 'answerer', true)).toBe(false)
+    expect(focusedModelParticipantId('finalBets.hearing', 'a', 'b', true)).toBe(false)
+    expect(focusedModelParticipantId('welcoming', null, null, true)).toBe(false)
+    expect(focusedModelParticipantId('startMenu', null, null, true)).toBeNull()
+    expect(focusedModelParticipantId('choosing.listening', 'chooser', 'answerer', true)).toBe('chooser')
+    expect(focusedModelParticipantId('answering.waiting', 'chooser', 'answerer', true)).toBe('answerer')
+  })
 })
+
 
 describe('streamsForModelHear', () => {
   const remotes = [
@@ -91,6 +102,12 @@ describe('streamsForModelHear', () => {
     expect(
       streamsForModelHear({ remotes, localId: 'local', localStream: local, focusParticipantId: 'local' }),
     ).toEqual({ remotes: [], local })
+  })
+
+  it('false — никого не отдаёт в микс модели', () => {
+    expect(
+      streamsForModelHear({ remotes, localId: 'local', localStream: local, focusParticipantId: false }),
+    ).toEqual({ remotes: [], local: null })
   })
 })
 

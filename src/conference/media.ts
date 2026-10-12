@@ -26,10 +26,10 @@ export type ConferenceMedia = {
   /** Общий поток локального микрофона и удалённых игроков для ведущей-модели. */
   modelInputStream: () => MediaStream | null
   /**
-   * Ограничить микс модели одним участником Jitsi; `null` — снова все.
+   * Кого слышит модель: id участника, `null` — все, `false` — никого.
    * HTML/Jitsi playback для людей не трогает.
    */
-  setModelHearOnly: (participantId: string | null) => void
+  setModelHearOnly: (participantId: string | null | false) => void
   /** Есть ли речь людей в комнате (без дорожки «Ведущей»). */
   anyoneSpeaking: () => boolean
   localParticipantId: () => string

@@ -83,16 +83,25 @@ describe('conferenceTurnTitle', () => {
 })
 
 describe('conferenceSoloListenHint', () => {
-  it('показывает узкий слух на выборе и ответе', () => {
-    expect(conferenceSoloListenHint('choosing.listening', true)).toBe('Никого другого не слушаю')
-    expect(conferenceSoloListenHint('choosing.clarifying', true)).toBe('Никого другого не слушаю')
-    expect(conferenceSoloListenHint('answering.waiting', true)).toBe('Никого другого не слушаю')
-    expect(conferenceSoloListenHint('answering.hearing', true)).toBe('Никого другого не слушаю')
+  it('на выборе и ответе пишет кого слушает', () => {
+    expect(conferenceSoloListenHint('choosing.listening', true, { focusName: 'Аня' })).toBe('Слушаю Аня')
+    expect(conferenceSoloListenHint('choosing.clarifying', true, { focusName: 'Аня' })).toBe('Слушаю Аня')
+    expect(conferenceSoloListenHint('answering.waiting', true, { focusName: 'Борис' })).toBe('Слушаю Борис')
+    expect(conferenceSoloListenHint('answering.hearing', true, { focusName: 'Борис' })).toBe('Слушаю Борис')
   })
 
-  it('не показывает узкий слух, когда модель слышит всех', () => {
+  it('без галки вне выбора и ответа подписи нет', () => {
     expect(conferenceSoloListenHint('buzzing.open', true)).toBeNull()
     expect(conferenceSoloListenHint('finalBets.hearing', true)).toBeNull()
-    expect(conferenceSoloListenHint('choosing.listening', false)).toBeNull()
+    expect(conferenceSoloListenHint('choosing.listening', false, { focusName: 'Аня' })).toBeNull()
+  })
+
+  it('с «Меньше слышать» вне хода — глухо, в лобби — всех', () => {
+    expect(conferenceSoloListenHint('buzzing.open', true, { hearTurnOnly: true })).toBe('Ничего не слышу')
+    expect(conferenceSoloListenHint('reading.sealed', true, { hearTurnOnly: true })).toBe('Ничего не слышу')
+    expect(conferenceSoloListenHint('startMenu', true, { hearTurnOnly: true })).toBe('Слушаю всех')
+    expect(
+      conferenceSoloListenHint('choosing.listening', true, { hearTurnOnly: true, focusName: 'Аня' }),
+    ).toBe('Слушаю Аня')
   })
 })

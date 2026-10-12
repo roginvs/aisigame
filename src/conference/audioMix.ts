@@ -7,19 +7,26 @@ export type MicMixer = {
 
 /**
  * Кого модель слышит в миксе конференции.
- * `null` — все (лобби, окно кнопки, финальные ставки и т.п.).
- * В `choosing.*` / `answering.*` — только выбирающий / отвечающий.
- * Если Jitsi id ещё не известен, оставляем всех (fail open), чтобы голос не пропал.
+ * - `null` — все (лобби; без «Меньше слышать» — окно кнопки, ставки и т.п.)
+ * - `string` — один участник (`choosing.*` / `answering.*`)
+ * - `false` — никого («Меньше слышать» вне выбора и ответа: глухо, не «чуть тише»)
+ * Если Jitsi id ещё не известен на выборе/ответе, оставляем всех (fail open).
  */
+export type ModelHearFocus = string | null | false
+
 export function focusedModelParticipantId(
   phase: string,
   chooserParticipantId: string | null,
   answererParticipantId: string | null,
-): string | null {
+  hearTurnOnly = false,
+): ModelHearFocus {
   const root = phase.split('.')[0] ?? phase
   if (root === 'choosing') return chooserParticipantId
   if (root === 'answering') return answererParticipantId
-  return null
+  if (!hearTurnOnly) return null
+  // Лобби / меню: все; уже в партии вне выбора и ответа — тишина для модели.
+  if (root === 'startMenu' || root === 'connecting' || root === 'failed') return null
+  return false
 }
 
 /** Отбирает удалённые потоки и локальный микрофон для микса модели. */
@@ -27,9 +34,12 @@ export function streamsForModelHear(input: {
   remotes: Array<{ id: string; stream: MediaStream }>
   localId: string
   localStream: MediaStream | null
-  focusParticipantId: string | null
+  focusParticipantId: ModelHearFocus
 }): { remotes: Array<{ id: string; stream: MediaStream }>; local: MediaStream | null } {
   const focus = input.focusParticipantId
+  if (focus === false) {
+    return { remotes: [], local: null }
+  }
   if (!focus) {
     return { remotes: input.remotes, local: input.localStream }
   }

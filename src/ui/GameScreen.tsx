@@ -147,6 +147,9 @@ export function GameScreen(props: {
     chatLines?: { name: string; text: string }[]
     onConferenceExit?: () => void
     hiddenClientIds?: ReadonlySet<string>
+    /** Только мастер: галка «Меньше слышать» (вне хода — глухо). */
+    hearTurnOnly?: boolean
+    onHearTurnOnlyChange?: (value: boolean) => void
   }
 }) {
   const { snapshot, link, onBuzz, onPick, onPause, onReset, onNextRound, modelId, onModel, conference } = props
@@ -205,9 +208,22 @@ export function GameScreen(props: {
   const turnTitle = conference?.awaitingPack
     ? null
     : conferenceTurnTitle(path, Boolean(conference?.layout), context)
+  const listenFocusName = (() => {
+    const root = path.split('.')[0] ?? path
+    if (root === 'choosing') {
+      return context.players.find((player) => player.id === context.chooserId)?.name ?? null
+    }
+    if (root === 'answering') {
+      return context.players.find((player) => player.id === context.activePlayerId)?.name ?? null
+    }
+    return null
+  })()
   const soloListenHint = conference?.awaitingPack
     ? null
-    : conferenceSoloListenHint(path, Boolean(conference?.layout))
+    : conferenceSoloListenHint(path, Boolean(conference?.layout), {
+        hearTurnOnly: Boolean(conference?.hearTurnOnly),
+        focusName: listenFocusName,
+      })
   const flashing = path === 'flashing' || (paused && context.resumePath === 'flashing')
   const showQuestion = Boolean(question) && !flashing && !conference?.awaitingPack
   const showTimer = context.phaseStartedAt !== null && context.phaseDurationMs !== null
@@ -604,6 +620,8 @@ export function GameScreen(props: {
                 : (conference?.mediaError ?? context.error)
             }
             conferenceSpeaking={conference?.hostSpeaking}
+            hearTurnOnly={conference?.hearTurnOnly}
+            onHearTurnOnlyChange={conference?.isMaster ? conference.onHearTurnOnlyChange : undefined}
           />
           <ConversationChat
             conversation={conference?.remoteSnapshot?.conversation}

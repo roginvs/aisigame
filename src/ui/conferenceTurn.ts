@@ -60,19 +60,22 @@ export function conferenceTurnTitle(
 }
 
 /**
- * Пока модель в конференции слышит только выбирающего или отвечающего —
- * та же строка у всех, в том числе у joiners по снимку фазы.
- * В окне кнопки, лобби и на ставке финала микс общий — подсказки нет.
+ * Что модель сейчас слышит в миксе — строка под карточкой ведущей.
+ * На выборе/ответе: «Слушаю Имя». С галкой «Меньше слышать» вне хода: «Ничего не слышу»;
+ * в лобби при галке — «Слушаю всех». Без галки вне узкого хода подписи нет (микс общий).
  */
-export function conferenceSoloListenHint(path: string, conferenceLayout: boolean): string | null {
+export function conferenceSoloListenHint(
+  path: string,
+  conferenceLayout: boolean,
+  options: { hearTurnOnly?: boolean; focusName?: string | null } = {},
+): string | null {
   if (!conferenceLayout) return null
-  if (
-    path === 'choosing.listening' ||
-    path === 'choosing.clarifying' ||
-    path === 'answering.waiting' ||
-    path === 'answering.hearing'
-  ) {
-    return 'Никого другого не слушаю'
+  const root = path.split('.')[0] ?? path
+  const name = options.focusName?.trim() || ''
+  if (root === 'choosing' || root === 'answering') {
+    return name ? `Слушаю ${name}` : 'Слушаю одного игрока'
   }
-  return null
+  if (!options.hearTurnOnly) return null
+  if (root === 'startMenu' || root === 'connecting' || root === 'failed') return 'Слушаю всех'
+  return 'Ничего не слышу'
 }
