@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest'
+import { emptyMessageRing, readMessageRing, messageRingEntries } from '../conference/messageRing.ts'
 import { storageKey } from '../config.ts'
 import type { GameContext } from './types.ts'
 import {
@@ -6,6 +7,7 @@ import {
   gameStorageKey,
   packCanResume,
   persistConferenceLobby,
+  persistConferenceHistory,
   persistMatch,
   readMatchMode,
   readSavedGame,
@@ -546,9 +548,62 @@ describe('saved game', () => {
     expect(saved?.mode).toBe('conference')
     expect(saved?.jitsiUrl).toBe('https://meet.example/jitsi')
     expect(saved?.roomId).toBe('room-abc')
-    expect(saved?.chat).toEqual(chat)
+    expect(saved?.chat).toBeUndefined()
+    expect(messageRingEntries(saved as Parameters<typeof messageRingEntries>[0]).map(({ message }) => message)).toEqual(chat.map((line) => ({ kind: 'chat', ...line })))
     expect(saved?.players[0]?.clientId).toBe('host-1')
     expect(readMatchMode(saved)).toBe('conference')
+  })
+
+  it('хранит все 200 физических слотов и индекс одинаково в лобби, партии и после повторного чтения', () => {
+    const storage = memory()
+    const ring = emptyMessageRing()
+    ring.messageIndex = 37
+    for (let slot = 0; slot < 200; slot++) {
+      ring[`message${slot}`] = slot % 2
+        ? { kind: 'chat', name: 'Гость', text: `чат ${slot}`, at: '2026-10-12T12:00:00.000Z' }
+        : { kind: 'conversation', role: 'host', text: `реплика ${slot}`, note: `эталон ${slot}`, at: '2026-10-12T12:00:00.000Z' }
+    }
+    persistConferenceLobby({
+      packId: 'demo', packFile: 'demo.siq', pack: demoPack,
+      master: { id: 1, name: 'Мастер', score: 0, clientId: 'master' },
+      jitsiUrl: 'https://meet.example/jitsi', roomId: 'history-room', messageRing: ring,
+    }, storage)
+    expect(readMessageRing(readSavedGame(storage))).toEqual(ring)
+    const raw = JSON.parse(storage.getItem(gameStorageKey)!)
+    expect(Object.keys(raw).filter((key) => /^message\d+$/.test(key))).toHaveLength(200)
+    expect(raw).not.toHaveProperty('chat')
+    expect(raw).not.toHaveProperty('conversation')
+    persistMatch({
+      packId: 'demo', packFile: 'demo.siq', path: 'choosing.listening', context: context(),
+      conference: { mode: 'conference', conferenceLobby: false, roomId: 'history-room' },
+    }, storage)
+    expect(readMessageRing(readSavedGame(storage))).toEqual(ring)
+    const next = { ...ring, messageIndex: 38, message38: { kind: 'conversation' as const, role: 'judge' as const, text: 'Верно', note: 'Правильный ответ: Август' } }
+    const saved = persistConferenceHistory('history-room', next, storage)
+    expect(saved?.phase).toBe('choosing.listening')
+    expect(readMessageRing(readSavedGame(storage))).toEqual(next)
+    expect(messageRingEntries(next).at(-1)?.message).toEqual(next.message38)
+    const before = storage.getItem(gameStorageKey)
+    expect(persistConferenceHistory('other-room', ring, storage)).toBeNull()
+    expect(storage.getItem(gameStorageKey)).toBe(before)
+    persistMatch({ packId: 'demo', packFile: 'demo.siq', path: 'choosing.listening', context: context(), conference: { mode: 'table' } }, storage)
+    expect(readSavedGame(storage)?.messageIndex).toBeUndefined()
+  })
+
+  it('мигрирует старый chat в слоты, а неизвестные поля реплики не сохраняет', () => {
+    const storage = memory()
+    storage.setItem(gameStorageKey, JSON.stringify({ ...sample(), mode: 'conference', roomId: 'legacy', chat: [{ name: 'Мастер', text: 'Старый чат' }] }))
+    const legacy = readSavedGame(storage)
+    expect(legacy?.messageIndex).toBe(0)
+    expect(legacy?.message0).toEqual({ kind: 'chat', name: 'Мастер', text: 'Старый чат' })
+    expect(legacy?.chat).toBeUndefined()
+    const ring = emptyMessageRing()
+    ring.messageIndex = 0
+    Object.assign(ring, { authorityToken: 'do-not-store' })
+    ring.message0 = Object.assign({ kind: 'conversation' as const, role: 'host' as const, text: 'Реплика', note: 'Подпись' }, { authToken: 'do-not-store' })
+    persistConferenceHistory('legacy', ring, storage)
+    expect(readSavedGame(storage)?.message0).toEqual({ kind: 'conversation', role: 'host', text: 'Реплика', note: 'Подпись' })
+    expect(storage.getItem(gameStorageKey)).not.toContain('do-not-store')
   })
 
   it('сохраняет онлайн-лобби до старта машины и отличает его от начатой партии', () => {

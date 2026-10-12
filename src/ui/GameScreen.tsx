@@ -10,7 +10,7 @@ import type { LinkStatus } from '../realtime/client.ts'
 import { voiceById, voiceModels } from '../realtime/models.ts'
 import { billedTokens, formatTokens, getUsageSnapshot, subscribeUsage, type UsageTotals } from '../realtime/usage.ts'
 import type { GameContext, PlayerId } from '../game/types.ts'
-import type { ConferenceSnapshot } from '../conference/messages.ts'
+import type { ConferenceMessageRing, ConferenceSnapshot } from '../conference/messages.ts'
 import type { RosterEntry } from '../conference/roster.ts'
 import { copyDebugDump, formatDebugSize } from '../debug/trace.ts'
 import type { ConferenceTile } from '../conference/media.ts'
@@ -144,7 +144,7 @@ export function GameScreen(props: {
     bindVideo?: (participantId: string, element: HTMLVideoElement | null) => void
     mediaError?: string | null
     onSendChat?: (text: string) => void
-    chatLines?: { name: string; text: string; at?: string }[]
+    messageRing?: ConferenceMessageRing
     onConferenceExit?: () => void
     hiddenClientIds?: ReadonlySet<string>
     /** Только мастер: галка «Меньше слышать» (вне хода — глухо). */
@@ -629,8 +629,7 @@ export function GameScreen(props: {
             onHearTurnOnlyChange={conference?.isMaster ? conference.onHearTurnOnlyChange : undefined}
           />
           <ConversationChat
-            conversation={conference?.remoteSnapshot?.conversation}
-            chat={conference?.chatLines ?? conference?.remoteSnapshot?.chat}
+            messageRing={conference?.messageRing ?? conference?.remoteSnapshot ?? undefined}
             onSendChat={conference?.onSendChat}
             aboveComposer={
               conference?.layout ? (

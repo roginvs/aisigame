@@ -69,6 +69,15 @@ describe('isConferenceMessage', () => {
     expect(isConferenceMessage({ type: 'packVerified', clientId: 'client', authToken: 'secret' })).toBe(false)
   })
 
+  it('проверяет статус загрузки/сверки клиента и оставляет ready отдельным действием', () => {
+    const message = { type: 'packStatus', clientId: 'client', authToken: 'secret', hash: 'sha256', percent: 99, packPhase: 'verifying' }
+    expect(isConferenceMessage(message)).toBe(true)
+    expect(isConferenceMessage({ ...message, percent: -1 })).toBe(false)
+    expect(isConferenceMessage({ ...message, percent: 100 })).toBe(false)
+    expect(isConferenceMessage({ ...message, packPhase: 'ready' })).toBe(false)
+    expect(isConferenceMessage({ ...message, hash: '' })).toBe(false)
+  })
+
   it('принимает только ограниченный debug-батч игрока', () => {
     expect(
       isConferenceMessage({

@@ -116,6 +116,44 @@ describe('JitsiMessageTransport', () => {
     transport.close()
   })
 
+  it('сохраняет порядок дифов, полный статус заменяет ожидающие дифы и обгоняет куски пакета', () => {
+    vi.useFakeTimers()
+    vi.stubGlobal('window', globalThis)
+    const sent: ConferenceMessage[] = []
+    let blocked = true
+    const conference = {
+      on: vi.fn(),
+      sendEndpointMessage: (_to: string, message: ConferenceMessage) => {
+        if (blocked) throw new Error('not ready')
+        sent.push(message)
+      },
+    }
+    const transport = new JitsiMessageTransport(conference as never, 'endpoint', 'data-open')
+    const chunk = { type: 'packChunk', authorityToken: 'master', hash: 'h', index: 0, total: 1, dataBase64: 'YQ==' } as ConferenceMessage
+    const full = { type: 'snapshot', authorityToken: 'master', revision: 0 } as ConferenceMessage
+    const diff = (baseRevision: number) => ({ type: 'partialUpdate', authorityToken: 'master', baseRevision, revision: baseRevision + 1, changes: { statusLine: String(baseRevision) } }) as ConferenceMessage
+    transport.send(chunk)
+    transport.send(full)
+    transport.send(diff(0))
+    transport.send(diff(1))
+    blocked = false
+    vi.advanceTimersByTime(250)
+    expect(sent.map((message) => message.type)).toEqual(['snapshot', 'partialUpdate', 'partialUpdate', 'packChunk'])
+    expect(sent[1]).toMatchObject({ baseRevision: 0 })
+    expect(sent[2]).toMatchObject({ baseRevision: 1 })
+    blocked = true
+    transport.send(chunk)
+    transport.send(diff(2))
+    transport.send({ ...full, revision: 3 } as ConferenceMessage)
+    transport.send(diff(3))
+    blocked = false
+    vi.advanceTimersByTime(250)
+    expect(sent.slice(4).map((message) => message.type)).toEqual(['snapshot', 'partialUpdate', 'packChunk'])
+    expect(sent[4]).toMatchObject({ revision: 3 })
+    expect(sent[5]).toMatchObject({ baseRevision: 3 })
+    transport.close()
+  })
+
   it('findBridgeDataChannel читает rtc._channel', () => {
     const channel = fakeDataChannel(0)
     expect(findBridgeDataChannel({ rtc: { _channel: channel } })).toBe(channel)

@@ -1,7 +1,20 @@
 import { describe, expect, it } from 'vitest'
-import { mergeConversationStream } from './conversationStream.ts'
+import { emptyMessageRing } from '../conference/messageRing.ts'
+import { conversationStreamFromRing, mergeConversationStream } from './conversationStream.ts'
 
 describe('mergeConversationStream', () => {
+  it('читает конференцию одним потоком: порядок слотов важнее совпавших или сбившихся часов, note сохраняется', () => {
+    const ring = emptyMessageRing()
+    ring.messageIndex = 1
+    ring.message199 = { kind: 'conversation', role: 'host', text: 'Первая', at: '2026-10-12T12:00:00.000Z' }
+    ring.message0 = { kind: 'chat', name: 'Гость', text: 'Вторая', at: '2026-10-12T12:00:00.000Z' }
+    ring.message1 = { kind: 'conversation', role: 'judge', text: 'Третья', note: 'Правильный ответ: Август', at: '2026-10-11T12:00:00.000Z' }
+    const stream = conversationStreamFromRing(ring)
+    expect(stream.map((item) => item.text)).toEqual(['Первая', 'Вторая', 'Третья'])
+    expect(stream.at(-1)).toMatchObject({ note: 'Правильный ответ: Август' })
+    expect(conversationStreamFromRing(emptyMessageRing())).toEqual([])
+  })
+
   it('вставляет текстовый чат между голосовыми репликами по времени', () => {
     const stream = mergeConversationStream(
       [

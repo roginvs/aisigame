@@ -1,7 +1,8 @@
 import { masterBuildMismatchMessage } from './buildMatch.ts'
 import { decidePackGate } from './packGate.ts'
 import { deletePack, getPack, putPack } from './packDb.ts'
-import type { ConferenceMessage, ConferenceSnapshot, PackOfferMessage } from './messages.ts'
+import { validConferenceState, type ConferenceMessage, type ConferenceSnapshot, type ConferenceState, type PackOfferMessage } from './messages.ts'
+import { snapshotFromState } from './stateProtocol.ts'
 import { createPackPipeJoiner, type PackPipeInbound } from './packPipe.ts'
 import { derivePackPhase, type PackPhase } from './packProgress.ts'
 import { CHUNK_BYTES, createPackReceiver } from './packTransfer.ts'
@@ -67,9 +68,13 @@ export class JoinerSession {
   private masterOffline = false
   private packName = ''
   private lastSnapshot: ConferenceSnapshot | null = null
+  private masterState: ConferenceState | null = null
+  private stateRevision: number | null = null
+  private waitingStatus = true
   /** Любой трафик от мастера (снимок, offer, chunk) — признак, что он жив. */
   private lastMasterAliveAt: number | null = null
   private activeOfferKey = ''
+  private statePackSenderId: string | null = null
   private readyPackHash: string | null = null
   private masterAuthorityToken: string | null = null
   private masterSenderId: string | null = null
@@ -132,8 +137,10 @@ export class JoinerSession {
         })
     })
     this.sendHello()
+    this.requestStatus()
     this.heartbeatTimer = window.setInterval(() => {
       this.sendHello()
+      if (this.waitingStatus) this.requestStatus()
       const offline =
         this.lastMasterAliveAt !== null && Date.now() - this.lastMasterAliveAt >= PRESENCE_STALE_MS
       if (offline !== this.masterOffline) {
@@ -184,6 +191,13 @@ export class JoinerSession {
 
   snapshot(): ConferenceSnapshot | null {
     return this.lastSnapshot
+  }
+
+  /** Полный статус можно запросить повторно в любой момент. Ответ общий для комнаты. */
+  requestStatus(): void {
+    if (this.disposed) return
+    this.waitingStatus = true
+    this.transport.send({ type: 'statusRequest', clientId: this.clientId, authToken: this.authToken })
   }
 
   private emitLobby(): void {
@@ -260,18 +274,40 @@ export class JoinerSession {
     if (message.type === 'snapshot' || message.type === 'packOffer') {
       if (!this.acceptMaster(message.authorityToken, senderId, true)) return
       if (!this.acceptMasterBuild(message.commit)) return
-    } else if (message.type === 'packChunk') {
+    } else if (message.type === 'packChunk' || message.type === 'partialUpdate') {
       if (!this.acceptMaster(message.authorityToken, senderId, false)) return
     } else {
       return
     }
     if (message.type === 'snapshot') {
       this.noteMasterAlive()
-      this.lastSnapshot = message
-      this.gameStarted = message.phase !== 'lobby'
-      this.callbacks.onSnapshot(message)
-      if (this.gameStarted) this.sendReady()
-      this.emitLobby()
+      if (this.stateRevision !== null && message.revision < this.stateRevision) return
+      const { type: _type, authorityToken: _token, revision, ...state } = message
+      this.masterState = state
+      this.stateRevision = revision
+      this.waitingStatus = false
+      this.emitSnapshot()
+      await this.syncPackFromState(message.authorityToken)
+      return
+    }
+    if (message.type === 'partialUpdate') {
+      this.noteMasterAlive()
+      if (this.stateRevision !== null && message.revision < this.stateRevision) return
+      if (this.stateRevision === message.revision && message.revision !== message.baseRevision) return
+      if (!this.masterState || this.stateRevision !== message.baseRevision) {
+        if (!this.waitingStatus) this.requestStatus()
+        return
+      }
+      const state = { ...this.masterState, ...message.changes }
+      if (!validConferenceState(state)) {
+        this.requestStatus()
+        return
+      }
+      if (!this.acceptMasterBuild(state.commit)) return
+      this.masterState = state
+      this.stateRevision = message.revision
+      if (Object.keys(message.changes).length > 0) this.emitSnapshot()
+      await this.syncPackFromState(message.authorityToken)
       return
     }
     if (message.type === 'packOffer') {
@@ -283,6 +319,30 @@ export class JoinerSession {
       this.noteMasterAlive()
       await this.handlePackChunkMessage(message)
     }
+  }
+
+  private emitSnapshot(): void {
+    if (!this.masterState) return
+    this.lastSnapshot = snapshotFromState(this.masterState)
+    this.gameStarted = this.lastSnapshot.phase !== 'lobby'
+    this.callbacks.onSnapshot(this.lastSnapshot)
+    if (this.gameStarted) this.sendReady()
+    this.emitLobby()
+  }
+
+  private async syncPackFromState(authorityToken: string): Promise<void> {
+    const pack = this.masterState?.pack
+    if (!pack) return
+    const key = `${pack.hash}:${pack.size}`
+    if (key === this.activeOfferKey && this.statePackSenderId === this.masterSenderId) return
+    this.statePackSenderId = this.masterSenderId
+    // Мастер мог появиться позже первого hello клиента. Связываем endpoint
+    // перед статусом кеша/запросом файла, чтобы эти сообщения были приняты.
+    this.sendHello()
+    await this.handlePackOffer({
+      type: 'packOffer', authorityToken, targetClientId: this.clientId,
+      commit: this.masterState?.commit, ...pack,
+    })
   }
 
   private async handlePackChunkMessage(message: {
@@ -309,6 +369,7 @@ export class JoinerSession {
     if (ack.bytes) {
       const offer = this.packReceiver.state()
       if (offer) {
+        this.sendPackStatus(offer.hash, 'verifying', 99)
         const gate = await decidePackGate(ack.bytes, offer.hash, offer.expectedSize)
         if (gate.ready) {
           await this.acceptPack(ack.bytes, offer.hash, gate.store)
@@ -337,7 +398,7 @@ export class JoinerSession {
       // Новый мастер после перезагрузки ещё не знает прежний ready. Повторяем
       // его в ответ на offer, не заставляя игрока возвращаться в лобби.
       if (this.readyRequested || this.gameStarted) {
-        this.transport.send({ type: 'ready', clientId: this.clientId, authToken: this.authToken })
+        this.sendReady()
       }
       this.emitLobby()
       return
@@ -345,7 +406,9 @@ export class JoinerSession {
 
     if (offerKey === this.activeOfferKey) {
       const nextIndex = this.packReceiver.state()?.nextIndex ?? 0
-      this.sendPackAck(message.hash, nextIndex)
+      // Метаданные из полного статуса уже запустили проверку кеша/ACK 0.
+      // Ответный offer перед первым куском не перезапускает то же окно снова.
+      if (nextIndex > 0) this.sendPackAck(message.hash, nextIndex)
       return
     }
 
@@ -355,6 +418,7 @@ export class JoinerSession {
     this.readySent = false
     this.readyPackHash = null
     this.packReceiver.handle(message)
+    this.sendPackStatus(message.hash, this.usePackPipe && this.pipeState !== 'open' ? 'connecting' : 'downloading', 0)
     this.emitLobby()
 
     let cached: Uint8Array | null = null
@@ -367,6 +431,9 @@ export class JoinerSession {
     if (this.disposed) return
 
     if (cached) {
+      this.lobbyPercent = 99
+      this.sendPackStatus(message.hash, 'verifying', 99)
+      this.emitLobby()
       const gate = await decidePackGate(cached, message.hash, message.size)
       if (gate.ready) {
         await this.acceptPack(cached, message.hash, false)
@@ -379,7 +446,9 @@ export class JoinerSession {
 
     // ACK 0 doubles as an explicit request/restart. This also makes late join
     // work when the master's first automatic chunk window was missed.
+    this.lastPackPhase = this.usePackPipe && this.pipeState !== 'open' ? 'connecting' : 'downloading'
     this.packReceiver.restart()
+    this.sendPackStatus(message.hash, this.usePackPipe && this.pipeState !== 'open' ? 'connecting' : 'downloading', 0)
     this.sendPackAck(message.hash, 0)
     this.emitLobby()
   }
@@ -449,6 +518,10 @@ export class JoinerSession {
     this.transport.send(this.packVerifiedMessage(hash))
   }
 
+  private sendPackStatus(hash: string, packPhase: 'connecting' | 'downloading' | 'verifying', percent: number): void {
+    this.transport.send({ type: 'packStatus', clientId: this.clientId, authToken: this.authToken, hash, packPhase, percent })
+  }
+
   private packVerifiedMessage(hash: string) {
     return {
       type: 'packVerified' as const,
@@ -472,9 +545,11 @@ export class JoinerSession {
   }
 
   private noteMasterAlive(): void {
+    const changed = this.waitingMaster || this.masterOffline
     this.waitingMaster = false
     this.masterOffline = false
     this.lastMasterAliveAt = Date.now()
+    if (changed) this.emitLobby()
   }
 
   private acceptMasterBuild(masterCommit: string | undefined): boolean {
@@ -501,7 +576,10 @@ export class JoinerSession {
     // После перезагрузки у мастера новый Jitsi endpoint и пустая таблица
     // привязок. Старые ready/hello нельзя считать доставленными ему.
     this.readySent = false
+    this.masterState = null
+    this.stateRevision = null
     this.sendHello()
+    this.requestStatus()
     return true
   }
 }

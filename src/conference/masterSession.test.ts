@@ -6,11 +6,15 @@ import { demoPack } from '../game/questions.ts'
 import type { SavedMatch } from '../game/types.ts'
 import type { GameVoice } from '../realtime/client.ts'
 import { MasterSession } from './masterSession.ts'
-import type { ConferenceMessage } from './messages.ts'
+import { isConferenceMessage, type ConferenceMessage, type ConferenceState } from './messages.ts'
+import { emptyMessageRing, readMessageRing, messageRingEntries } from './messageRing.ts'
+import { snapshotFromState } from './stateProtocol.ts'
 import { CHUNK_BYTES } from './chunks.ts'
+import { decodePackChunkBinary } from './packPipeCodec.ts'
 import { clearRememberedPlayersForTests, PRESENCE_HEARTBEAT_MS, PRESENCE_STALE_MS } from './presence.ts'
+import type { ConferenceChatLine, ConferenceMessageRing } from './messages.ts'
 import type { ConferenceTransport } from './transport.ts'
-import { formatDebugDump } from '../debug/trace.ts'
+import { formatDebugDump, pushHostLine, pushPlayerLine, pushJudgeLine } from '../debug/trace.ts'
 import {
   LOBBY_IDLE_INTERVAL_MS,
   LOBBY_SILENCE_BEFORE_SPEECH_MS,
@@ -86,6 +90,97 @@ describe('MasterSession resume', () => {
     vi.useRealTimers()
   })
 
+  it('первым шлёт полный статус; дальше дифы, полный ответ только на запрос привязанного клиента', () => {
+    const actor = createActor(gameMachine).start()
+    const transport = new MemoryTransport()
+    const session = new MasterSession({
+      transport, actor, client: { requestSpeech: vi.fn() } as unknown as GameVoice,
+      masterClientId: 'master-client', masterName: 'Мастер', pack: demoPack,
+      packBytes: new Uint8Array([1, 2, 3]), packHash: 'hash', authorityToken: 'master-token',
+      onRoster: () => {},
+    })
+    expect(transport.sent[0]?.type).toBe('snapshot')
+    vi.advanceTimersByTime(2_000)
+    transport.receive({ type: 'hello', clientId: 'guest-client', authToken: 'guest-token', name: 'Гость' })
+    expect(transport.sent.filter((message) => message.type === 'snapshot')).toHaveLength(1)
+    expect(transport.sent.some((message) => message.type === 'partialUpdate' && message.changes.presence)).toBe(true)
+    transport.receive({ type: 'statusRequest', clientId: 'guest-client', authToken: 'guest-token' }, 'attacker')
+    expect(transport.sent.filter((message) => message.type === 'snapshot')).toHaveLength(1)
+    transport.receive({ type: 'statusRequest', clientId: 'guest-client', authToken: 'guest-token' })
+    expect(transport.sent.filter((message) => message.type === 'snapshot')).toHaveLength(2)
+    expect(transport.sent.at(-1)).toMatchObject({ type: 'snapshot', presence: expect.arrayContaining([expect.objectContaining({ name: 'Гость' })]) })
+    expect(transport.sent.at(-1)).not.toHaveProperty('targetClientId')
+    expect(transport.sent.every(isConferenceMessage)).toBe(true)
+    session.dispose()
+    actor.stop()
+  })
+
+  it('публикует чат, речь ведущей, услышанное и оценку сразу, ровно двумя полями', () => {
+    const actor = createActor(gameMachine).start()
+    const transport = new MemoryTransport()
+    const onHistory = vi.fn()
+    const session = new MasterSession({
+      transport, actor, client: { requestSpeech: vi.fn() } as unknown as GameVoice,
+      masterClientId: 'master-client', masterName: 'Мастер', pack: demoPack,
+      packBytes: new Uint8Array([1, 2, 3]), packHash: 'hash', authorityToken: 'master-token',
+      onRoster: () => {}, onHistory,
+    })
+    const start = transport.sent.length
+    session.sendChat('Мастер', 'Привет')
+    pushHostLine('Новая реплика кольцевого буфера')
+    pushPlayerLine('Ответ игрока')
+    pushJudgeLine('Верно')
+    const updates = transport.sent.slice(start)
+    expect(updates).toHaveLength(4)
+    expect(onHistory).toHaveBeenCalledTimes(4)
+    for (const message of updates) {
+      expect(message.type).toBe('partialUpdate')
+      if (message.type !== 'partialUpdate') throw new Error('нет дифа')
+      expect(Object.keys(message.changes)).toHaveLength(2)
+      expect(message.changes).toHaveProperty('messageIndex')
+      expect(message.changes).toHaveProperty(`message${message.changes.messageIndex}`)
+      expect(isConferenceMessage(message)).toBe(true)
+    }
+    expect(chatLines(lastSnapshot(transport))).toEqual([expect.objectContaining({ text: 'Привет' })])
+    expect(messageRingEntries(lastSnapshot(transport)!).filter(({ message }) => message.kind === 'conversation').slice(-3).map(({ message }) => message.text)).toEqual(['Новая реплика кольцевого буфера', 'Ответ игрока', 'Верно'])
+    session.dispose()
+    const count = transport.sent.length
+    pushPlayerLine('После выхода')
+    expect(transport.sent).toHaveLength(count)
+    actor.stop()
+  })
+
+  it('первый статус после продолжения содержит исходные слоты, note и индекс; новая реплика продолжает кольцо', () => {
+    const actor = createActor(gameMachine).start()
+    const transport = new MemoryTransport()
+    const history = emptyMessageRing()
+    history.messageIndex = 199
+    history.message198 = { kind: 'chat', name: 'Гость', text: 'Чат перед обновлением' }
+    history.message199 = { kind: 'conversation', role: 'host', text: 'Верно', note: 'Правильный ответ: Август' }
+    pushHostLine('Посторонняя реплика trace до подключения комнаты')
+    const onHistory = vi.fn()
+    const session = new MasterSession({
+      transport, actor, client: {} as GameVoice,
+      masterClientId: 'master-client', masterName: 'Мастер', pack: demoPack,
+      packBytes: new Uint8Array([1, 2, 3]), packHash: 'hash', authorityToken: 'master-token',
+      onRoster: () => {}, onHistory, messageRing: history, resumePlayers: saved.players,
+    })
+    session.resumeGame(() => {
+      actor.send({ type: 'CONTINUE_GAME', pack: demoPack, saved })
+      actor.send({ type: 'CONNECTED' })
+    })
+    const first = transport.sent.find((message) => message.type === 'snapshot')
+    expect(readMessageRing(first)).toEqual(history)
+    pushHostLine('Реплика после продолжения')
+    const next = readMessageRing(lastSnapshot(transport))!
+    expect(next.messageIndex).toBe(0)
+    expect(next.message0).toMatchObject({ kind: 'conversation', text: 'Реплика после продолжения' })
+    expect(next.message199).toEqual(history.message199)
+    expect(onHistory).toHaveBeenLastCalledWith(next)
+    session.dispose()
+    actor.stop()
+  })
+
   it('не рассылает lobby и возвращает прежнему clientId его playerId и счёт', () => {
     const actor = createActor(gameMachine)
     actor.start()
@@ -102,9 +197,8 @@ describe('MasterSession resume', () => {
       packHash: 'hash',
       authorityToken: 'master-token',
       onRoster: () => {},
-      getChat: () => chat,
-      setChat: (next) => {
-        chat = next
+      onHistory: (next) => {
+        chat = chatLines(next)
       },
       resumePlayers: saved.players,
     })
@@ -172,8 +266,6 @@ describe('MasterSession resume', () => {
       packHash: 'hash',
       authorityToken: 'master-token',
       onRoster: () => {},
-      getChat: () => [],
-      setChat: () => {},
     })
 
     transport.receive({ type: 'hello', clientId: 'guest-client', authToken: 'guest-token', name: 'Гость' })
@@ -204,7 +296,7 @@ describe('MasterSession resume', () => {
     actor.stop()
   })
 
-  it('повторный hello при packPipe не сбрасывает прогресс в connecting/0%', () => {
+  it('heartbeat сохраняет прогресс packPipe, а новый endpoint закрывает старый peer и повторяет передачу', async () => {
     class FakeDc {
       bufferedAmount = 0
       bufferedAmountLowThreshold = 0
@@ -215,16 +307,19 @@ describe('MasterSession resume', () => {
       onerror: (() => void) | null = null
       onmessage: ((event: MessageEvent) => void) | null = null
       onbufferedamountlow: (() => void) | null = null
-      send(): void {}
-      close(): void {}
+      send = vi.fn()
+      close = vi.fn(() => { this.readyState = 'closed' })
     }
+    const peers: FakePc[] = []
     class FakePc {
+      constructor() { peers.push(this) }
+      dc = new FakeDc()
       connectionState = 'new'
       localDescription: { type: string; sdp: string } | null = null
       onicecandidate: ((event: { candidate: null }) => void) | null = null
       onconnectionstatechange: (() => void) | null = null
       createDataChannel(): FakeDc {
-        return new FakeDc()
+        return this.dc
       }
       async createOffer(): Promise<{ type: string; sdp: string }> {
         return { type: 'offer', sdp: 'v=0' }
@@ -232,7 +327,7 @@ describe('MasterSession resume', () => {
       async setLocalDescription(desc: { type: string; sdp: string }): Promise<void> {
         this.localDescription = desc
       }
-      close(): void {}
+      close = vi.fn()
     }
     vi.stubGlobal('RTCPeerConnection', FakePc)
 
@@ -251,8 +346,6 @@ describe('MasterSession resume', () => {
       packHash: 'hash',
       authorityToken: 'master-token',
       onRoster: () => {},
-      getChat: () => [],
-      setChat: () => {},
       usePackPipe: true,
     })
 
@@ -285,6 +378,55 @@ describe('MasterSession resume', () => {
       packPhase: 'downloading',
     })
 
+    const oldPeer = peers[0]!
+    oldPeer.dc.readyState = 'open'
+    oldPeer.dc.onopen?.()
+    transport.receive({ type: 'packAck', clientId: 'guest-client', authToken: 'guest-token', hash: 'hash', nextIndex: 10 })
+    transport.receive({ type: 'packVerified', clientId: 'guest-client', authToken: 'guest-token', hash: 'hash' })
+    transport.receive({ type: 'ready', clientId: 'guest-client', authToken: 'guest-token' })
+    expect(session.rosterList().find((entry) => entry.clientId === 'guest-client')).toMatchObject({ hashOk: true, ready: true })
+    transport.receive({ ...hello, authToken: 'wrong-token' }, 'reloaded-endpoint')
+    expect(peers).toHaveLength(1)
+    expect(oldPeer.close).not.toHaveBeenCalled()
+
+    transport.receive(hello, 'reloaded-endpoint')
+    expect(peers).toHaveLength(2)
+    expect(oldPeer.close).toHaveBeenCalledTimes(1)
+    expect(oldPeer.dc.close).toHaveBeenCalledTimes(1)
+    expect(session.rosterList().find((entry) => entry.clientId === 'guest-client')).toMatchObject({
+      percent: 0, hashOk: false, ready: false, packPhase: 'connecting', downloadBps: null, etaSeconds: null,
+    })
+    expect(lastSnapshot(transport)?.presence.find((entry) => entry.clientId === 'guest-client')).toMatchObject({ hashOk: false, ready: false })
+    // Поздний ACK/ошибка закрытого peer не меняют новый канал и его процент.
+    oldPeer.dc.onmessage?.(new MessageEvent('message', { data: JSON.stringify({
+      type: 'packAck', clientId: 'guest-client', authToken: 'guest-token', hash: 'hash', nextIndex: 10,
+    }) }))
+    oldPeer.dc.onerror?.()
+    oldPeer.dc.onclose?.()
+    expect(session.rosterList().find((entry) => entry.clientId === 'guest-client')).toMatchObject({ percent: 0, packPhase: 'connecting' })
+    await vi.advanceTimersByTimeAsync(0)
+    // Старый createOffer мог ещё выполняться в момент reload: он не уходит в эфир.
+    expect(transport.sent.filter((message) => message.type === 'packPipeOffer')).toHaveLength(1)
+    const nextPeer = peers[1]!
+    nextPeer.dc.readyState = 'open'
+    nextPeer.dc.onopen?.()
+    expect(nextPeer.dc.send).not.toHaveBeenCalled()
+    transport.receive({ type: 'packAck', clientId: 'guest-client', authToken: 'guest-token', hash: 'hash', nextIndex: 0 }, 'reloaded-endpoint')
+    const offer = nextPeer.dc.send.mock.calls[0]?.[0]
+    expect(typeof offer).toBe('string')
+    expect(JSON.parse(offer as string)).toMatchObject({ type: 'packOffer', targetClientId: 'guest-client', hash: 'hash' })
+    const chunks = nextPeer.dc.send.mock.calls
+      .filter(([payload]) => payload instanceof ArrayBuffer)
+      .map(([payload]) => decodePackChunkBinary(payload as ArrayBuffer)?.index)
+    expect(chunks.length).toBeGreaterThan(0)
+    expect(chunks).toEqual(Array.from({ length: chunks.length }, (_, i) => i))
+    transport.receive({ type: 'ready', clientId: 'guest-client', authToken: 'guest-token' }, 'reloaded-endpoint')
+    expect(session.rosterList().find((entry) => entry.clientId === 'guest-client')?.ready).toBe(false)
+    const count = nextPeer.dc.send.mock.calls.length
+    transport.receive(hello, 'reloaded-endpoint')
+    expect(nextPeer.dc.send.mock.calls).toHaveLength(count)
+    expect(peers).toHaveLength(2)
+
     session.dispose()
     actor.stop()
     vi.unstubAllGlobals()
@@ -306,8 +448,6 @@ describe('MasterSession resume', () => {
       packHash: 'hash',
       authorityToken: 'master-token',
       onRoster: () => {},
-      getChat: () => [],
-      setChat: () => {},
     })
 
     transport.receive({ type: 'hello', clientId: 'guest-client', authToken: 'guest-token', name: 'Гость' })
@@ -342,8 +482,6 @@ describe('MasterSession resume', () => {
       packHash: 'hash',
       authorityToken: 'master-token',
       onRoster: () => {},
-      getChat: () => [],
-      setChat: () => {},
     })
 
     transport.receive({ type: 'hello', clientId: 'guest-client', authToken: 'guest-token', name: 'Гость' })
@@ -394,8 +532,6 @@ describe('MasterSession resume', () => {
       packHash: 'hash',
       authorityToken: 'master-token',
       onRoster: () => {},
-      getChat: () => [],
-      setChat: () => {},
     })
 
     const hello = { type: 'hello', clientId: 'guest-client', authToken: 'guest-token', name: 'Гость' } as const
@@ -453,8 +589,6 @@ describe('MasterSession resume', () => {
       packHash: 'hash',
       authorityToken: 'master-token',
       onRoster: () => {},
-      getChat: () => [],
-      setChat: () => {},
     })
 
     flushLobbySilence()
@@ -490,8 +624,6 @@ describe('MasterSession resume', () => {
       packHash: 'hash',
       authorityToken: 'master-token',
       onRoster: () => {},
-      getChat: () => [],
-      setChat: () => {},
       isRoomSpeaking: () => speaking,
     })
 
@@ -523,8 +655,6 @@ describe('MasterSession resume', () => {
       packHash: 'hash',
       authorityToken: 'master-token',
       onRoster: () => {},
-      getChat: () => [],
-      setChat: () => {},
     })
     transport.receive({ type: 'hello', clientId: 'guest-client', authToken: 'guest-token', name: 'Гость' })
     transport.receive(
@@ -567,8 +697,6 @@ describe('MasterSession resume', () => {
       packHash: 'hash',
       authorityToken: 'master-token',
       onRoster: () => {},
-      getChat: () => [],
-      setChat: () => {},
     })
     transport.receive({ type: 'hello', clientId: 'guest-client', authToken: 'guest-token', name: 'Гость' })
     transport.receive({
@@ -610,8 +738,6 @@ describe('MasterSession resume', () => {
       packHash: 'hash',
       authorityToken: 'master-token',
       onRoster: () => {},
-      getChat: () => [],
-      setChat: () => {},
     })
     const add = (clientId: string, authToken: string, name: string, endpoint: string) => {
       transport.receive({ type: 'hello', clientId, authToken, name }, endpoint)
@@ -671,8 +797,6 @@ describe('MasterSession resume', () => {
       packHash: 'hash',
       authorityToken: 'master-token',
       onRoster: () => {},
-      getChat: () => [],
-      setChat: () => {},
     })
     transport.receive({ type: 'hello', clientId: 'guest-client', authToken: 'guest-token', name: 'Вася' })
     transport.receive({
@@ -715,8 +839,6 @@ describe('MasterSession resume', () => {
       packHash: 'hash',
       authorityToken: 'master-token',
       onRoster: () => {},
-      getChat: () => [],
-      setChat: () => {},
     })
     transport.receive({ type: 'hello', clientId: 'guest-client', authToken: 'guest-token', name: 'Вася' })
     transport.receive({
@@ -749,5 +871,22 @@ describe('MasterSession resume', () => {
 })
 
 function lastSnapshot(transport: MemoryTransport) {
-  return transport.sent.filter((message) => message.type === 'snapshot').at(-1)
+  let state: ConferenceState | null = null
+  for (const message of transport.sent) {
+    if (message.type === 'snapshot') {
+      const { type: _type, authorityToken: _token, revision: _revision, ...fields } = message
+      state = fields
+    } else if (message.type === 'partialUpdate' && state) {
+      state = Object.assign({}, state, message.changes)
+    }
+  }
+  return state ? snapshotFromState(state) : null
+}
+
+function chatLines(ring: ConferenceMessageRing | null): ConferenceChatLine[] {
+  return ring ? messageRingEntries(ring).flatMap(({ message }) => {
+    if (message.kind !== 'chat') return []
+    const { kind: _kind, ...line } = message
+    return [line]
+  }) : []
 }

@@ -166,8 +166,15 @@ export class JitsiMessageTransport implements ConferenceTransport {
     if (message.type === 'snapshot') {
       // Снимок важнее кусков пакета: иначе окно CHUNK_WINDOW забивает канал,
       // joiner 10 с не видит presence и пишет «Мастер-игрок отключился».
-      this.pending = this.pending.filter((item) => item.type !== 'snapshot')
+      this.pending = this.pending.filter((item) =>
+        (item.type !== 'snapshot' && item.type !== 'partialUpdate') || item.authorityToken !== message.authorityToken,
+      )
       this.pending.unshift(message)
+    } else if (message.type === 'partialUpdate') {
+      // Дифы идут в исходном порядке, сразу после ожидающего полного статуса;
+      // куски пакета с забитым bufferedAmount не задерживают presence/ходы.
+      const lastState = this.pending.findLastIndex((item) => item.type === 'snapshot' || item.type === 'partialUpdate')
+      this.pending.splice(lastState + 1, 0, message)
     } else if (message.type === 'hello') {
       this.pending = this.pending.filter(
         (item) => item.type !== 'hello' || item.clientId !== message.clientId,

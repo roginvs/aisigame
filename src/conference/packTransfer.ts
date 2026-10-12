@@ -22,6 +22,8 @@ export type PackClientPipe = {
 
 export type PackTransferMaster = {
   start: () => void
+  /** Новый endpoint того же клиента: прежние offer/ACK больше не относятся к его странице. */
+  resetClient: (clientId: string) => void
   pumpClient: (clientId: string) => void
   handleAck: (clientId: string, nextIndex: number) => void
   dispose: () => void
@@ -124,6 +126,10 @@ export function createPackTransferMaster(input: {
   }
 
   return {
+    resetClient(clientId) {
+      senders.delete(clientId)
+      offered.delete(clientId)
+    },
     start() {
       for (const clientId of input.targetClientIds()) pumpForClient(clientId)
     },

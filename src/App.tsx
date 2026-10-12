@@ -34,6 +34,7 @@ import {
   decideResumeFile,
   packCanResume,
   persistConferenceLobby,
+  persistConferenceHistory,
   persistMatch,
   readMatchMode,
   readSavedGame,
@@ -58,7 +59,8 @@ import {
   writeVoiceModelId,
 } from './realtime/models.ts'
 import { createVoice } from './realtime/voice.ts'
-import type { ConferenceChatLine, ConferenceSnapshot } from './conference/messages.ts'
+import { emptyMessageRing, readMessageRing } from './conference/messageRing.ts'
+import type { ConferenceMessageRing, ConferenceSnapshot } from './conference/messages.ts'
 import type { PackPhase } from './conference/packProgress.ts'
 import type { RosterEntry } from './conference/roster.ts'
 import { GameScreen } from './ui/GameScreen.tsx'
@@ -126,8 +128,8 @@ export default function App() {
   const [masterRoster, setMasterRoster] = useState<RosterEntry[]>([])
   const [masterRosterAll, setMasterRosterAll] = useState<RosterEntry[]>([])
   const [masterParticipantIds, setMasterParticipantIds] = useState<Record<string, string>>({})
-  const [conferenceChat, setConferenceChat] = useState<ConferenceChatLine[]>(() => readSavedGame()?.chat ?? [])
-  const conferenceChatRef = useRef(conferenceChat)
+  const [masterHistory, setMasterHistory] = useState<ConferenceMessageRing>(() => readMessageRing(readSavedGame()) ?? emptyMessageRing())
+  const masterHistoryRef = useRef(masterHistory)
   const [joinerSnapshot, setJoinerSnapshot] = useState<ConferenceSnapshot | null>(null)
   const [joinerLobby, setJoinerLobby] = useState({
     waitingMaster: true,
@@ -192,9 +194,6 @@ export default function App() {
   useEffect(() => {
     keyRef.current = needsKey ? activeKey : 'mock'
   }, [needsKey, activeKey])
-  useEffect(() => {
-    conferenceChatRef.current = conferenceChat
-  }, [conferenceChat])
 
   useEffect(() => {
     if (packId === ownPackId) return
@@ -429,10 +428,10 @@ export default function App() {
                 conferenceLobby,
                 jitsiUrl,
                 roomId: conferenceRoomId,
-                chat: conferenceChat,
+                messageRing: masterHistory,
               }
             : conferenceRole === 'master'
-              ? { mode: 'conference', conferenceLobby, jitsiUrl, chat: conferenceChat }
+              ? { mode: 'conference', conferenceLobby, jitsiUrl, messageRing: masterHistory }
               : { mode: 'table', conferenceLobby: false },
       }),
     )
@@ -446,7 +445,7 @@ export default function App() {
     conferenceRoomId,
     conferenceLobby,
     jitsiUrl,
-    conferenceChat,
+    masterHistory,
     hearTurnOnly,
   ])
 
@@ -632,8 +631,8 @@ export default function App() {
       setConferenceLobby(false)
       setJoinerSnapshot(null)
       setJoinerPack(null)
-      conferenceChatRef.current = []
-      setConferenceChat([])
+      masterHistoryRef.current = emptyMessageRing()
+      setMasterHistory(masterHistoryRef.current)
     } finally {
       tearingDownConferenceRef.current = false
     }
@@ -787,14 +786,9 @@ export default function App() {
       setConferenceRoomId(roomId)
       setConferenceLobby(!restoringGame)
       writeMasterRoomId(roomId)
-      if (resume?.saved.chat) {
-        conferenceChatRef.current = resume.saved.chat
-        setConferenceChat(resume.saved.chat)
-      } else {
-        // Новая комната не должна показывать текстовый чат прошлой партии.
-        conferenceChatRef.current = []
-        setConferenceChat([])
-      }
+      const history = resume ? readMessageRing(resume.saved) ?? emptyMessageRing() : emptyMessageRing()
+      masterHistoryRef.current = history
+      setMasterHistory(history)
       const session = new MasterSession({
         transport: handle.transport,
         client: voiceClientRef.current!,
@@ -822,10 +816,12 @@ export default function App() {
             ),
           )
         },
-        getChat: () => conferenceChatRef.current,
-        setChat: (chat) => {
-          conferenceChatRef.current = chat
-          setConferenceChat(chat)
+        messageRing: history,
+        onHistory: (next) => {
+          masterHistoryRef.current = next
+          setMasterHistory(next)
+          const persisted = persistConferenceHistory(roomId, next)
+          if (persisted) setSavedGame(persisted)
         },
         isRoomSpeaking: () => conferenceHandleRef.current?.anyoneSpeaking() ?? false,
         resumePlayers: restoringGame ? resume?.saved.players : undefined,
@@ -848,7 +844,7 @@ export default function App() {
             master: { id: 1, name: roomMasterName, score: 0, clientId: masterClientId },
             jitsiUrl: roomJitsi,
             roomId,
-            chat: conferenceChatRef.current,
+            messageRing: masterHistoryRef.current,
             hearTurnOnly,
           }),
         )
@@ -1195,6 +1191,7 @@ export default function App() {
         ? contextFromSnapshot(
             joinerSnapshot ?? {
               phase: 'lobby',
+              pack: null,
               players: [{ id: 1, name: conferenceName || 'Игрок', score: 0, clientId: masterClientId }],
               presence: [],
               roundIndex: joinerPack.rounds[0]?.index ?? 0,
@@ -1225,8 +1222,7 @@ export default function App() {
               statusLine: 'Ждём игроков',
               phaseDurationMs: null,
               timerRemainingMs: null,
-              conversation: [],
-              chat: [],
+              ...emptyMessageRing(),
             },
             joinerPack,
           )
@@ -1341,7 +1337,7 @@ export default function App() {
                 if (conferenceRole === 'joiner') joinerSessionRef.current?.sendChat(text)
                 else masterSessionRef.current?.sendChat(conferenceName || 'Мастер', text)
               },
-              chatLines: conferenceRole === 'master' ? conferenceChat : undefined,
+              messageRing: conferenceRole === 'master' ? masterHistory : joinerSnapshot ?? emptyMessageRing(),
               onConferenceExit: conferenceRole === 'joiner' ? leaveConferenceToMenu : exitToMenu,
               hiddenClientIds: hiddenConferenceClientIds,
               hearTurnOnly: conferenceRole === 'master' ? hearTurnOnly : undefined,

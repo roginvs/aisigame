@@ -5,7 +5,7 @@ import { statePath } from '../game/machine.ts'
 import type { GameContext, Player, QuestionPack } from '../game/types.ts'
 import { buildConferenceSnapshot, timerRemainingMs } from './buildSnapshot.ts'
 import { createPackPipeHub, type PackPipeLinkState } from './packPipe.ts'
-import { createPackTransferMaster, type PackTransferMaster } from './packTransfer.ts'
+import { CHUNK_BYTES, createPackTransferMaster, type PackTransferMaster } from './packTransfer.ts'
 import type { PackPhase } from './packProgress.ts'
 import {
   LOBBY_IDLE_INTERVAL_MS,
@@ -16,8 +16,8 @@ import {
   packLobbySummary,
 } from './lobbySpeech.ts'
 import {
-  CONFERENCE_HISTORY_LIMIT,
-  type ConferenceChatLine,
+  type ConferenceMessageRing,
+  type ConferenceHistoryMessage,
   type ConferenceMessage,
   type ConferenceSnapshot,
 } from './messages.ts'
@@ -25,7 +25,10 @@ import { paceAfterAck, type TransferPace } from './packProgress.ts'
 import { ConferenceRoster } from './roster.ts'
 import type { ConferenceTransport } from './transport.ts'
 import { PRESENCE_HEARTBEAT_MS, PRESENCE_STALE_MS } from './presence.ts'
-import { appendRemoteDebug, clearRemoteDebug } from '../debug/trace.ts'
+import { appendRemoteDebug, clearRemoteDebug, getTrace, subscribeTrace } from '../debug/trace.ts'
+import { emptyMessageRing } from './messageRing.ts'
+import { ConferenceStatePublisher } from './stateProtocol.ts'
+import { conversationLineFromTrace } from './traceConversation.ts'
 
 type GameActor = Actor<typeof gameMachine>
 
@@ -40,8 +43,8 @@ export type MasterSessionOptions = {
   packHash: string
   authorityToken: string
   onRoster: () => void
-  getChat: () => ConferenceChatLine[]
-  setChat: (chat: ConferenceChatLine[]) => void
+  messageRing?: ConferenceMessageRing
+  onHistory?: (history: ConferenceMessageRing) => void
   /** Игроки сохранённой партии. Если переданы, лобби не объявляется и не рассылается. */
   resumePlayers?: readonly Player[]
   /** Речь людей в комнате (без «Ведущей»): лобби ждёт тишину перед репликой. */
@@ -75,12 +78,12 @@ export class MasterSession {
   private heartbeatTimer = 0
   private presenceTimer = 0
   private onRosterCb: () => void
-  private getChat: () => ConferenceChatLine[]
-  private setChat: (chat: ConferenceChatLine[]) => void
+  private initialHistory: ConferenceMessageRing
+  private onHistory: (history: ConferenceMessageRing) => void
   private isRoomSpeaking: () => boolean
   private machineSub: { unsubscribe: () => void } | null = null
   private masterClientId: string
-  private packOfferSent = false
+  private packRequested = new Set<string>()
   private authorityToken: string
   private clientAuth = new Map<string, string>()
   private clientSender = new Map<string, string>()
@@ -89,6 +92,9 @@ export class MasterSession {
   private transferPace = new Map<string, TransferPace>()
   private packPipe: ReturnType<typeof createPackPipeHub> | null = null
   private usePackPipe = false
+  private statePublisher: ConferenceStatePublisher | null = null
+  private traceCursor = 0
+  private traceUnsub: () => void
 
   constructor(options: MasterSessionOptions) {
     clearRemoteDebug()
@@ -101,8 +107,8 @@ export class MasterSession {
     this.packHash = options.packHash
     this.authorityToken = options.authorityToken
     this.onRosterCb = options.onRoster
-    this.getChat = options.getChat
-    this.setChat = options.setChat
+    this.initialHistory = options.messageRing ?? emptyMessageRing()
+    this.onHistory = options.onHistory ?? (() => {})
     this.isRoomSpeaking = options.isRoomSpeaking ?? (() => false)
     this.roster = new ConferenceRoster(options.masterClientId, options.masterName)
     this.verified.add(options.masterClientId)
@@ -119,7 +125,7 @@ export class MasterSession {
         sendSignal: (message) => this.transport.send(message),
         onOpen: (clientId) => {
           this.roster.updateProgress(clientId, { packPhase: 'downloading' })
-          this.packTransfer.pumpClient(clientId)
+          if (this.packRequested.has(clientId)) this.packTransfer.pumpClient(clientId)
           this.onRosterCb()
         },
         onInbound: (clientId, inbound) => {
@@ -173,9 +179,18 @@ export class MasterSession {
     }, 1000)
 
     if (!this.gameStarted) {
+      this.broadcastFullStatus()
       this.maybeOpenLobbySpeech()
-      this.broadcastLobbySnapshot()
     }
+    this.traceCursor = getTrace().at(-1)?.id ?? 0
+    this.traceUnsub = subscribeTrace(() => {
+      const entries = getTrace().filter((entry) => entry.id > this.traceCursor)
+      this.traceCursor = entries.at(-1)?.id ?? this.traceCursor
+      for (const entry of entries) {
+        const line = conversationLineFromTrace(entry)
+        if (line && this.statePublisher) this.broadcastMessage({ kind: 'conversation', ...line })
+      }
+    })
   }
 
   attachMachine(): void {
@@ -219,7 +234,7 @@ export class MasterSession {
     sendResume()
     this.attachMachine()
     this.onRosterCb()
-    this.broadcastGameSnapshot()
+    this.broadcastFullStatus()
   }
 
   rosterList() {
@@ -243,12 +258,7 @@ export class MasterSession {
   sendChat(name: string, text: string): void {
     const clean = text.trim()
     if (!clean) return
-    const chat = [...this.getChat(), { name, text: clean, at: new Date().toISOString() }].slice(
-      -CONFERENCE_HISTORY_LIMIT,
-    )
-    this.setChat(chat)
-    if (this.gameStarted) this.broadcastGameSnapshot()
-    else this.broadcastLobbySnapshot()
+    this.broadcastMessage({ kind: 'chat', name, text: clean, at: new Date().toISOString() })
   }
 
   dispose(): void {
@@ -256,6 +266,7 @@ export class MasterSession {
     window.clearInterval(this.presenceTimer)
     this.clearLobbySpeechTimer()
     this.machineSub?.unsubscribe()
+    this.traceUnsub()
     this.unsub()
     this.packPipe?.dispose()
     this.packTransfer.dispose()
@@ -263,6 +274,10 @@ export class MasterSession {
 
   private applyPackAck(clientId: string, hash: string, nextIndex: number): void {
     if (hash !== this.packHash) return
+    // Готовый кеш не требует окна кусков или повторного offer.
+    if (this.verified.has(clientId) && nextIndex >= Math.max(1, Math.ceil(this.packBytes.length / CHUNK_BYTES))) return
+    this.packRequested.add(clientId)
+    this.packPipe?.ensure(clientId)
     this.packTransfer.handleAck(clientId, nextIndex)
     const { pace, view } = paceAfterAck(
       this.transferPace.get(clientId),
@@ -280,9 +295,23 @@ export class MasterSession {
 
   private onMessage(message: ConferenceMessage, senderId: string): void {
     if (message.type === 'hello') {
+      const previousEndpoint = this.clientSender.get(message.clientId)
       if (!this.bindClient(message.clientId, message.authToken, senderId)) return
       this.roster.upsertHello(message.clientId, message.name)
       if (message.clientId === this.masterClientId) return
+      if (previousEndpoint && previousEndpoint !== senderId) {
+        // После reload сохраняются clientId и секрет, но в новой странице ещё
+        // нет открытого пакета. Она сама сверит кеш по глобальному хешу.
+        this.verified.delete(message.clientId)
+        this.transferPace.delete(message.clientId)
+        this.roster.updateProgress(message.clientId, {
+          percent: 0, hashOk: false, ready: false,
+          downloadBps: null, etaSeconds: null, packPhase: 'connecting',
+        })
+        this.packTransfer.resetClient(message.clientId)
+        this.packRequested.delete(message.clientId)
+        this.packPipe?.reset(message.clientId)
+      }
       if (this.gameStarted && message.clientId) {
         void this.addMidGamePlayer(message.clientId, message.name)
       }
@@ -290,11 +319,8 @@ export class MasterSession {
         // Повторный hello (heartbeat) не сбрасывает percent/фазу — только поднимает peer при нужде.
         // Новому гостю upsertHello уже ставит packPhase: connecting.
         this.packPipe.ensure(message.clientId)
-        this.packOfferSent = true
-      } else if (!this.packOfferSent) {
-        this.packOfferSent = true
-        this.packTransfer.start()
-      } else {
+      }
+      if (this.packRequested.has(message.clientId)) {
         this.packTransfer.pumpClient(message.clientId)
       }
       this.onRosterCb()
@@ -315,8 +341,23 @@ export class MasterSession {
     }
     if (!('clientId' in message) || !('authToken' in message)) return
     if (!this.clientMatches(message.clientId, message.authToken, senderId)) return
+    if (message.type === 'statusRequest') {
+      this.broadcastFullStatus()
+      return
+    }
     if (message.type === 'packAck') {
       this.applyPackAck(message.clientId, message.hash, message.nextIndex)
+      return
+    }
+    if (message.type === 'packStatus') {
+      if (message.hash !== this.packHash) return
+      this.verified.delete(message.clientId)
+      this.roster.updateProgress(message.clientId, {
+        percent: message.percent, packPhase: message.packPhase, hashOk: false, ready: false,
+        downloadBps: null, etaSeconds: null,
+      })
+      this.onRosterCb()
+      this.broadcastCurrentSnapshot()
       return
     }
     if (message.type === 'packVerified') {
@@ -356,12 +397,7 @@ export class MasterSession {
       const clean = message.text.trim()
       const name = this.roster.get(message.clientId)?.name
       if (!clean || !name) return
-      const chat = [...this.getChat(), { name, text: clean, at: new Date().toISOString() }].slice(
-        -CONFERENCE_HISTORY_LIMIT,
-      )
-      this.setChat(chat)
-      if (this.gameStarted) this.broadcastGameSnapshot()
-      else this.broadcastLobbySnapshot()
+      this.sendChat(name, clean)
       return
     }
     if (message.type === 'debugLog') {
@@ -380,8 +416,7 @@ export class MasterSession {
   }
 
   private broadcastLobbySnapshot(): void {
-    const snap = this.buildSnapshot('lobby')
-    this.transport.send({ type: 'snapshot', authorityToken: this.authorityToken, ...snap })
+    this.publishSnapshot(this.buildSnapshot('lobby'))
   }
 
   private broadcastCurrentSnapshot(): void {
@@ -390,8 +425,29 @@ export class MasterSession {
   }
 
   broadcastGameSnapshot(): void {
-    const snap = this.buildSnapshot(statePath(this.actor.getSnapshot().value))
-    this.transport.send({ type: 'snapshot', authorityToken: this.authorityToken, ...snap })
+    this.publishSnapshot(this.buildSnapshot(statePath(this.actor.getSnapshot().value)))
+  }
+
+  private publishSnapshot(snapshot: ConferenceSnapshot): void {
+    if (!this.statePublisher) {
+      this.statePublisher = new ConferenceStatePublisher(snapshot, this.authorityToken)
+      this.transport.send(this.statePublisher.full())
+    } else {
+      this.transport.send(this.statePublisher.update(snapshot))
+    }
+  }
+
+  private broadcastFullStatus(): void {
+    const snapshot = this.buildSnapshot(this.gameStarted ? statePath(this.actor.getSnapshot().value) : 'lobby')
+    if (!this.statePublisher) this.statePublisher = new ConferenceStatePublisher(snapshot, this.authorityToken)
+    else this.statePublisher.update(snapshot)
+    this.transport.send(this.statePublisher.full())
+  }
+
+  private broadcastMessage(line: ConferenceHistoryMessage): void {
+    if (!this.statePublisher) this.broadcastFullStatus()
+    this.transport.send(this.statePublisher!.appendMessage(line))
+    this.onHistory(this.statePublisher!.history())
   }
 
   private buildSnapshot(phase: string): ConferenceSnapshot {
@@ -401,9 +457,10 @@ export class MasterSession {
     const now = Date.now()
     return buildConferenceSnapshot({
       phase,
+      pack: { hash: this.packHash, size: this.packBytes.byteLength, name: this.pack.name, summary: packLobbySummary(this.pack) },
       context,
       roster: this.roster.allIncludingHidden(now),
-      chat: this.getChat(),
+      messageRing: this.statePublisher?.history() ?? this.initialHistory,
       timerRemainingMs: this.gameStarted ? timerRemainingMs(context, now) : null,
       falseStartIds: this.gameStarted
         ? Object.entries(this.actor.getSnapshot().context.falseStarts)

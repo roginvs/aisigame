@@ -1,4 +1,5 @@
-import { CONFERENCE_HISTORY_LIMIT } from '../conference/messages.ts'
+import type { ConferenceMessageRing } from '../conference/messages.ts'
+import { messageRingFromLegacyChat, readMessageRing } from '../conference/messageRing.ts'
 import { questionById } from './pack.ts'
 import { openingChooser } from './players.ts'
 import type {
@@ -33,12 +34,14 @@ export type SavedGame = SavedMatch & {
   conferenceLobby?: boolean
   jitsiUrl?: string
   roomId?: string
+  /** Только старые входные снимки; при чтении мигрируется в message0…message199. */
   chat?: { name: string; text: string; at?: string }[]
   /** Мастер: галка «Меньше слышать». Старые снимки без поля — выкл. */
   hearTurnOnly?: boolean
-}
+} & Partial<ConferenceMessageRing>
 
 export type PersistMatchConference = {
+  messageRing?: ConferenceMessageRing
   mode?: 'table' | 'conference'
   conferenceLobby?: boolean
   jitsiUrl?: string
@@ -54,6 +57,7 @@ export function persistConferenceLobby(
     packHash?: string
     pack: QuestionPack
     master: Player
+    messageRing?: ConferenceMessageRing
     jitsiUrl: string
     roomId: string
     chat?: { name: string; text: string; at?: string }[]
@@ -71,6 +75,7 @@ export function persistConferenceLobby(
     conferenceLobby: true,
     jitsiUrl: input.jitsiUrl,
     roomId: input.roomId,
+    ...input.messageRing,
     chat: input.chat,
     ...(input.hearTurnOnly === true ? { hearTurnOnly: true } : {}),
     players: [input.master],
@@ -350,21 +355,31 @@ export function restoredMatch(pack: QuestionPack, saved: SavedMatch): Pick<
 function conferenceForSave(
   input: PersistMatchConference | undefined,
   previous: SavedGame | null,
-): Pick<SavedGame, 'mode' | 'conferenceLobby' | 'jitsiUrl' | 'roomId' | 'chat'> {
+): Pick<SavedGame, 'mode' | 'conferenceLobby' | 'jitsiUrl' | 'roomId'> & Partial<ConferenceMessageRing> {
   if (input?.mode === 'table') return { mode: 'table' }
   const mode = input?.mode ?? previous?.mode
   const conferenceLobby = input?.conferenceLobby ?? previous?.conferenceLobby
   const jitsiUrl = input?.jitsiUrl ?? previous?.jitsiUrl
   const roomId = input?.roomId ?? previous?.roomId
-  const chatSource = input?.chat ?? previous?.chat
-  const chat = chatSource ? chatSource.slice(-CONFERENCE_HISTORY_LIMIT) : undefined
+  const messageRing = input?.messageRing ?? readMessageRing(previous) ?? messageRingFromLegacyChat(input?.chat ?? previous?.chat ?? [])
   return {
-    ...(mode === 'conference' ? { mode } : mode === 'table' ? { mode } : {}),
+    ...(mode === 'conference' ? { mode, ...messageRing } : mode === 'table' ? { mode } : {}),
     ...(conferenceLobby === true ? { conferenceLobby: true } : {}),
     ...(typeof jitsiUrl === 'string' && jitsiUrl.trim() ? { jitsiUrl: jitsiUrl.trim() } : {}),
     ...(typeof roomId === 'string' && roomId.trim() ? { roomId: roomId.trim() } : {}),
-    ...(chat && chat.length > 0 ? { chat } : {}),
   }
+}
+
+/** Реплика сохраняется синхронно, включая лобби и паузу, без нового хода машины. */
+export function persistConferenceHistory(roomId: string, history: ConferenceMessageRing, storage: Storage = localStorage): SavedGame | null {
+  const previous = readSavedGame(storage)
+  if (!previous || previous.mode !== 'conference' || previous.roomId !== roomId) return null
+  const clean = readMessageRing(history)
+  if (!clean) return previous
+  const game = sanitize({ ...previous, ...clean })
+  if (!game) return previous
+  storage.setItem(gameStorageKey, JSON.stringify(game))
+  return game
 }
 
 /** `undefined` — оставить как в прошлом снимке; `false` — выкл. и не писать поле. */
@@ -558,15 +573,15 @@ function normalizePlayers(value: unknown): Player[] | null {
 
 function normalizeConference(
   record: Record<string, unknown>,
-): Pick<SavedGame, 'mode' | 'conferenceLobby' | 'jitsiUrl' | 'roomId' | 'chat' | 'hearTurnOnly'> {
-  const out: Pick<SavedGame, 'mode' | 'conferenceLobby' | 'jitsiUrl' | 'roomId' | 'chat' | 'hearTurnOnly'> = {}
+): Pick<SavedGame, 'mode' | 'conferenceLobby' | 'jitsiUrl' | 'roomId' | 'hearTurnOnly'> & Partial<ConferenceMessageRing> {
+  const out: Pick<SavedGame, 'mode' | 'conferenceLobby' | 'jitsiUrl' | 'roomId' | 'hearTurnOnly'> & Partial<ConferenceMessageRing> = {}
   if (record.mode === 'conference') out.mode = 'conference'
   else if (record.mode === 'table') out.mode = 'table'
   if (record.conferenceLobby === true) out.conferenceLobby = true
   if (typeof record.jitsiUrl === 'string' && record.jitsiUrl.trim()) out.jitsiUrl = record.jitsiUrl.trim()
   if (typeof record.roomId === 'string' && record.roomId.trim()) out.roomId = record.roomId.trim()
   const chat = normalizeChat(record.chat)
-  if (chat && chat.length > 0) out.chat = chat.slice(-CONFERENCE_HISTORY_LIMIT)
+  if (out.mode === 'conference') Object.assign(out, readMessageRing(record) ?? messageRingFromLegacyChat(chat ?? []))
   if (record.hearTurnOnly === true) out.hearTurnOnly = true
   return out
 }

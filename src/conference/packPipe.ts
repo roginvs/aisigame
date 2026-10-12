@@ -43,6 +43,8 @@ export function createPackPipeHub(input: {
   onState: (clientId: string, state: PackPipeLinkState) => void
 }): {
   ensure: (clientId: string) => void
+  /** Закрывает peer прежнего endpoint; следующий ensure создаёт новый. */
+  reset: (clientId: string) => void
   ready: (clientId: string) => boolean
   /** Канал открыт и bufferedAmount не выше high-water. */
   canSend: (clientId: string) => boolean
@@ -76,19 +78,22 @@ export function createPackPipeHub(input: {
     }
     dc.binaryType = 'arraybuffer'
     dc.onopen = () => {
+      if (peers.get(clientId) !== peer || peer.dc !== dc) return
       setState(clientId, 'open')
       input.onOpen(clientId)
     }
     dc.onbufferedamountlow = () => {
+      if (peers.get(clientId) !== peer || peer.dc !== dc) return
       if (dc.readyState === 'open') input.onOpen(clientId)
     }
     dc.onclose = () => {
-      if (peers.get(clientId)?.dc === dc) setState(clientId, 'closed')
+      if (peers.get(clientId) === peer && peer.dc === dc) setState(clientId, 'closed')
     }
     dc.onerror = () => {
-      if (peers.get(clientId)?.dc === dc) setState(clientId, 'failed')
+      if (peers.get(clientId) === peer && peer.dc === dc) setState(clientId, 'failed')
     }
     dc.onmessage = (event) => {
+      if (peers.get(clientId) !== peer || peer.dc !== dc) return
       const inbound = parseInbound(event.data)
       if (inbound) input.onInbound(clientId, inbound)
     }
@@ -102,7 +107,9 @@ export function createPackPipeHub(input: {
       const dc = peer.pc.createDataChannel(PACK_DC_LABEL, { ordered: true })
       wireChannel(clientId, peer, dc)
       const offer = await peer.pc.createOffer()
+      if (peers.get(clientId) !== peer) return
       await peer.pc.setLocalDescription(offer)
+      if (peers.get(clientId) !== peer) return
       const sdp = peer.pc.localDescription?.sdp
       if (!sdp) return
       const message: PackPipeOfferMessage = {
@@ -113,18 +120,27 @@ export function createPackPipeHub(input: {
       }
       input.sendSignal(message)
     } catch {
-      setState(clientId, 'failed')
+      if (peers.get(clientId) === peer) setState(clientId, 'failed')
     } finally {
       peer.makingOffer = false
     }
+  }
+
+  function reset(clientId: string): void {
+    const peer = peers.get(clientId)
+    if (!peer) return
+    // Сначала убираем из карты: поздние callbacks/offer старого peer не должны
+    // менять новый канал или подтверждать пакет перезагруженной страницы.
+    peers.delete(clientId)
+    peer.dc?.close()
+    peer.pc.close()
   }
 
   function ensure(clientId: string): void {
     if (peers.has(clientId)) {
       const existing = peers.get(clientId)!
       if (existing.state === 'failed' || existing.state === 'closed') {
-        existing.pc.close()
-        peers.delete(clientId)
+        reset(clientId)
       } else {
         return
       }
@@ -134,6 +150,7 @@ export function createPackPipeHub(input: {
     peers.set(clientId, peer)
     setState(clientId, 'connecting')
     pc.onicecandidate = (event) => {
+      if (peers.get(clientId) !== peer) return
       const message: PackPipeIceMessage = {
         type: 'packPipeIce',
         authorityToken: input.authorityToken,
@@ -143,6 +160,7 @@ export function createPackPipeHub(input: {
       input.sendSignal(message)
     }
     pc.onconnectionstatechange = () => {
+      if (peers.get(clientId) !== peer) return
       if (pc.connectionState === 'failed' || pc.connectionState === 'disconnected') {
         if (peer.state !== 'open') setState(clientId, 'failed')
       }
@@ -155,7 +173,7 @@ export function createPackPipeHub(input: {
       const peer = peers.get(fromClientId)
       if (!peer) return
       void peer.pc.setRemoteDescription({ type: 'answer', sdp: message.sdp }).catch(() => {
-        setState(fromClientId, 'failed')
+        if (peers.get(fromClientId) === peer) setState(fromClientId, 'failed')
       })
       return
     }
@@ -199,6 +217,7 @@ export function createPackPipeHub(input: {
 
   return {
     ensure,
+    reset,
     ready: (clientId) => openChannel(clientId) !== null,
     canSend,
     sendOffer,
@@ -206,8 +225,7 @@ export function createPackPipeHub(input: {
     handleSignal,
     state: (clientId) => peers.get(clientId)?.state ?? 'idle',
     dispose() {
-      for (const peer of peers.values()) peer.pc.close()
-      peers.clear()
+      for (const clientId of peers.keys()) reset(clientId)
     },
   }
 }

@@ -1,11 +1,22 @@
 import type { ChatRole } from '../debug/trace.ts'
-import type { ConferenceChatLine, ConferenceConversationLine } from '../conference/messages.ts'
+import type { ConferenceChatLine, ConferenceConversationLine, ConferenceMessageRing } from '../conference/messages.ts'
+import { messageRingEntries } from '../conference/messageRing.ts'
 
 export type VoiceStreamLine = ConferenceConversationLine & { note?: string }
 
 export type ConversationStreamItem =
   | { kind: 'voice'; key: string; at: string; role: ChatRole; text: string; note?: string }
   | { kind: 'typed'; key: string; at: string; name: string; text: string }
+
+/** Конференция читает единственный буфер напрямую, без разделения и сортировки. */
+export function conversationStreamFromRing(ring: ConferenceMessageRing): ConversationStreamItem[] {
+  return messageRingEntries(ring).map(({ slot, message }) => {
+    const key = `${slot}-${message.at ?? ''}-${message.kind}`
+    return message.kind === 'chat'
+      ? { kind: 'typed', key, at: message.at ?? '', name: message.name, text: message.text }
+      : { kind: 'voice', key, at: message.at ?? '', role: message.role, text: message.text, ...(message.note ? { note: message.note } : {}) }
+  })
+}
 
 function stampMs(at: string | undefined): number {
   if (!at) return Number.POSITIVE_INFINITY

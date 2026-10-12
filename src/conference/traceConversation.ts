@@ -1,16 +1,12 @@
-import { getTrace, type ChatRole } from '../debug/trace.ts'
-import { CONFERENCE_HISTORY_LIMIT, type ConferenceConversationLine } from './messages.ts'
+import type { ChatRole, TraceEntry } from '../debug/trace.ts'
+import type { ConferenceConversationLine } from './messages.ts'
 
-export function readConversationLines(limit = CONFERENCE_HISTORY_LIMIT): ConferenceConversationLine[] {
-  const out: ConferenceConversationLine[] = []
-  for (const entry of getTrace()) {
-    if (entry.kind !== 'chat') continue
-    const role = chatRole(entry.detail)
-    const text = chatText(entry.detail)
-    if (!text) continue
-    out.push({ role, text, at: entry.at })
-  }
-  return out.slice(-limit)
+export function conversationLineFromTrace(entry: TraceEntry): ConferenceConversationLine | null {
+  if (entry.kind !== 'chat') return null
+  const text = chatText(entry.detail)
+  const note = entry.detail && typeof entry.detail === 'object' && 'note' in entry.detail && typeof entry.detail.note === 'string'
+    ? entry.detail.note : undefined
+  return text ? { role: chatRole(entry.detail), text, at: entry.at, ...(note ? { note } : {}) } : null
 }
 
 function chatRole(detail: unknown): ChatRole {

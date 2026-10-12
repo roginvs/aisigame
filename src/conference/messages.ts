@@ -1,12 +1,13 @@
 /** Сообщения конференции — plain JSON, без классов. */
 import type { AnnounceKind, JudgmentStatus } from '../game/types.ts'
 
-/** Сколько последних реплик «Разговора» и строк чата кладём в снимок и храним у мастера. */
-export const CONFERENCE_HISTORY_LIMIT = 100
+/** Общий кольцевой буфер текстового чата и реплик «Разговора». */
+export const CONFERENCE_HISTORY_LIMIT = 200
 
 export type ConferenceConversationLine = {
   role: 'host' | 'player' | 'judge'
   text: string
+  note?: string
   /** ISO-время для общего хронологического потока с текстовым чатом. */
   at?: string
 }
@@ -47,9 +48,18 @@ export type ConferenceSnapshotPresence = {
   hashOk: boolean
 }
 
+export type ConferencePackManifest = {
+  hash: string
+  size: number
+  name: string
+  summary: string
+}
+
 export type ConferenceSnapshot = {
   /** Хеш коммита сборки мастера (`buildCommit`); joiner сверяет со своим. Старые мастера могут не слать. */
   commit?: string
+  /** Пакет — часть глобального статуса, доступная без отдельного packOffer. */
+  pack: ConferencePackManifest | null
   phase: string
   players: ConferenceSnapshotPlayer[]
   presence: ConferenceSnapshotPresence[]
@@ -81,8 +91,32 @@ export type ConferenceSnapshot = {
   statusLine: string
   phaseDurationMs: number | null
   timerRemainingMs: number | null
-  conversation: ConferenceConversationLine[]
-  chat: ConferenceChatLine[]
+} & ConferenceMessageRing
+
+/** Единая история состояния, сохранения и экрана — сообщения в отдельных слотах. */
+export type ConferenceHistoryMessage =
+  | ({ kind: 'conversation' } & ConferenceConversationLine)
+  | ({ kind: 'chat' } & ConferenceChatLine)
+
+export type ConferenceMessageSlot = `message${number}`
+export type ConferenceMessageRing = Record<ConferenceMessageSlot, ConferenceHistoryMessage | null> & {
+  /** Последний записанный слот; -1 означает пустую историю. */
+  messageIndex: number
+}
+export type ConferenceState = ConferenceSnapshot
+
+export type StatusRequestMessage = {
+  type: 'statusRequest'
+  clientId: string
+  authToken: string
+}
+
+export type PartialUpdateMessage = {
+  type: 'partialUpdate'
+  authorityToken: string
+  baseRevision: number
+  revision: number
+  changes: Partial<ConferenceState>
 }
 
 export type HelloMessage = {
@@ -165,6 +199,16 @@ export type PackVerifiedMessage = {
   hash: string
 }
 
+/** Клиент заново проверяет кеш или загружает файл; прежний hashOk/ready уже не актуален. */
+export type PackStatusMessage = {
+  type: 'packStatus'
+  clientId: string
+  authToken: string
+  hash: string
+  percent: number
+  packPhase: 'connecting' | 'downloading' | 'verifying'
+}
+
 export type BuzzMessage = {
   type: 'buzz'
   clientId: string
@@ -204,7 +248,8 @@ export type DebugLogMessage = {
 export type SnapshotMessage = {
   type: 'snapshot'
   authorityToken: string
-} & ConferenceSnapshot
+  revision: number
+} & ConferenceState
 
 export type ConferenceMessage =
   | HelloMessage
@@ -215,12 +260,15 @@ export type ConferenceMessage =
   | PackPipeAnswerMessage
   | PackPipeIceMessage
   | PackVerifiedMessage
+  | PackStatusMessage
   | ReadyMessage
   | BuzzMessage
   | PickMessage
   | ChatMessage
   | DebugLogMessage
   | SnapshotMessage
+  | PartialUpdateMessage
+  | StatusRequestMessage
 
 export function isConferenceMessage(value: unknown): value is ConferenceMessage {
   if (!isRecord(value) || typeof value.type !== 'string') return false
@@ -265,6 +313,10 @@ export function isConferenceMessage(value: unknown): value is ConferenceMessage 
       return validPackPipeIce(value)
     case 'packVerified':
       return client() && shortString(value.hash, 128)
+    case 'packStatus':
+      return client() && shortString(value.hash, 128) && integer(value.percent, 0) &&
+        value.percent <= 99 && ['connecting', 'downloading', 'verifying'].includes(String(value.packPhase))
+    case 'statusRequest':
     case 'ready':
     case 'buzz':
       return client()
@@ -282,7 +334,11 @@ export function isConferenceMessage(value: unknown): value is ConferenceMessage 
         debugEntriesSize(value.entries) <= 32_000
       )
     case 'snapshot':
-      return authority(value) && validSnapshot(value)
+      return authority(value) && integer(value.revision, 0) && validConferenceState(value)
+    case 'partialUpdate':
+      return authority(value) && integer(value.baseRevision, 0) && integer(value.revision, 0) &&
+        ((value.revision === value.baseRevision && isRecord(value.changes) && Object.keys(value.changes).length === 0) ||
+          (value.revision === (value.baseRevision as number) + 1 && validPartialState(value.changes)))
     default:
       return false
   }
@@ -337,28 +393,89 @@ function validPackPipeIce(value: Record<string, unknown>): boolean {
   return true
 }
 
-function validSnapshot(value: Record<string, unknown>): boolean {
-  if (!optionalString(value.commit, 80)) return false
-  if (!shortString(value.phase, 100) || !Array.isArray(value.players) || !Array.isArray(value.presence)) return false
-  if (value.players.length > 1_000 || value.presence.length > 1_000) return false
-  if (!value.players.every(validPlayer) || !value.presence.every(validPresence)) return false
-  if (!integer(value.roundIndex) || !stringArray(value.playedIds, 20_000) || !numberArray(value.missedIds, 10_000)) return false
-  if (!numberArray(value.finalists, 10_000) || !integer(value.finalCursor, 0)) return false
-  if (!nullableString(value.activeQuestionId, 2_000) || !nullableInteger(value.chooserId) || !nullableInteger(value.answererId)) return false
-  if (!numberArray(value.falseStartIds, 10_000) || !numericRecord(value.falseStarts) || !numericRecord(value.bets)) return false
-  if (!integer(value.betMisses, 0) || !nullableInteger(value.activeStake) || !integer(value.attemptId, 0)) return false
-  if (!integer(value.clarifications, 0)) return false
-  for (const key of ['spokeWithoutButton', 'talkedDuringRead', 'sayFalseStart', 'sayCloseGuess'] as const) {
-    if (typeof value[key] !== 'boolean') return false
+type StateFields = Omit<ConferenceSnapshot, keyof ConferenceMessageRing>
+const stateValidators = {
+  commit: (value: unknown) => optionalString(value, 80),
+  pack: (value: unknown) => value === null || validPackManifest(value),
+  phase: (value: unknown) => shortString(value, 100),
+  players: (value: unknown) => Array.isArray(value) && value.length <= 1_000 && value.every(validPlayer),
+  presence: (value: unknown) => Array.isArray(value) && value.length <= 1_000 && value.every(validPresence),
+  roundIndex: integer,
+  playedIds: (value: unknown) => stringArray(value, 20_000),
+  missedIds: (value: unknown) => numberArray(value, 10_000),
+  finalists: (value: unknown) => numberArray(value, 10_000),
+  finalCursor: (value: unknown) => integer(value, 0),
+  activeQuestionId: (value: unknown) => nullableString(value, 2_000),
+  chooserId: nullableInteger,
+  answererId: nullableInteger,
+  falseStartIds: (value: unknown) => numberArray(value, 10_000),
+  falseStarts: numericRecord,
+  bets: numericRecord,
+  betMisses: (value: unknown) => integer(value, 0),
+  activeStake: nullableInteger,
+  attemptId: (value: unknown) => integer(value, 0),
+  clarifications: (value: unknown) => integer(value, 0),
+  spokeWithoutButton: (value: unknown) => typeof value === 'boolean',
+  talkedDuringRead: (value: unknown) => typeof value === 'boolean',
+  sayFalseStart: (value: unknown) => typeof value === 'boolean',
+  sayCloseGuess: (value: unknown) => typeof value === 'boolean',
+  heard: validText,
+  judgmentReason: validText,
+  clarifyReason: validText,
+  statusLine: validText,
+  wrongHeard: (value: unknown) => stringArray(value, 10_000),
+  judgmentStatus: (value: unknown) => nullableString(value, 100),
+  announceKind: (value: unknown) => nullableString(value, 100),
+  phaseDurationMs: nullableFinite,
+  timerRemainingMs: nullableFinite,
+} satisfies Record<keyof StateFields, (value: unknown) => boolean>
+
+function validPackManifest(value: unknown): boolean {
+  return isRecord(value) && shortString(value.hash, 128) && integer(value.size, 0) &&
+    value.size <= 120 * 1024 * 1024 && shortString(value.name, 300) &&
+    typeof value.summary === 'string' && value.summary.length <= 10_000
+}
+
+function validText(value: unknown): boolean {
+  return typeof value === 'string' && value.length <= 20_000
+}
+
+export function validConferenceState(value: unknown): value is ConferenceState {
+  if (!isRecord(value)) return false
+  for (const [key, validate] of Object.entries(stateValidators)) {
+    if (!validate(value[key])) return false
   }
-  for (const key of ['heard', 'judgmentReason', 'clarifyReason', 'statusLine'] as const) {
-    if (typeof value[key] !== 'string' || value[key].length > 20_000) return false
+  return validConferenceMessageRing(value)
+}
+
+export function validConferenceMessageRing(value: unknown): value is ConferenceMessageRing {
+  if (!isRecord(value) || !validMessageIndex(value.messageIndex)) return false
+  for (let i = 0; i < CONFERENCE_HISTORY_LIMIT; i++) {
+    if (!validHistoryMessage(value[`message${i}`])) return false
   }
-  if (!stringArray(value.wrongHeard, 10_000)) return false
-  if (!nullableString(value.judgmentStatus, 100) || !nullableString(value.announceKind, 100)) return false
-  if (!nullableFinite(value.phaseDurationMs) || !nullableFinite(value.timerRemainingMs)) return false
-  return Array.isArray(value.conversation) && value.conversation.length <= CONFERENCE_HISTORY_LIMIT && value.conversation.every(validConversationLine) &&
-    Array.isArray(value.chat) && value.chat.length <= CONFERENCE_HISTORY_LIMIT && value.chat.every(validChatLine)
+  return true
+}
+
+function validMessageIndex(value: unknown): boolean {
+  return integer(value, -1) && value < CONFERENCE_HISTORY_LIMIT
+}
+
+function validHistoryMessage(value: unknown): boolean {
+  if (value === null) return true
+  return isRecord(value) && ((value.kind === 'conversation' && validConversationLine(value)) ||
+    (value.kind === 'chat' && validChatLine(value)))
+}
+
+function validPartialState(value: unknown): boolean {
+  if (!isRecord(value)) return false
+  const fields = Object.entries(value)
+  if (fields.length === 0 || fields.length > Object.keys(stateValidators).length + CONFERENCE_HISTORY_LIMIT + 1) return false
+  return fields.every(([key, item]) => {
+    if (Object.hasOwn(stateValidators, key)) return stateValidators[key as keyof StateFields](item)
+    if (key === 'messageIndex') return validMessageIndex(item)
+    const slot = /^message(0|[1-9]\d*)$/.exec(key)
+    return slot !== null && Number(slot[1]) < CONFERENCE_HISTORY_LIMIT && validHistoryMessage(item)
+  })
 }
 
 function validPlayer(value: unknown): boolean {
@@ -378,6 +495,7 @@ function validPresence(value: unknown): boolean {
 function validConversationLine(value: unknown): boolean {
   return isRecord(value) && (value.role === 'host' || value.role === 'player' || value.role === 'judge') &&
     typeof value.text === 'string' && value.text.length <= 20_000 &&
+    (value.note === undefined || (typeof value.note === 'string' && value.note.length <= 20_000)) &&
     (value.at === undefined || shortString(value.at, 40))
 }
 

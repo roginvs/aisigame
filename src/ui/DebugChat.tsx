@@ -1,31 +1,27 @@
 import { useEffect, useLayoutEffect, useRef, useState, useSyncExternalStore, type ReactNode } from 'react'
 import { getTrace, subscribeTrace, type ChatRole, type TraceEntry } from '../debug/trace.ts'
-import type { ConferenceChatLine, ConferenceConversationLine } from '../conference/messages.ts'
+import type { ConferenceMessageRing } from '../conference/messages.ts'
 import { chatPinKey, isAtTail, pinColumn } from './chatScroll.ts'
 import { formatChatTime } from './chatTime.ts'
-import { mergeConversationStream, type VoiceStreamLine } from './conversationStream.ts'
+import { conversationStreamFromRing, mergeConversationStream, type VoiceStreamLine } from './conversationStream.ts'
 
 export function ConversationChat(props?: {
-  conversation?: ConferenceConversationLine[]
-  chat?: ConferenceChatLine[]
+  messageRing?: ConferenceMessageRing
   onSendChat?: (text: string) => void
   composerLabel?: string
   /** Над медиа-рядом и compose — например «Начать игру». */
   aboveComposer?: ReactNode
 }) {
   const entries = useSyncExternalStore(subscribeTrace, getTrace, getTrace)
-  const voiceLines: VoiceStreamLine[] =
-    props?.conversation && props.conversation.length > 0
-      ? props.conversation
-      : entries
-          .filter((entry) => entry.kind === 'chat')
-          .map((entry) => ({
-            role: chatRole(entry.detail),
-            text: chatText(entry.detail) || entry.title,
-            at: entry.at,
-            ...(chatNote(entry.detail) ? { note: chatNote(entry.detail) } : {}),
-          }))
-  const stream = mergeConversationStream(voiceLines, props?.chat ?? [])
+  const voiceLines: VoiceStreamLine[] = entries
+    .filter((entry) => entry.kind === 'chat')
+    .map((entry) => ({
+      role: chatRole(entry.detail),
+      text: chatText(entry.detail) || entry.title,
+      at: entry.at,
+      ...(chatNote(entry.detail) ? { note: chatNote(entry.detail) } : {}),
+    }))
+  const stream = props?.messageRing ? conversationStreamFromRing(props.messageRing) : mergeConversationStream(voiceLines, [])
   const [draft, setDraft] = useState('')
   const [scrollerRef, logRef] = usePinColumn(chatPinKey(stream))
   return (

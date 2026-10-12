@@ -1,19 +1,20 @@
 import { buildCommit } from '../buildInfo.ts'
 import type { GameContext } from '../game/types.ts'
 import {
-  CONFERENCE_HISTORY_LIMIT,
-  type ConferenceChatLine,
+  type ConferenceMessageRing,
+  type ConferencePackManifest,
   type ConferenceSnapshot,
   type ConferenceSnapshotPresence,
 } from './messages.ts'
 import type { RosterEntry } from './roster.ts'
-import { readConversationLines } from './traceConversation.ts'
+import { emptyMessageRing } from './messageRing.ts'
 
 export function buildConferenceSnapshot(input: {
   phase: string
+  pack: ConferencePackManifest | null
   context: GameContext
   roster: RosterEntry[]
-  chat: ConferenceChatLine[]
+  messageRing?: ConferenceMessageRing
   timerRemainingMs: number | null
   falseStartIds: number[]
 }): ConferenceSnapshot {
@@ -37,6 +38,7 @@ export function buildConferenceSnapshot(input: {
 
   return {
     commit: buildCommit(),
+    pack: input.pack,
     phase: input.phase,
     players: input.context.players.map((player) => ({
       id: player.id,
@@ -75,8 +77,7 @@ export function buildConferenceSnapshot(input: {
     statusLine: input.context.statusLine,
     phaseDurationMs: input.context.phaseDurationMs,
     timerRemainingMs: input.timerRemainingMs,
-    conversation: readConversationLines(CONFERENCE_HISTORY_LIMIT),
-    chat: input.chat.slice(-CONFERENCE_HISTORY_LIMIT),
+    ...(input.messageRing ?? emptyMessageRing()),
   }
 }
 

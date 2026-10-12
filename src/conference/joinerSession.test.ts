@@ -7,6 +7,8 @@ import type { ConferenceMessage, PackOfferMessage, SnapshotMessage } from './mes
 import { PRESENCE_HEARTBEAT_MS, PRESENCE_STALE_MS } from './presence.ts'
 import type { ConferenceTransport } from './transport.ts'
 import { pushTrace } from '../debug/trace.ts'
+import { messageRingEntries } from './messageRing.ts'
+import { emptyMessageRing } from './stateProtocol.ts'
 
 class TestTransport implements ConferenceTransport {
   sent: ConferenceMessage[] = []
@@ -50,6 +52,7 @@ function makeSession(input: {
   const lobby: JoinerLobbyState[] = []
   const errors: string[] = []
   const fatals: string[] = []
+  const onSnapshot = vi.fn()
   const onReady = vi.fn(input.onReady ?? (() => undefined))
   const session = new JoinerSession({
     transport,
@@ -58,14 +61,14 @@ function makeSession(input: {
     name: 'Игрок',
     packCache: input.cache,
     callbacks: {
-      onSnapshot: () => undefined,
+      onSnapshot,
       onLobby: (state) => lobby.push(state),
       onPackReady: onReady,
       onError: (message) => errors.push(message),
       onFatalError: (message) => fatals.push(message),
     },
   })
-  return { session, transport, lobby, errors, fatals, onReady }
+  return { session, transport, lobby, errors, fatals, onReady, onSnapshot }
 }
 
 function offer(hash: string, size: number, commit = buildCommit()): PackOfferMessage {
@@ -85,6 +88,9 @@ function snapshot(phase = 'lobby', commit = buildCommit()): SnapshotMessage {
   return {
     type: 'snapshot',
     authorityToken: 'master-token',
+    revision: 0,
+    pack: null,
+    ...emptyMessageRing(),
     commit,
     phase,
     players: [{ id: 1, name: 'Мастер', score: 0, clientId: 'master' }],
@@ -129,8 +135,6 @@ function snapshot(phase = 'lobby', commit = buildCommit()): SnapshotMessage {
     statusLine: 'Ждём игроков',
     phaseDurationMs: null,
     timerRemainingMs: null,
-    conversation: [],
-    chat: [],
   }
 }
 
@@ -138,6 +142,75 @@ describe('JoinerSession pack cache and transfer', () => {
   afterEach(() => {
     vi.unstubAllGlobals()
     vi.useRealTimers()
+  })
+
+  it('ждёт мастера, повторяет запрос полного статуса и принимает общий ответ без своего запроса', async () => {
+    vi.useFakeTimers()
+    vi.stubGlobal('window', globalThis)
+    const { session, transport, lobby, onSnapshot } = makeSession({ cache: { get: async () => null, put: async () => {}, delete: async () => {} } })
+    expect(transport.sent.map((message) => message.type)).toEqual(['hello', 'statusRequest'])
+    expect(lobby.at(-1)?.waitingMaster).toBe(true)
+    await vi.advanceTimersByTimeAsync(PRESENCE_HEARTBEAT_MS)
+    expect(session.snapshot()).toBeNull()
+    expect(transport.sent.filter((message) => message.type === 'statusRequest')).toHaveLength(2)
+    transport.emit(snapshot())
+    await vi.advanceTimersByTimeAsync(0)
+    expect(lobby.at(-1)?.waitingMaster).toBe(false)
+    expect(onSnapshot).toHaveBeenCalledTimes(1)
+    transport.emit({ type: 'partialUpdate', authorityToken: 'master-token', baseRevision: 0, revision: 1, changes: { statusLine: 'Диф' } })
+    await vi.advanceTimersByTimeAsync(0)
+    expect(session.snapshot()?.statusLine).toBe('Диф')
+    // Этот полный статус мастер прислал в ответ другому игроку.
+    transport.emit({ ...snapshot(), revision: 2, statusLine: 'Общий полный статус' })
+    await vi.advanceTimersByTimeAsync(0)
+    expect(session.snapshot()?.statusLine).toBe('Общий полный статус')
+    const requestCount = transport.sent.filter((message) => message.type === 'statusRequest').length
+    await vi.advanceTimersByTimeAsync(PRESENCE_HEARTBEAT_MS)
+    expect(transport.sent.filter((message) => message.type === 'statusRequest')).toHaveLength(requestCount)
+    session.requestStatus()
+    expect(transport.sent.at(-1)?.type).toBe('statusRequest')
+    session.dispose()
+  })
+
+  it('пустой диф поддерживает presence мастера и снимает баннер offline после паузы трафика', async () => {
+    vi.useFakeTimers()
+    vi.stubGlobal('window', globalThis)
+    const { session, transport, lobby, onSnapshot } = makeSession({ cache: { get: async () => null, put: async () => {}, delete: async () => {} } })
+    transport.emit(snapshot())
+    await vi.advanceTimersByTimeAsync(0)
+    await vi.advanceTimersByTimeAsync(PRESENCE_STALE_MS + PRESENCE_HEARTBEAT_MS)
+    expect(lobby.at(-1)?.masterOffline).toBe(true)
+    transport.emit({ type: 'partialUpdate', authorityToken: 'master-token', baseRevision: 0, revision: 0, changes: {} })
+    await vi.advanceTimersByTimeAsync(0)
+    expect(lobby.at(-1)?.masterOffline).toBe(false)
+    expect(onSnapshot).toHaveBeenCalledTimes(1)
+    session.dispose()
+  })
+
+  it('при пропуске дифа запрашивает снимок; heartbeat выявляет пропуск последнего изменения', async () => {
+    vi.stubGlobal('window', globalThis)
+    const { session, transport, onSnapshot } = makeSession({ cache: { get: async () => null, put: async () => {}, delete: async () => {} } })
+    transport.emit(snapshot())
+    await eventually(() => expect(onSnapshot).toHaveBeenCalledTimes(1))
+    transport.emit({ type: 'partialUpdate', authorityToken: 'master-token', baseRevision: 1, revision: 2, changes: { phase: 'finished' } })
+    await eventually(() => expect(transport.sent.filter((message) => message.type === 'statusRequest')).toHaveLength(2))
+    expect(session.snapshot()?.phase).toBe('lobby')
+    transport.emit({ ...snapshot(), revision: 2, statusLine: 'Восстановлено' })
+    await eventually(() => expect(session.snapshot()?.statusLine).toBe('Восстановлено'))
+    transport.emit({ type: 'partialUpdate', authorityToken: 'master-token', baseRevision: 3, revision: 3, changes: {} })
+    await eventually(() => expect(transport.sent.filter((message) => message.type === 'statusRequest')).toHaveLength(3))
+    transport.emit({ ...snapshot(), revision: 3 })
+    await eventually(() => expect(session.snapshot()?.statusLine).toBe('Ждём игроков'))
+    transport.emit({ type: 'partialUpdate', authorityToken: 'master-token', baseRevision: 3, revision: 4, changes: { messageIndex: 0, message0: { kind: 'chat', name: 'Игрок', text: 'Один слот' } } })
+    await eventually(() => expect(messageRingEntries(session.snapshot()!).map(({ message }) => message)).toEqual([{ kind: 'chat', name: 'Игрок', text: 'Один слот' }]))
+    const count = onSnapshot.mock.calls.length
+    // Дубликат не публикует запись ещё раз; чужой endpoint не меняет состояние.
+    transport.emit({ type: 'partialUpdate', authorityToken: 'master-token', baseRevision: 3, revision: 4, changes: { statusLine: 'Дубликат' } })
+    transport.emit({ type: 'partialUpdate', authorityToken: 'master-token', baseRevision: 4, revision: 5, changes: { phase: 'finished' } }, 'attacker-endpoint')
+    await new Promise((resolve) => setTimeout(resolve, 5))
+    expect(onSnapshot).toHaveBeenCalledTimes(count)
+    expect(session.snapshot()?.phase).toBe('lobby')
+    session.dispose()
   })
 
   it('раз в две секунды отправляет мастеру новый ограниченный debug-батч', () => {

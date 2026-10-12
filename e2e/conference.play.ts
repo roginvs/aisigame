@@ -12,6 +12,13 @@ test.describe('конференция на BroadcastChannel', () => {
     await page.getByRole('button', { name: 'Начать игру' }).click()
     await expect(page.getByRole('button', { name: 'Ссылка для игры' })).toBeVisible()
 
+    await expect(page.locator('.chat-log')).toContainText('Игра создана. Ждём игроков.')
+    await page.getByRole('textbox').fill('Чат в сохранённом лобби')
+    await page.getByRole('textbox').press('Enter')
+    await expect(page.locator('.chat-log')).toContainText('Чат в сохранённом лобби')
+    const history = await readHistory(page)
+    expect(Object.keys(history)).toHaveLength(201)
+
     const before = await page.evaluate(() => {
       const raw = localStorage.getItem('aisigame.game')
       if (!raw) throw new Error('нет сохранения лобби')
@@ -31,6 +38,50 @@ test.describe('конференция на BroadcastChannel', () => {
 
     const after = await page.evaluate(() => JSON.parse(localStorage.getItem('aisigame.game') ?? 'null'))
     expect(after).toMatchObject({ mode: 'conference', conferenceLobby: true, roomId: before.roomId })
+    await expect(page.locator('.chat-log')).toContainText('Игра создана. Ждём игроков.')
+    await expect(page.locator('.chat-log')).toContainText('Чат в сохранённом лобби')
+    expect(await readHistory(page)).toEqual(history)
+  })
+
+  test('игрок после reload сверяет кеш по глобальному хешу или скачивает пакет заново', async ({ browser }) => {
+    const context = await browser.newContext()
+    await context.grantPermissions(['clipboard-read', 'clipboard-write'])
+    const master = await context.newPage()
+    const joiner = await context.newPage()
+    await master.goto('/?mock=1&transport=broadcast')
+    await master.getByLabel('Модель').selectOption('mock')
+    await master.getByRole('radio', { name: 'Конференция' }).check()
+    await master.getByLabel('Пакет вопросов').selectOption('demo')
+    await master.getByLabel('Ваше имя').fill('Мастер')
+    await master.getByRole('button', { name: 'Начать игру' }).click()
+    const invite = localInviteUrl(await copyInvite(master))
+    await joiner.goto(`${invite}&mock=1`)
+    await joiner.getByLabel('Ваше имя').fill('Гость')
+    await joiner.getByRole('button', { name: 'Подключиться' }).click()
+    await expect(joiner.getByRole('button', { name: 'Я готов' })).toBeEnabled()
+    await master.getByRole('textbox').fill('Сообщение до перезагрузки')
+    await master.getByRole('textbox').press('Enter')
+    const guestAtMaster = master.getByRole('group', { name: 'Гость', exact: true })
+    for (const clearCache of [false, true]) {
+      await joiner.getByRole('button', { name: 'Я готов' }).click()
+      await expect(guestAtMaster.getByText('Пакет сверен · готов', { exact: true })).toBeVisible()
+      if (clearCache) {
+        await joiner.evaluate(() => new Promise<void>((resolve, reject) => {
+          const request = indexedDB.deleteDatabase('aisigame.packs')
+          request.onsuccess = () => resolve()
+          request.onerror = () => reject(request.error)
+          request.onblocked = () => reject(new Error('кеш пакета занят'))
+        }))
+      }
+      await joiner.reload()
+      await joiner.getByRole('button', { name: 'Подключиться' }).click()
+      await expect(joiner.locator('.bubble-typed').filter({ hasText: 'Сообщение до перезагрузки' })).toBeVisible()
+      await expect(joiner.getByRole('button', { name: 'Я готов' })).toBeEnabled()
+      await expect(joiner.getByRole('group', { name: 'Гость', exact: true }).getByText('Пакет сверен', { exact: true })).toBeVisible()
+      await expect(guestAtMaster.getByText('Пакет сверен', { exact: true })).toBeVisible()
+      await expect(guestAtMaster.getByText('Пакет сверен · готов', { exact: true })).toHaveCount(0)
+    }
+    await context.close()
   })
 
   test('верный ответ joiner меняет счёт у мастера', async ({ browser }) => {
@@ -90,18 +141,28 @@ test.describe('конференция на BroadcastChannel', () => {
     await expect(joinerCell).toBeEnabled()
     await joinerCell.click()
     await expect(joiner.getByRole('status').filter({ hasText: 'Жмите кнопку' })).toBeVisible({ timeout: 20_000 })
-    await expect(master.getByRole('group', { name: /Мастер: 0/ }).getByRole('button', { name: 'Мастер' })).toBeEnabled()
-    await expect(master.getByRole('group', { name: /Гость: 0/ }).getByRole('button', { name: 'Гость' })).toBeDisabled()
-    await expect(joiner.getByRole('group', { name: /Мастер: 0/ }).getByRole('button', { name: 'Мастер' })).toBeDisabled()
-    await expect(joiner.getByRole('group', { name: /Гость: 0/ }).getByRole('button', { name: 'Гость' })).toBeEnabled()
-    await joiner.getByRole('button', { name: 'Гость' }).click()
+    await expect(master.getByRole('group', { name: /Мастер: 0/ }).getByRole('button', { name: 'Жмите' })).toBeEnabled()
+    await expect(master.getByRole('group', { name: /Гость: 0/ }).getByRole('button', { name: 'Жмите' })).toBeDisabled()
+    await expect(joiner.getByRole('group', { name: /Мастер: 0/ }).getByRole('button', { name: 'Жмите' })).toBeDisabled()
+    await expect(joiner.getByRole('group', { name: /Гость: 0/ }).getByRole('button', { name: 'Жмите' })).toBeEnabled()
+    await joiner.getByRole('group', { name: /Гость:/ }).getByRole('button', { name: 'Жмите' }).click()
     await hear(master, 'август')
     await expect(master.getByRole('group', { name: /Гость: 100/ })).toBeVisible({ timeout: 20_000 })
+
+    await expect(master.locator('.chat-log')).toContainText('Правильный ответ:')
+    await expect(joiner.getByRole('button', { name: 'Текст, 200' })).toBeEnabled({ timeout: 10_000 })
+    const history = await readHistory(master)
+    await master.reload()
+    await master.getByRole('button', { name: 'Продолжить прошлую игру' }).click()
+    await expect(master.getByRole('group', { name: /Гость: 100/ })).toBeVisible()
+    await expect(master.locator('.chat-log')).toContainText('Правильный ответ:')
+    await expect(joiner.locator('.chat-log')).toContainText('Правильный ответ:')
+    expect(await readHistory(master)).toEqual(history)
 
     await expect(joiner.getByRole('button', { name: 'Текст, 200' })).toBeEnabled({ timeout: 10_000 })
     await joiner.getByRole('button', { name: 'Текст, 200' }).click()
     await expect(master.getByRole('status').filter({ hasText: 'Жмите кнопку' })).toBeVisible({ timeout: 20_000 })
-    await master.getByRole('group', { name: /Мастер: 0/ }).getByRole('button', { name: 'Мастер' }).click()
+    await master.getByRole('group', { name: /Мастер: 0/ }).getByRole('button', { name: 'Жмите' }).click()
     await expect(joiner.getByRole('status').filter({ hasText: 'Мастер отвечает' })).toBeVisible()
     const mutedReminder = master.getByText(/Мастер,.+микрофон/i)
     await master.waitForTimeout(2_500)
@@ -182,7 +243,7 @@ test.describe('конференция на BroadcastChannel', () => {
     await expect(joinerCell).toBeEnabled()
     await joinerCell.click()
     await expect(joiner.getByRole('status').filter({ hasText: 'Жмите кнопку' })).toBeVisible({ timeout: 20_000 })
-    await joiner.getByRole('button', { name: 'Гость' }).click()
+    await joiner.getByRole('group', { name: /Гость:/ }).getByRole('button', { name: 'Жмите' }).click()
     await hear(master, 'август')
     await expect(master.getByRole('group', { name: /Гость: 400/ })).toBeVisible({ timeout: 20_000 })
   })
@@ -274,4 +335,13 @@ function localInviteUrl(invite: string): string {
   url.protocol = 'http:'
   url.host = '127.0.0.1:5173'
   return url.href
+}
+
+async function readHistory(page: Page): Promise<Record<string, unknown>> {
+  return page.evaluate(() => {
+    const saved = JSON.parse(localStorage.getItem('aisigame.game') ?? 'null')
+    if (!saved) throw new Error('нет сохранённой истории')
+    if ('chat' in saved || 'conversation' in saved) throw new Error('история всё ещё хранится отдельными массивами')
+    return Object.fromEntries(Object.entries(saved).filter(([key]) => /^message(?:Index|\d+)$/.test(key)))
+  })
 }
