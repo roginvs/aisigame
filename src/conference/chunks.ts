@@ -1,6 +1,9 @@
 import { sha256Hex } from '../game/savedGame.ts'
 
-export const CHUNK_BYTES = 16 * 1024
+/** Сырой кусок пакета до base64. 64 KiB → ~87 KiB в JSON; лимит `dataBase64` в messages — 400K. */
+export const CHUNK_BYTES = 64 * 1024
+/** Сколько кусков держим в полёте, пока ждём ACK. 32 × 64 KiB ≈ 2 МБ полезной нагрузки. */
+export const CHUNK_WINDOW = 32
 
 export type SplitChunk = {
   index: number
@@ -57,7 +60,7 @@ export type ChunkSender = {
   onAck: (nextIndex: number) => void
 }
 
-export function createSender(chunks: SplitChunk[], windowSize = 4): ChunkSender {
+export function createSender(chunks: SplitChunk[], windowSize = CHUNK_WINDOW): ChunkSender {
   const total = chunks.length
   const inflight = new Set<number>()
   let ackedPrefix = 0

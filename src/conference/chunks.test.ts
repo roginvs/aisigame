@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest'
 import { sha256Hex } from '../game/savedGame.ts'
 import {
   CHUNK_BYTES,
+  CHUNK_WINDOW,
   base64ToBytes,
   bytesToBase64,
   chunkToWire,
@@ -12,7 +13,7 @@ import {
 } from './chunks.ts'
 
 describe('splitChunks', () => {
-  it('режет по 16 KiB и собирает обратно через приёмник', () => {
+  it('режет по CHUNK_BYTES и собирает обратно через приёмник', () => {
     const payload = new Uint8Array(CHUNK_BYTES * 2 + 100)
     for (let index = 0; index < payload.length; index += 1) payload[index] = index % 251
     const parts = splitChunks(payload)
@@ -59,22 +60,23 @@ describe('createSender window', () => {
     expect(sender.nextToSend()).toBe(1)
   })
 
-  it('окно в четыре куска', () => {
-    const payload = new Uint8Array(CHUNK_BYTES * 5)
+  it('окно по умолчанию — CHUNK_WINDOW кусков', () => {
+    const payload = new Uint8Array(CHUNK_BYTES * (CHUNK_WINDOW + 1))
     const parts = splitChunks(payload)
-    const sender = createSender(parts, 4)
+    const sender = createSender(parts)
     const first: number[] = []
     for (;;) {
       const index = sender.nextToSend()
       if (index === null) break
       first.push(index)
     }
-    expect(first).toEqual([0, 1, 2, 3])
-    expect(sender.inflight.size).toBe(4)
+    expect(first).toEqual([...Array(CHUNK_WINDOW).keys()])
+    expect(sender.inflight.size).toBe(CHUNK_WINDOW)
     expect(sender.nextToSend()).toBeNull()
 
     sender.onAck(2)
-    expect([...sender.inflight].sort()).toEqual([3])
+    // Префикс до 2 закрыт, индекс 2 тоже снят с inflight — остаётся 3…WINDOW-1.
+    expect([...sender.inflight].sort((a, b) => a - b)).toEqual([...Array(CHUNK_WINDOW).keys()].slice(3))
     const after = sender.nextToSend()
     expect(after).toBe(2)
   })

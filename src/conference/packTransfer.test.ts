@@ -55,6 +55,7 @@ describe('createPackTransferMaster', () => {
     const indexes = messages
       .filter((message) => message.type === 'packChunk')
       .map((message) => message.index)
-    expect(indexes.slice(-4)).toEqual([0, 1, 2, 3])
+    // После ACK 0 снова уходит полное окно с нуля (здесь весь файл — 5 кусков).
+    expect(indexes.slice(-5)).toEqual([0, 1, 2, 3, 4])
   })
 })
