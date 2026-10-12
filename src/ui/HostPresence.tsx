@@ -18,6 +18,8 @@ export function HostPresence(props: {
   title?: string | null
   /** Строка под персональным ходом, например «Слушаю Вася» / «Ничего не слышу». */
   titleHint?: string | null
+  /** Лобби конференции: вместо «Не говорите» приглашаем поболтать. */
+  lobbyInvite?: boolean
   error?: string | null
   /** В онлайн-режиме: речь бота «Ведущая» по уровню Jitsi — золотая пульсация рамки. */
   conferenceSpeaking?: boolean
@@ -29,6 +31,8 @@ export function HostPresence(props: {
   const stopped = props.path === 'stopped'
   const mood = paused || stopped ? 'think' : hostMood(props.path, props.link)
   const listenHint = props.titleHint?.trim() || ''
+  // Joiner шлёт phase «lobby»; у мастера машина ещё в startMenu — нужен lobbyInvite.
+  const lobbyInvite = Boolean(props.lobbyInvite) || props.path === 'lobby'
   // titleHint из конференции важнее шаблонного hint настроения («Слышу вас…» на buzz),
   // иначе при «Меньше слышать» в окне кнопки врёт «засчитаю только после кнопки».
   const copy = props.title
@@ -37,7 +41,10 @@ export function HostPresence(props: {
       ? { title: 'Остановлена', hint: listenHint || 'Сессия закрыта, ведущая не ждёт' }
       : paused
         ? { title: 'Пауза', hint: listenHint || 'Микрофон выключен, ведущая не ждёт' }
-        : { title: hostCopy[mood].title, hint: listenHint || hostCopy[mood].hint }
+        : {
+            title: lobbyInvite ? 'Можно поболтать' : hostCopy[mood].title,
+            hint: listenHint || hostCopy[mood].hint,
+          }
   const caption = hostCaption({ title: copy.title, hint: copy.hint, status: props.title ? '' : props.status })
   const classes = [
     'host',

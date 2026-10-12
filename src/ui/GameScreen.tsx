@@ -603,6 +603,7 @@ export function GameScreen(props: {
             link={link}
             title={turnTitle}
             titleHint={soloListenHint}
+            lobbyInvite={Boolean(conference?.lobby)}
             status={
               conference?.masterOffline && !conference.waitingMaster
                 ? ''

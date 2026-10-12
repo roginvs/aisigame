@@ -25,6 +25,39 @@ describe('HostPresence', () => {
     expect(speaking).toContain('host host-think speaking')
   })
 
+  it('invites chat in conference lobby instead of silence', () => {
+    const joiner = renderToStaticMarkup(
+      createElement(HostPresence, {
+        path: 'lobby',
+        link: { host: 'idle', mic: 'idle' },
+        status: 'Ждём начала игры',
+      }),
+    )
+    const master = renderToStaticMarkup(
+      createElement(HostPresence, {
+        path: 'startMenu',
+        link: { host: 'idle', mic: 'idle' },
+        status: 'Ждём начала игры',
+        lobbyInvite: true,
+      }),
+    )
+    const inMatch = renderToStaticMarkup(
+      createElement(HostPresence, {
+        path: 'judging',
+        link: { host: 'idle', mic: 'idle' },
+        status: 'Ведущая оценивает ответ',
+      }),
+    )
+
+    expect(joiner).toContain('Можно поболтать')
+    expect(joiner).not.toContain('Не говорите')
+    expect(joiner).toContain('Ждём начала игры')
+    expect(master).toContain('Можно поболтать')
+    expect(master).not.toContain('Не говорите')
+    expect(inMatch).toContain('Не говорите')
+    expect(inMatch).not.toContain('Можно поболтать')
+  })
+
   it('prefers conference listen hint over buzz mood copy when hear-turn-only is on', () => {
     const html = renderToStaticMarkup(
       createElement(HostPresence, {
