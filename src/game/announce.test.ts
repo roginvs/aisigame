@@ -82,13 +82,16 @@ describe('announceInstructions', () => {
     expect(line).not.toContain('выбирайте следующий')
   })
 
-  it('если без кнопки уже говорили, после ответа просит нажимать кнопку', () => {
-    const line = announceInstructions(context({ spokeWithoutButton: true }))
-    expect(line).toBe('Боевой Буратино. Ответ называют только после кнопки.')
-    expect(line.indexOf('Боевой Буратино')).toBeLessThan(line.indexOf('только после кнопки'))
+  it('если без кнопки уже говорили, эталон обязателен, а хвост про кнопку — свободный', () => {
+    const sample = context({ spokeWithoutButton: true })
+    const line = announceInstructions(sample)
+    expect(verbatimAnnouncement(sample)).toBeNull()
+    expect(line).toContain('Сначала произнеси правильный ответ: «Боевой Буратино»')
+    expect(line).toContain('своими словами напомни, что ответ засчитывают только после кнопки')
+    expect(line.indexOf('«Боевой Буратино»')).toBeLessThan(line.indexOf('только после кнопки'))
+    expect(line).not.toBe('Боевой Буратино. Ответ называют только после кнопки.')
     expect(line).not.toContain('выбирайте следующий')
     expect(line).not.toContain('никто не нажал')
-    expect(line).not.toContain('произнес')
   })
 
   it('когда ошиблись все, сначала дословный эталон, потом что неверно', () => {
@@ -102,13 +105,36 @@ describe('announceInstructions', () => {
     expect(line).not.toContain('без тем и номиналов')
   })
 
-  it('когда у последнего вышло время, сначала дословный эталон', () => {
+  it('когда у последнего вышло время, сначала дословный эталон, потом что не услышала', () => {
     const line = announceInstructions(context({ announceKind: 'silence' }))
     expect(line).toContain('Сначала произнеси правильный ответ: «Боевой Буратино»')
-    expect(line).toContain('время на ответ вышло')
+    expect(line).toContain('ничего не услышала')
+    expect(line).toContain('минус')
     expect(line).toContain('минус 100')
     expect(line).not.toContain('дословно')
-    expect(line.indexOf('«Боевой Буратино»')).toBeLessThan(line.indexOf('время на ответ вышло'))
+    expect(line).not.toContain('что неверно')
+    expect(line).not.toContain('время на ответ вышло')
+    expect(line.indexOf('«Боевой Буратино»')).toBeLessThan(line.indexOf('ничего не услышала'))
+  })
+
+  it('молчание с перехватом: свободно что не услышала, не «неверно», минус на месте', () => {
+    const line = announceInstructions(
+      context({ announceKind: 'silence', playedIds: [], activePlayerId: 1, players: [
+        { id: 1, name: 'Маша', score: 0 },
+        { id: 2, name: 'Вася', score: 0 },
+        { id: 3, name: 'Игрок 3', score: 0 },
+      ] }),
+    )
+    const spoken = spokenPayload(line)
+    expect(spoken).toContain('Исход: молчание')
+    expect(spoken).toContain('ничего не услышала')
+    expect(spoken).toContain('микрофон')
+    expect(spoken).toContain('минус 100')
+    expect(spoken).toContain('Маша')
+    expect(spoken).toContain('Формулировку выбери сам')
+    expect(spoken).toContain('Не говори, что ответ неверный')
+    expect(spoken).not.toContain('Исход: неверно')
+    expect(spoken).not.toContain('Боевой Буратино')
   })
 
   it('на созвучие просит повторить и не называет эталон', () => {
@@ -199,10 +225,14 @@ describe('announceInstructions', () => {
     expect(line).not.toContain('никто не нажал')
   })
 
-  it('если перебили чтение, после ответа напоминает про кнопку', () => {
-    const line = announceInstructions(context({ talkedDuringRead: true }))
-    expect(line).toBe('Боевой Буратино. Ответ называют только после кнопки.')
-    expect(line.indexOf('Боевой Буратино')).toBeLessThan(line.indexOf('только после кнопки'))
+  it('если перебили чтение, эталон обязателен, а хвост про кнопку — свободный', () => {
+    const sample = context({ talkedDuringRead: true })
+    const line = announceInstructions(sample)
+    expect(verbatimAnnouncement(sample)).toBeNull()
+    expect(line).toContain('Сначала произнеси правильный ответ: «Боевой Буратино»')
+    expect(line).toContain('своими словами напомни, что ответ засчитывают только после кнопки')
+    expect(line.indexOf('«Боевой Буратино»')).toBeLessThan(line.indexOf('только после кнопки'))
+    expect(line).not.toBe('Боевой Буратино. Ответ называют только после кнопки.')
     expect(line).not.toContain('дословно')
     expect(line).not.toContain('выбирайте следующий')
     expect(line).not.toContain('никто не нажал')
@@ -306,7 +336,7 @@ describe('announceInstructions', () => {
       }),
     )
     expect(line.indexOf('«Братство кольца»')).toBeLessThan(line.indexOf('«Властелин колец»'))
-    expect(line.indexOf('«Властелин колец»')).toBeLessThan(line.indexOf('время на ответ вышло'))
+    expect(line.indexOf('«Властелин колец»')).toBeLessThan(line.indexOf('ничего не услышала'))
   })
 
   it('молчание без попытки и верный ответ близость не упоминают', () => {

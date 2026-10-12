@@ -252,8 +252,14 @@ function announceLine(instructions: string): string {
   if (folded.includes('исход: неверно') || folded.includes('что неверно') || folded.includes('ответ неверный')) {
     return 'Неверно.'
   }
-  if (folded.includes('исход: молчание') || folded.includes('время на ответ вышло') || folded.includes('ответа не было')) {
-    return 'Время вышло.'
+  if (
+    folded.includes('исход: молчание') ||
+    folded.includes('время на ответ вышло') ||
+    folded.includes('ответа не было') ||
+    folded.includes('ничего не услышала') ||
+    folded.includes('ничего не услышал')
+  ) {
+    return 'Ничего не услышала, минус.'
   }
   return 'Дальше.'
 }
