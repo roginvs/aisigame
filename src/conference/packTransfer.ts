@@ -77,8 +77,13 @@ export function createPackTransferMaster(input: {
     start() {
       for (const clientId of input.targetClientIds()) pumpForClient(clientId)
     },
+    /** Первому контакту — offer+окно; повторному hello — только дозаполнить окно, без нового флода. */
     pumpClient(clientId: string) {
-      pumpForClient(clientId)
+      if (!senders.has(clientId)) {
+        pumpForClient(clientId)
+        return
+      }
+      pump(clientId)
     },
     handleAck(clientId: string, nextIndex: number) {
       // ACK 0 is also an explicit request to restart after a missing/corrupt

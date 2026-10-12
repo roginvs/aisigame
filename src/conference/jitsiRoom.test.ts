@@ -58,6 +58,46 @@ describe('JitsiMessageTransport', () => {
     transport.close()
   })
 
+  it('ставит свежий снимок вперёд кусков пакета', () => {
+    vi.useFakeTimers()
+    vi.stubGlobal('window', globalThis)
+    const sent: ConferenceMessage[] = []
+    let blocked = false
+    const conference = {
+      on: vi.fn(),
+      sendEndpointMessage: (_to: string, message: ConferenceMessage) => {
+        if (blocked) throw new Error('busy')
+        sent.push(message)
+      },
+    }
+    const transport = new JitsiMessageTransport(conference as never, 'endpoint', 'data-open')
+    transport.send({
+      type: 'packChunk',
+      authorityToken: 'master',
+      targetClientId: 'guest',
+      hash: 'h',
+      index: 0,
+      total: 2,
+      dataBase64: 'YQ==',
+    })
+    blocked = true
+    transport.send({
+      type: 'packChunk',
+      authorityToken: 'master',
+      targetClientId: 'guest',
+      hash: 'h',
+      index: 1,
+      total: 2,
+      dataBase64: 'YQ==',
+    })
+    transport.send({ type: 'snapshot', authorityToken: 'master', phase: 'lobby' } as ConferenceMessage)
+
+    blocked = false
+    vi.advanceTimersByTime(250)
+    expect(sent.map((message) => message.type)).toEqual(['packChunk', 'snapshot', 'packChunk'])
+    transport.close()
+  })
+
   it('не копит heartbeat и устаревшие снимки, пока канал закрыт', () => {
     vi.useFakeTimers()
     vi.stubGlobal('window', globalThis)
@@ -82,8 +122,9 @@ describe('JitsiMessageTransport', () => {
     handlers.get('data-open')?.()
 
     expect(sent).toHaveLength(2)
-    expect(sent[0]).toMatchObject({ type: 'hello', name: 'Новое имя' })
-    expect(sent[1]).toMatchObject({ type: 'snapshot', phase: 'choosing.listening' })
+    // Снимок впереди hello: presence не должен ждать за кусками/служебными.
+    expect(sent[0]).toMatchObject({ type: 'snapshot', phase: 'choosing.listening' })
+    expect(sent[1]).toMatchObject({ type: 'hello', name: 'Новое имя' })
     transport.close()
   })
 })

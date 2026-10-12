@@ -23,10 +23,11 @@ describe('createPackTransferMaster', () => {
 
     transfer.start()
     transfer.pumpClient('second')
+    // Повторный nudge уже известному клиенту не шлёт второй offer.
     transfer.pumpClient('first')
 
     const offers = messages.filter((message) => message.type === 'packOffer')
-    expect(offers.map((message) => message.targetClientId)).toEqual(['first', 'second', 'first'])
+    expect(offers.map((message) => message.targetClientId)).toEqual(['first', 'second'])
     const chunks = messages.filter((message) => message.type === 'packChunk')
     expect(chunks.map((message) => message.targetClientId)).toEqual(['first', 'second'])
   })

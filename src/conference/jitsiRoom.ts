@@ -149,13 +149,18 @@ export class JitsiMessageTransport implements ConferenceTransport {
   send(message: ConferenceMessage): void {
     if (this.closed) return
     if (message.type === 'snapshot') {
+      // Снимок важнее кусков пакета: иначе окно CHUNK_WINDOW забивает канал,
+      // joiner 10 с не видит presence и пишет «Мастер-игрок отключился».
       this.pending = this.pending.filter((item) => item.type !== 'snapshot')
+      this.pending.unshift(message)
     } else if (message.type === 'hello') {
       this.pending = this.pending.filter(
         (item) => item.type !== 'hello' || item.clientId !== message.clientId,
       )
+      this.pending.push(message)
+    } else {
+      this.pending.push(message)
     }
-    this.pending.push(message)
     this.flush()
   }
 
