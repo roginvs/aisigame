@@ -129,6 +129,7 @@ export function GameScreen(props: {
     remoteContext?: GameContext | null
     remotePath?: string
     tiles?: ConferenceTile[]
+    hostSpeaking?: boolean
     mediaBusy?: boolean
     onToggleMic?: () => void
     onToggleCamera?: () => void
@@ -557,6 +558,7 @@ export function GameScreen(props: {
                 : context.statusLine
             }
             error={conference?.mediaError ?? context.error}
+            conferenceSpeaking={conference?.hostSpeaking}
           />
           <ConversationChat
             conversation={conference?.remoteSnapshot?.conversation}

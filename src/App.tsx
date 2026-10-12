@@ -160,8 +160,10 @@ export default function App() {
   const transportDisposeRef = useRef<(() => void) | null>(null)
   const conferenceHandleRef = useRef<ConferenceHandle | null>(null)
   const tilesUnsubRef = useRef<(() => void) | null>(null)
+  const hostSpeakingUnsubRef = useRef<(() => void) | null>(null)
   const tearingDownConferenceRef = useRef(false)
   const [conferenceTiles, setConferenceTiles] = useState<ConferenceTile[]>([])
+  const [conferenceHostSpeaking, setConferenceHostSpeaking] = useState(false)
   const conferenceTilesRef = useRef<ConferenceTile[]>([])
   const warnedMicAttemptRef = useRef('')
   const hostSpeakingRef = useRef(link.host)
@@ -582,10 +584,12 @@ export default function App() {
     const masterSession = masterSessionRef.current
     const joinerSession = joinerSessionRef.current
     const unsubscribeTiles = tilesUnsubRef.current
+    const unsubscribeHostSpeaking = hostSpeakingUnsubRef.current
     const disposeTransport = transportDisposeRef.current
     masterSessionRef.current = null
     joinerSessionRef.current = null
     tilesUnsubRef.current = null
+    hostSpeakingUnsubRef.current = null
     transportDisposeRef.current = null
     conferenceHandleRef.current = null
     conferenceLobbyRef.current = false
@@ -593,10 +597,12 @@ export default function App() {
       masterSession?.dispose()
       joinerSession?.dispose()
       unsubscribeTiles?.()
+      unsubscribeHostSpeaking?.()
       disposeTransport?.()
       voiceClientRef.current?.stopSession()
       voiceConnectedRef.current = false
       setConferenceTiles([])
+      setConferenceHostSpeaking(false)
       setMasterRoster([])
       setMasterRosterAll([])
       setMasterParticipantIds({})
@@ -627,6 +633,8 @@ export default function App() {
     transportDisposeRef.current = () => handle.dispose()
     tilesUnsubRef.current?.()
     tilesUnsubRef.current = handle.subscribeTiles(setConferenceTiles)
+    hostSpeakingUnsubRef.current?.()
+    hostSpeakingUnsubRef.current = handle.subscribeHostSpeaking(setConferenceHostSpeaking)
   }
 
   async function toggleConferenceMic(): Promise<void> {
@@ -1271,6 +1279,7 @@ export default function App() {
               remoteContext: joinerViewContext,
               remotePath: joinerSnapshot?.phase ?? path,
               tiles: conferenceTiles,
+              hostSpeaking: conferenceHostSpeaking,
               mediaBusy,
               mediaError: conferenceError,
               onToggleMic: () => void toggleConferenceMic(),

@@ -19,6 +19,8 @@ export function HostPresence(props: {
   /** Строка под персональным ходом, например «Никого другого не слушаю». */
   titleHint?: string | null
   error?: string | null
+  /** В онлайн-режиме: речь бота «Ведущая» по уровню Jitsi — золотая пульсация рамки. */
+  conferenceSpeaking?: boolean
 }) {
   const paused = props.path === 'paused'
   const stopped = props.path === 'stopped'
@@ -31,8 +33,16 @@ export function HostPresence(props: {
       ? { title: 'Пауза', hint: 'Микрофон выключен, ведущая не ждёт' }
       : hostCopy[mood]
   const caption = hostCaption({ title: copy.title, hint: copy.hint, status: props.title ? '' : props.status })
+  const classes = [
+    'host',
+    `host-${mood}`,
+    stopped ? 'host-stopped' : '',
+    props.conferenceSpeaking ? 'speaking' : '',
+  ]
+    .filter(Boolean)
+    .join(' ')
   return (
-    <figure className={stopped ? `host host-${mood} host-stopped` : `host host-${mood}`} role="status" aria-live="polite">
+    <figure className={classes} role="status" aria-live="polite">
       <img src={portrait[mood]} alt="" />
       <figcaption>
         <strong>{caption.title}</strong>

@@ -1,4 +1,9 @@
-import type { ConferenceHandle, ConferenceTile } from './media.ts'
+import {
+  HOST_JITSI_NAME,
+  isHostJitsiParticipant,
+  type ConferenceHandle,
+  type ConferenceTile,
+} from './media.ts'
 import { fetchJitsiConfig, websocketUrlForBase } from './jitsiConfig.ts'
 import type { ConferenceMessage } from './messages.ts'
 import { isConferenceMessage } from './messages.ts'
@@ -8,6 +13,7 @@ import { nextCameraDeviceId } from './camera.ts'
 import { createSpeakerActivity } from './speakerActivity.ts'
 import { conferenceAudioStream, createConferenceAudioOutput } from './conferenceAudio.ts'
 import { PACK_CHANNEL_HIGH_WATER_BYTES, PACK_CHANNEL_LOW_WATER_BYTES } from './chunks.ts'
+import { mediaStreamTrackFromJitsi, micTrackIsDead } from './micTrack.ts'
 import { pushTrace } from '../debug/trace.ts'
 
 type JitsiMeetJS = {
@@ -336,8 +342,9 @@ export async function connectJitsiConference(input: {
   const base = input.jitsiBase.replace(/\/+$/, '')
   await loadScript(`${base}/libs/lib-jitsi-meet.min.js`)
   const hosts = await fetchJitsiConfig(base)
-  const JitsiMeetJS = window.JitsiMeetJS
-  if (!JitsiMeetJS) throw new Error('JitsiMeetJS не найден')
+  const api = window.JitsiMeetJS
+  if (!api) throw new Error('JitsiMeetJS не найден')
+  const JitsiMeetJS: JitsiMeetJS = api
 
   // INFO/LOG у lib-jitsi-meet очень многословны (в частности, на каждом
   // endpoint message) и при открытых DevTools могут заметно тормозить мастера.
@@ -410,6 +417,10 @@ export async function connectJitsiConference(input: {
   let localVideo: JitsiTrack | null = null
   let localMicMedia: MediaStream | null = null
   let micLive = false
+  /** Пользователь хочет микрофон включённым — даже если дорожка оборвалась на телефоне. */
+  let wantMicLive = false
+  let recoveringMic = false
+  let localMicEndedUnsub: (() => void) | null = null
   let cameraOn = false
   let cameraDeviceId: string | null = null
   const hostTracks: JitsiTrack[] = []
@@ -422,6 +433,8 @@ export async function connectJitsiConference(input: {
   /** `null` — модель слышит всех; иначе только этот Jitsi participant id. */
   let modelHearOnlyId: string | null = null
   const tileListeners = new Set<(tiles: ConferenceTile[]) => void>()
+  const hostSpeakingListeners = new Set<(speaking: boolean) => void>()
+  let lastHostSpeaking = false
   const localId = () => conference.myUserId() || 'local'
   let botHandle: ConferenceHandle | null = null
   const speakerActivity = createSpeakerActivity(() => emitTiles())
@@ -430,11 +443,23 @@ export async function connectJitsiConference(input: {
     return botHandle?.localParticipantId() ?? null
   }
 
-  function anyoneSpeaking(): boolean {
+  function isHostRemote(id: string, name?: string): boolean {
+    return isHostJitsiParticipant(id, name ?? remoteNames.get(id) ?? '', botParticipantId())
+  }
+
+  function hostSpeakingNow(): boolean {
     const botId = botParticipantId()
+    if (botId && speakerActivity.has(botId)) return true
+    for (const [id, name] of remoteNames) {
+      if (isHostJitsiParticipant(id, name, botId) && speakerActivity.has(id)) return true
+    }
+    return false
+  }
+
+  function anyoneSpeaking(): boolean {
     if (speakerActivity.has(localId())) return true
-    for (const id of remoteNames.keys()) {
-      if (botId && id === botId) continue
+    for (const [id, name] of remoteNames) {
+      if (isHostRemote(id, name)) continue
       if (speakerActivity.has(id)) return true
     }
     return false
@@ -453,6 +478,7 @@ export async function connectJitsiConference(input: {
     ]
     for (const [id, name] of remoteNames) {
       if (id === localId()) continue
+      if (isHostRemote(id, name)) continue
       tiles.push({
         id,
         name,
@@ -463,6 +489,11 @@ export async function connectJitsiConference(input: {
       })
     }
     for (const listener of tileListeners) listener(tiles)
+    const speaking = hostSpeakingNow()
+    if (speaking !== lastHostSpeaking) {
+      lastHostSpeaking = speaking
+      for (const listener of hostSpeakingListeners) listener(speaking)
+    }
   }
 
   function attachVideo(id: string): void {
@@ -521,6 +552,79 @@ export async function connectJitsiConference(input: {
     })
     modelMixer.setLocalMic(selected.local)
     modelMixer.setRemoteStreams(selected.remotes)
+  }
+
+  function stopWatchingLocalMic(): void {
+    localMicEndedUnsub?.()
+    localMicEndedUnsub = null
+  }
+
+  function watchLocalMic(track: JitsiTrack): void {
+    stopWatchingLocalMic()
+    const media = mediaStreamTrackFromJitsi(track)
+    if (!media) return
+    const onEnded = () => {
+      if (disposed || !wantMicLive) return
+      pushTrace('note', 'Локальный микрофон оборвался, переподключаем')
+      void recoverLocalMic()
+    }
+    media.addEventListener('ended', onEnded)
+    localMicEndedUnsub = () => media.removeEventListener('ended', onEnded)
+  }
+
+  async function dropLocalAudioTrack(): Promise<void> {
+    stopWatchingLocalMic()
+    const previous = localAudio
+    localAudio = null
+    localMicMedia = null
+    if (!previous) return
+    try {
+      await conference.removeTrack(previous)
+    } catch {
+      // Дорожка уже могла уйти из комнаты вместе с ended.
+    }
+    try {
+      previous.dispose()
+    } catch {
+      // ignore
+    }
+  }
+
+  async function publishFreshLocalMic(): Promise<void> {
+    const tracks = await JitsiMeetJS.createLocalTracks({ devices: ['audio'] })
+    const next = tracks[0] ?? null
+    if (!next) throw new Error('Микрофон недоступен')
+    for (const extra of tracks.slice(1)) extra.dispose()
+    localAudio = next
+    localMicMedia = next.getOriginalStream?.() ?? null
+    watchLocalMic(next)
+    await conference.addTrack(next)
+    await Promise.resolve(next.unmute())
+    micLive = true
+    syncModelMixer()
+    conferenceAudio.resume()
+    emitTiles()
+  }
+
+  async function recoverLocalMic(): Promise<void> {
+    if (disposed || recoveringMic || !wantMicLive) return
+    recoveringMic = true
+    micLive = false
+    emitTiles()
+    try {
+      await dropLocalAudioTrack()
+      await publishFreshLocalMic()
+      pushTrace('note', 'Микрофон переподключён после обрыва дорожки')
+    } catch (error) {
+      micLive = false
+      wantMicLive = false
+      emitTiles()
+      pushTrace('note', 'Не удалось переподключить микрофон', {
+        error: error instanceof Error ? error.message : String(error),
+      })
+    } finally {
+      recoveringMic = false
+    }
   }
 
   conference.on(confEvents.userJoined, (id: unknown, participant: unknown) => {
@@ -630,16 +734,20 @@ export async function connectJitsiConference(input: {
       }
     },
     async setMicLive(live: boolean) {
+      wantMicLive = live
       if (live) {
+        // На телефоне ОС иногда убивает MediaStreamTrack: mute/unmute уже не помогает.
+        if (localAudio && micTrackIsDead(mediaStreamTrackFromJitsi(localAudio))) {
+          await recoverLocalMic()
+          return
+        }
         if (!localAudio) {
-          const tracks = await JitsiMeetJS.createLocalTracks({ devices: ['audio'] })
-          localAudio = tracks[0] ?? null
-          if (!localAudio) throw new Error('Микрофон недоступен')
-          localMicMedia = localAudio.getOriginalStream?.() ?? null
-          await conference.addTrack(localAudio)
+          await publishFreshLocalMic()
+          return
         }
         await Promise.resolve(localAudio.unmute())
         micLive = true
+        watchLocalMic(localAudio)
       } else if (localAudio) {
         await Promise.resolve(localAudio.mute())
         micLive = false
@@ -737,6 +845,11 @@ export async function connectJitsiConference(input: {
       emitTiles()
       return () => tileListeners.delete(handler)
     },
+    subscribeHostSpeaking(handler) {
+      hostSpeakingListeners.add(handler)
+      handler(lastHostSpeaking)
+      return () => hostSpeakingListeners.delete(handler)
+    },
     bindVideo(participantId, element) {
       const previous = videoBindings.get(participantId)
       const track = participantId === localId() ? localVideo : remoteVideo.get(participantId)
@@ -751,6 +864,8 @@ export async function connectJitsiConference(input: {
     dispose() {
       if (disposed) return
       disposed = true
+      wantMicLive = false
+      stopWatchingLocalMic()
       botHandle?.dispose()
       botHandle = null
       transport.close()
@@ -759,6 +874,7 @@ export async function connectJitsiConference(input: {
       speakerActivity.dispose()
       conferenceAudio.dispose()
       tileListeners.clear()
+      hostSpeakingListeners.clear()
       for (const [id, track] of remoteVideo) {
         const el = videoBindings.get(id)
         if (el) track.detach(el)
@@ -788,7 +904,7 @@ export async function connectJitsiConference(input: {
       botHandle = await connectJitsiConference({
         jitsiBase: input.jitsiBase,
         roomName: input.roomName,
-        displayName: 'Ведущая',
+        displayName: HOST_JITSI_NAME,
         bot: true,
         onError: input.onError,
       })

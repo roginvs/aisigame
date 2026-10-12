@@ -1,3 +1,6 @@
+/** Display name of the model bot in Jitsi; never shown as a video tile. */
+export const HOST_JITSI_NAME = 'Ведущая'
+
 export type ConferenceTile = {
   id: string
   name: string
@@ -5,6 +8,11 @@ export type ConferenceTile = {
   micLive: boolean
   cameraOn: boolean
   speaking: boolean
+}
+
+export function isHostJitsiParticipant(id: string, name: string, botParticipantId: string | null): boolean {
+  if (botParticipantId && id === botParticipantId) return true
+  return name === HOST_JITSI_NAME
 }
 
 export type ConferenceMedia = {
@@ -26,6 +34,8 @@ export type ConferenceMedia = {
   anyoneSpeaking: () => boolean
   localParticipantId: () => string
   subscribeTiles: (handler: (tiles: ConferenceTile[]) => void) => () => void
+  /** Уровень речи бота «Ведущая» в Jitsi — для пульсации портрета, не плитки. */
+  subscribeHostSpeaking: (handler: (speaking: boolean) => void) => () => void
   bindVideo: (participantId: string, element: HTMLVideoElement | null) => void
 }
 
@@ -39,6 +49,7 @@ export function createBroadcastMedia(displayName: string): ConferenceMedia & { d
   let camera = false
   let micStream: MediaStream | null = null
   const listeners = new Set<(tiles: ConferenceTile[]) => void>()
+  const hostSpeakingListeners = new Set<(speaking: boolean) => void>()
 
   function emit(): void {
     const tiles: ConferenceTile[] = [
@@ -82,9 +93,15 @@ export function createBroadcastMedia(displayName: string): ConferenceMedia & { d
       ])
       return () => listeners.delete(handler)
     },
+    subscribeHostSpeaking(handler) {
+      hostSpeakingListeners.add(handler)
+      handler(false)
+      return () => hostSpeakingListeners.delete(handler)
+    },
     bindVideo() {},
     dispose() {
       listeners.clear()
+      hostSpeakingListeners.clear()
       micStream?.getTracks().forEach((track) => track.stop())
       micStream = null
     },

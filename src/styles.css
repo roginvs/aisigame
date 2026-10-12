@@ -389,7 +389,8 @@ h1, h2, p { margin: 0; }
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .video-tile.speaking {
+  .video-tile.speaking,
+  .host.speaking {
     animation: none;
     border-color: #fff0ae;
     box-shadow: 0 0 0 2px rgb(255 240 174 / 55%);
@@ -1027,6 +1028,11 @@ button.continue-with-file .continue-file {
 .host-buzz strong { color: #ffc14d; }
 .host-think { border-color: #7eb6e8; }
 .host-think strong { color: #b9d7f5; }
+
+/* Онлайн: речь «Ведущей» из Jitsi — та же золотая рамка, что у видеоплиток. */
+.host.speaking {
+  animation: conference-speaker-pulse 520ms ease-in-out infinite alternate;
+}
 
 @keyframes host-pulse {
   50% { box-shadow: 0 0 18px rgba(61, 220, 151, 0.55); }
