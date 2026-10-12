@@ -4,7 +4,7 @@ import { gameMachine } from '../game/machine.ts'
 import { statePath } from '../game/machine.ts'
 import type { GameContext, Player, QuestionPack } from '../game/types.ts'
 import { buildConferenceSnapshot, timerRemainingMs } from './buildSnapshot.ts'
-import { CHUNK_BYTES, createPackTransferMaster, type PackTransferMaster } from './packTransfer.ts'
+import { createPackTransferMaster, type PackTransferMaster } from './packTransfer.ts'
 import {
   LOBBY_IDLE_INTERVAL_MS,
   LOBBY_SILENCE_BEFORE_SPEECH_MS,
@@ -14,6 +14,7 @@ import {
   packLobbySummary,
 } from './lobbySpeech.ts'
 import type { ConferenceChatLine, ConferenceMessage, ConferenceSnapshot } from './messages.ts'
+import { paceAfterAck, type TransferPace } from './packProgress.ts'
 import { ConferenceRoster } from './roster.ts'
 import type { ConferenceTransport } from './transport.ts'
 import { PRESENCE_HEARTBEAT_MS, PRESENCE_STALE_MS } from './presence.ts'
@@ -72,6 +73,8 @@ export class MasterSession {
   private clientAuth = new Map<string, string>()
   private clientSender = new Map<string, string>()
   private senderClient = new Map<string, string>()
+  /** Оценка скорости/ETA по packAck, отдельно для каждого клиента. */
+  private transferPace = new Map<string, TransferPace>()
 
   constructor(options: MasterSessionOptions) {
     clearRemoteDebug()
@@ -234,13 +237,20 @@ export class MasterSession {
     if (message.type === 'packAck') {
       if (message.hash !== this.packHash) return
       this.packTransfer.handleAck(message.clientId, message.nextIndex)
-      const total = Math.max(1, Math.ceil(this.packBytes.byteLength / CHUNK_BYTES))
-      const percent = Math.min(99, Math.floor((message.nextIndex / total) * 100))
-      this.roster.updateProgress(message.clientId, { percent })
+      const { pace, view } = paceAfterAck(
+        this.transferPace.get(message.clientId),
+        message.nextIndex,
+        this.packBytes.byteLength,
+      )
+      if (pace) this.transferPace.set(message.clientId, pace)
+      else this.transferPace.delete(message.clientId)
+      this.roster.updateProgress(message.clientId, view)
+      this.onRosterCb()
       return
     }
     if (message.type === 'packVerified') {
       if (message.hash !== this.packHash) return
+      this.transferPace.delete(message.clientId)
       this.markHashOk(message.clientId, 100)
       this.broadcastCurrentSnapshot()
       this.maybeLobbySpeech()

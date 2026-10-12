@@ -22,6 +22,8 @@ export function buildConferenceSnapshot(input: {
     stale: entry.stale,
     hidden: entry.hidden,
     percent: entry.percent,
+    downloadBps: entry.downloadBps,
+    etaSeconds: entry.etaSeconds,
     ready: entry.ready,
     hashOk: entry.hashOk,
   }))

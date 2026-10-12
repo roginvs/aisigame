@@ -6,8 +6,8 @@ import type { SavedMatch } from '../game/types.ts'
 import type { GameVoice } from '../realtime/client.ts'
 import { MasterSession } from './masterSession.ts'
 import type { ConferenceMessage } from './messages.ts'
-import { clearRememberedPlayersForTests } from './presence.ts'
-import { PRESENCE_STALE_MS } from './presence.ts'
+import { CHUNK_BYTES } from './chunks.ts'
+import { clearRememberedPlayersForTests, PRESENCE_HEARTBEAT_MS, PRESENCE_STALE_MS } from './presence.ts'
 import type { ConferenceTransport } from './transport.ts'
 import { formatDebugDump } from '../debug/trace.ts'
 import {
@@ -238,6 +238,58 @@ describe('MasterSession resume', () => {
     actor.stop()
   })
 
+  it('кладёт скорость и ETA в roster и снимок по packAck', () => {
+    const actor = createActor(gameMachine)
+    actor.start()
+    const transport = new MemoryTransport()
+    const packBytes = new Uint8Array(CHUNK_BYTES * 10)
+    const session = new MasterSession({
+      transport,
+      client: { requestSpeech: vi.fn() } as unknown as GameVoice,
+      actor,
+      masterClientId: 'master-client',
+      masterName: 'Мастер',
+      pack: demoPack,
+      packBytes,
+      packHash: 'hash',
+      authorityToken: 'master-token',
+      onRoster: () => {},
+      getChat: () => [],
+      setChat: () => {},
+    })
+
+    transport.receive({ type: 'hello', clientId: 'guest-client', authToken: 'guest-token', name: 'Гость' })
+    transport.receive({
+      type: 'packAck',
+      clientId: 'guest-client',
+      authToken: 'guest-token',
+      hash: 'hash',
+      nextIndex: 2,
+    })
+    vi.advanceTimersByTime(1_000)
+    transport.receive({
+      type: 'packAck',
+      clientId: 'guest-client',
+      authToken: 'guest-token',
+      hash: 'hash',
+      nextIndex: 4,
+    })
+
+    const entry = session.rosterList().find((row) => row.clientId === 'guest-client')
+    expect(entry).toMatchObject({ percent: 40 })
+    expect(entry?.downloadBps).toBeGreaterThan(0)
+    expect(entry?.etaSeconds).toBeGreaterThan(0)
+
+    vi.advanceTimersByTime(PRESENCE_HEARTBEAT_MS)
+    const presence = lastSnapshot(transport)?.presence.find((row) => row.clientId === 'guest-client')
+    expect(presence).toMatchObject({ percent: 40 })
+    expect(presence?.downloadBps).toBeGreaterThan(0)
+    expect(presence?.etaSeconds).toBeGreaterThan(0)
+
+    session.dispose()
+    actor.stop()
+  })
+
   it('объединяет быстрые изменения лобби и не сбрасывает готовность повторной сверкой', () => {
     const actor = createActor(gameMachine)
     actor.start()
@@ -297,7 +349,7 @@ describe('MasterSession resume', () => {
     actor.stop()
   })
 
-  it('без изменений поддерживает ожидание одной репликой примерно раз в 15 секунд', () => {
+  it('без изменений поддерживает ожидание одной репликой примерно раз в 25 секунд', () => {
     const actor = createActor(gameMachine)
     actor.start()
     const transport = new MemoryTransport()

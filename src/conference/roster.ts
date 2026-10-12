@@ -16,6 +16,10 @@ export type RosterEntry = {
   name: string
   playerId: number | null
   percent: number
+  /** Оценка скорости приёма пакета у этого клиента, байт/с; null если ещё рано или готово. */
+  downloadBps: number | null
+  /** Оценка оставшегося времени передачи, секунды. */
+  etaSeconds: number | null
   ready: boolean
   hashOk: boolean
   lastSeen: number
@@ -45,6 +49,8 @@ export class ConferenceRoster {
       name: masterName,
       playerId: 1,
       percent: 100,
+      downloadBps: null,
+      etaSeconds: null,
       ready: true,
       hashOk: true,
       lastSeen: now,
@@ -78,6 +84,8 @@ export class ConferenceRoster {
       name: name.trim() || 'Игрок',
       playerId,
       percent: 0,
+      downloadBps: null,
+      etaSeconds: null,
       ready: false,
       hashOk: false,
       lastSeen: now,
@@ -89,11 +97,21 @@ export class ConferenceRoster {
     return entry
   }
 
-  updateProgress(clientId: string, patch: Partial<Pick<RosterEntry, 'percent' | 'ready' | 'hashOk'>>, now = Date.now()): void {
+  updateProgress(
+    clientId: string,
+    patch: Partial<Pick<RosterEntry, 'percent' | 'downloadBps' | 'etaSeconds' | 'ready' | 'hashOk'>>,
+    now = Date.now(),
+  ): void {
     const entry = this.entries.get(clientId)
     if (!entry) return
     touch(clientId, now)
-    this.entries.set(clientId, this.withPresence({ ...entry, ...patch, lastSeen: now }, now))
+    const next = { ...entry, ...patch, lastSeen: now }
+    if (next.hashOk || next.percent >= 100) {
+      next.downloadBps = null
+      next.etaSeconds = null
+      if (next.percent < 100 && next.hashOk) next.percent = 100
+    }
+    this.entries.set(clientId, this.withPresence(next, now))
   }
 
   assignPlayerId(clientId: string): number | null {

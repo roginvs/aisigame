@@ -31,6 +31,10 @@ export type ConferenceSnapshotPresence = {
   hidden: boolean
   /** 0–100: сборка и сверка пакета у этого клиента */
   percent: number
+  /** Байты/с приёма пакета; старые клиенты могут не слать поле. */
+  downloadBps?: number | null
+  /** Секунды до конца передачи по оценке мастера. */
+  etaSeconds?: number | null
   ready: boolean
   hashOk: boolean
 }
@@ -298,7 +302,9 @@ function validPresence(value: unknown): boolean {
   return isRecord(value) && shortString(value.clientId, 200) && shortString(value.name, 100) &&
     nullableInteger(value.playerId) && typeof value.isMaster === 'boolean' && typeof value.stale === 'boolean' &&
     typeof value.hidden === 'boolean' && Number.isFinite(value.percent) && typeof value.ready === 'boolean' &&
-    typeof value.hashOk === 'boolean'
+    typeof value.hashOk === 'boolean' &&
+    (value.downloadBps === undefined || value.downloadBps === null || Number.isFinite(value.downloadBps)) &&
+    (value.etaSeconds === undefined || value.etaSeconds === null || Number.isFinite(value.etaSeconds))
 }
 
 function validConversationLine(value: unknown): boolean {

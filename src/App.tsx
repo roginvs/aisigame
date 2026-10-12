@@ -1131,6 +1131,8 @@ export default function App() {
       name: entry.name,
       playerId: entry.playerId,
       percent: entry.percent,
+      downloadBps: entry.downloadBps ?? null,
+      etaSeconds: entry.etaSeconds ?? null,
       ready: entry.ready,
       hashOk: entry.hashOk,
       stale: entry.stale,

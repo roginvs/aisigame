@@ -1,3 +1,4 @@
+import { packProgressLabel } from '../conference/packProgress.ts'
 import type { RosterEntry } from '../conference/roster.ts'
 
 export function ConferenceRosterPanel(props: {
@@ -26,10 +27,7 @@ export function ConferenceRosterPanel(props: {
                 <div className="roster-bar" role="progressbar" aria-valuenow={entry.percent} aria-valuemin={0} aria-valuemax={100}>
                   <span style={{ transform: `scaleX(${Math.max(0, Math.min(1, entry.percent / 100))})` }} />
                 </div>
-                <p className="status-line">
-                  {entry.hashOk ? 'Пакет сверен' : entry.percent >= 99 ? 'Сверка…' : `Загрузка ${entry.percent}%`}
-                  {entry.ready ? ' · готов' : ''}
-                </p>
+                <p className="status-line">{packProgressLabel(entry)}</p>
               </>
             ) : null}
           </li>
