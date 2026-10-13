@@ -18,8 +18,8 @@ const ICE_SERVERS: RTCIceServer[] = [
   { urls: 'stun:stun.l.google.com:19302' },
   {
     urls: ['turn:fallout-nevada.ru:3478?transport=udp', 'turn:fallout-nevada.ru:3478?transport=tcp'],
-    username: '4102444800:aisigame',
-    credential: 'sNgOnTytKaMZseeWPmUAl780Kb8=',
+    username: '2147480000:aisigame',
+    credential: '5NgMsCzO0Z91bffmCcwGQIM3V9Y=',
   },
 ]
 

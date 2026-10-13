@@ -50,8 +50,8 @@ sleep 3; docker ps --filter name=coturn; docker logs coturn 2>&1 | grep -i "list
 
 1. Открыть [Trickle ICE](https://webrtc.github.io/samples/src/content/peerconnection/trickle-ice/).
 2. STUN or TURN URI: `turn:fallout-nevada.ru:3478`
-3. TURN username: `4102444800:aisigame`
-4. TURN password: `sNgOnTytKaMZseeWPmUAl780Kb8=`
+3. TURN username: `2147480000:aisigame`
+4. TURN password: `5NgMsCzO0Z91bffmCcwGQIM3V9Y=`
 5. Add Server, затем Gather candidates. Должна появиться строка с типом `relay`. Если её нет, значит закрыты порты (шаг 2).
 
 ## Jitsi трогать не нужно
@@ -70,5 +70,5 @@ TURN_CREDENTIALS=08cf3274436761687fb3be3dd4456ab4216ed1826f865b21
 Новый секрет подставить в шаг 3, и пересчитать пароль для `packPipe.ts`:
 
 ```bash
-printf '%s' '4102444800:aisigame' | openssl dgst -binary -sha1 -hmac 'НОВЫЙ_СЕКРЕТ' | base64
+printf '%s' '2147480000:aisigame' | openssl dgst -binary -sha1 -hmac 'НОВЫЙ_СЕКРЕТ' | base64
 ```
