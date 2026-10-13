@@ -1,6 +1,9 @@
 import type { Actor, SnapshotFrom } from 'xstate'
 import { playTimeoutBeep } from '../audio/beep.ts'
-import { audioJudgmentTimings } from '../options.ts'
+import { auctionDingMs, audioJudgmentTimings, catMeowMs } from '../options.ts'
+import { matchAuctionSpeech, optionLabel } from './auction.ts'
+import { matchCatStake } from './cat.ts'
+import { matchSpokenPlayer, nameHints } from './nameMatch.ts'
 import type { JudgmentInputMode, JudgmentSource, JudgeRequestContext } from '../realtime/judgmentRequest.ts'
 import { JudgmentClock } from './judgmentClock.ts'
 import { gameConfig } from '../config.ts'
@@ -85,6 +88,8 @@ export function attachController(options: {
   let choiceEpoch = 0
   /** Инвалидирует in-flight разбор ставки при смене финалиста. */
   let betEpoch = 0
+  let specialEpoch = 0
+  let specialIntroTimer: ReturnType<typeof setTimeout> | null = null
   /** Инвалидирует фразу без кнопки после смены окна buzzing. */
   let buzzEpoch = 0
   /** Инвалидирует talkover после нового чтения. */
@@ -223,7 +228,7 @@ export function attachController(options: {
       overRead = true
       return
     }
-    if (path === 'choosing.clarifying') {
+    if (path === 'choosing.clarifying' || specialClarifying(path)) {
       client.interruptSpeech()
       actor.send({ type: 'PLAYER_SPEECH_STARTED' })
       return
@@ -262,6 +267,10 @@ export function attachController(options: {
     if (path === 'finalBets.hearing') {
       actor.send({ type: 'PLAYER_SPEECH_FINISHED' })
       void considerBet(itemId)
+      return
+    }
+    if (specialListening(path)) {
+      void considerSpecial(path, durationMs, itemId)
       return
     }
     if (path === 'answering.waiting' || path === 'answering.hearing') {
@@ -419,6 +428,60 @@ export function attachController(options: {
       client.setMicEnabled(false)
       if (context.appeal?.summary === 'pending') speak('roundSummary', roundSummaryInstructions(context), undefined, true)
       else client.interruptSpeech()
+    }
+    if (specialIntroTimer && !path.endsWith('.announcing')) { clearTimeout(specialIntroTimer); specialIntroTimer = null }
+    if (path === 'cat.announcing' || path === 'auction.announcing') {
+      specialEpoch += 1
+      choiceEpoch += 1
+      expectingToolTurn = null
+      client.interruptSpeech()
+      client.setMicEnabled(false)
+      // Мяу / динь звучит у всех локально; первая фраза — после звука.
+      const purpose = path === 'cat.announcing' ? 'cat' : 'auction'
+      const waitMs = from === 'paused' || from.startsWith(purpose === 'cat' ? 'cat.' : 'auction.') ? 0 : purpose === 'cat' ? catMeowMs : auctionDingMs
+      if (specialIntroTimer) clearTimeout(specialIntroTimer)
+      specialIntroTimer = setTimeout(() => {
+        specialIntroTimer = null
+        const now = actor.getSnapshot()
+        if (statePath(now.value) !== path) return
+        speak(purpose, purpose === 'cat' ? catCue(now.context) : auctionCue(now.context), undefined, true)
+      }, waitMs)
+    }
+    if (specialListening(path)) {
+      specialEpoch += 1
+      const special = context.special
+      const names = context.players.filter((player) => player.id !== special?.giverId).map((player) => player.name)
+      client.setTranscriptionPrompt(path === 'cat.picking'
+        ? `Игрок называет, кому отдаёт вопрос: ${nameHints(names)}.`
+        : path === 'cat.staking.listening'
+          ? `Игрок выбирает ставку: минимум или максимум, ${special?.stakeOptions.join(' или ')}.`
+          : `Игрок делает ставку: пас, ва-банк, номинал или сумма: ${special?.options.map(optionLabel).join(', ')}.`)
+      client.setMicEnabled(true)
+    }
+    if (path === 'cat.clarifying') speakWhileListening('catClarify', catClarifyCue(context))
+    if (path === 'cat.staking.clarifying') speakWhileListening('catStakeClarify', catStakeClarifyCue(context))
+    if (path === 'auction.clarifying') speakWhileListening('auctionClarify', auctionClarifyCue(context))
+    if (path === 'cat.staking.asking') {
+      specialEpoch += 1
+      client.setMicEnabled(false)
+      speak('catStake', catStakeCue(context), undefined, true)
+    }
+    if (path === 'auction.asking') {
+      specialEpoch += 1
+      client.setMicEnabled(false)
+      speak('auctionAsk', auctionAskCue(context), undefined, true)
+    }
+    if (path === 'auction.won') {
+      specialEpoch += 1
+      client.setMicEnabled(false)
+      speak('auctionWon', auctionWonCue(context), undefined, true)
+    }
+    if (path === 'specialAway') {
+      specialEpoch += 1
+      dropAnswerAttempt()
+      client.interruptSpeech()
+      client.setMicEnabled(false)
+      speak('specialAway', specialAwayCue(context), undefined, true)
     }
     if (path === 'welcoming') speak('welcome', welcomeInstructions(context), undefined, true)
     if (path === 'bridging') speak('bridge', bridgeInstructions(context), undefined, true)
@@ -692,6 +755,64 @@ export function attachController(options: {
     }
     pushTrace('note', `перебили чтение: ${heard.text || 'речь не распознана'}`)
     actor.send({ type: 'TALKED_OVER' })
+  }
+
+  /** Голос в коте/аукционе: только локальный разбор; результат — всегда вариант из экрана или переспрос. */
+  async function considerSpecial(path: string, durationMs: number, itemId: string | null): Promise<void> {
+    const epoch = specialEpoch
+    if (durationMs < 250) {
+      pushTrace('note', 'короткий звук в коте/аукционе — пропуск')
+      return
+    }
+    const heard = await client.waitForTranscript(itemId, 2200)
+    if (epoch !== specialEpoch) return
+    const snapshot = actor.getSnapshot()
+    const now = statePath(snapshot.value)
+    if (now !== path) return
+    const text = heard.text.trim()
+    if (!heard.arrived || !text) {
+      pushPlayerLine('речь не распознана')
+      return
+    }
+    const context = snapshot.context
+    const special = context.special
+    if (!special) return
+    if (path === 'cat.picking') {
+      const candidates = context.players.filter((player) => player.id !== special.giverId)
+      const playerId = matchSpokenPlayer(text, candidates)
+      if (playerId !== null) {
+        pushJudgeLine(`Услышала: «${text}» — кот уходит игроку ${nameOf(context, playerId)}`)
+        actor.send({ type: 'CAT_RECIPIENT', playerId })
+        return
+      }
+      const self = matchSpokenPlayer(text, context.players.filter((player) => player.id === special.giverId)) !== null
+      const reason = self ? 'себе оставить нельзя' : 'нужно имя другого игрока'
+      pushJudgeLine(`Услышала: «${text}», ${reason}`)
+      actor.send({ type: 'CAT_PICK_UNCLEAR', reason })
+      return
+    }
+    if (path === 'cat.staking.listening') {
+      const amount = matchCatStake(text, special.stakeOptions)
+      if (amount !== null && special.recipientId !== null) {
+        pushJudgeLine(`Ставка: ${amount}`)
+        actor.send({ type: 'CAT_STAKE', playerId: special.recipientId, amount })
+        return
+      }
+      pushJudgeLine(`Услышала: «${text}», нужна ставка ${special.stakeOptions.join(' или ')}`)
+      actor.send({ type: 'CAT_STAKE_UNCLEAR', reason: `услышала «${text}»` })
+      return
+    }
+    if (path === 'auction.listening' && special.recipientId !== null) {
+      const money = context.players.find((player) => player.id === special.recipientId)?.score ?? 0
+      const option = matchAuctionSpeech(text, { options: special.options, nominal: special.nominal, current: special.bid, money })
+      if (option) {
+        pushJudgeLine(`Аукцион: ${optionLabel(option)}`)
+        actor.send({ type: 'AUCTION_BID', playerId: special.recipientId, option })
+        return
+      }
+      pushJudgeLine(`Услышала: «${text}», нужен один из вариантов: ${special.options.map(optionLabel).join(', ')}`)
+      actor.send({ type: 'AUCTION_UNCLEAR', reason: `услышала «${text}»` })
+    }
   }
 
   async function considerBet(itemId: string | null): Promise<void> {
@@ -1044,8 +1165,21 @@ function micOpen(path: string): boolean {
     path === 'reading.armed' ||
     path === 'answering.waiting' ||
     path === 'answering.hearing' ||
-    path === 'finalBets.hearing'
+    path === 'finalBets.hearing' ||
+    specialListening(path) ||
+    specialClarifying(path)
   )
+}
+
+const specialPurposes = new Set<string>(['cat', 'catClarify', 'catStake', 'catStakeClarify', 'auction', 'auctionAsk', 'auctionClarify', 'auctionWon', 'specialAway'])
+
+/** Узлы кота/аукциона, где слушаем одного игрока. */
+export function specialListening(path: string): boolean {
+  return path === 'cat.picking' || path === 'cat.staking.listening' || path === 'auction.listening'
+}
+
+function specialClarifying(path: string): boolean {
+  return path === 'cat.clarifying' || path === 'cat.staking.clarifying' || path === 'auction.clarifying'
 }
 
 function isSpeechPurpose(purpose: string): purpose is SpeechPurpose {
@@ -1062,7 +1196,8 @@ function isSpeechPurpose(purpose: string): purpose is SpeechPurpose {
     purpose === 'turn' ||
     purpose === 'chooserHandoff' ||
     purpose === 'micWarning' ||
-    purpose === 'falseStart'
+    purpose === 'falseStart' ||
+    specialPurposes.has(purpose)
   )
 }
 
@@ -1369,6 +1504,135 @@ function withCloseGuess(cue: string, context: GameContext): string {
 }
 
 /** Дословная реплика, когда ответ один: модель не должна пересказывать задание. */
+// ——— Кот в мешке и аукцион: свободные реплики (ситуация + цель + ограничения) ———
+
+function nameOf(context: GameContext, id: number | null | undefined): string {
+  return context.players.find((player) => player.id === id)?.name ?? 'игрок'
+}
+
+function catTheme(context: GameContext): string {
+  const question = questionById(context.questions, context.activeQuestionId)
+  return question?.cat?.theme || question?.themeName || ''
+}
+
+export function catCue(context: GameContext): string {
+  const special = context.special
+  const giver = nameOf(context, special?.giverId)
+  const count = context.players.length
+  const question = questionById(context.questions, context.activeQuestionId)
+  const before = question?.cat?.knows === 'before' ? ` Тема: «${catTheme(context)}», варианты цены: ${special?.stakeOptions.join(' или ')}.` : ''
+  const who = count === 1
+    ? 'Игрок один — вопрос остаётся у него.'
+    : special?.recipientId != null
+      ? `Вопрос автоматически уходит игроку ${nameOf(context, special.recipientId)}.`
+      : `${giver} должен отдать вопрос другому игроку. В конце спроси: «Кому отдадите?»`
+  return hostCue({
+    situation: `Выбрана ячейка «кот в мешке». Выбирал ${giver}. Игроков: ${count}. ${who}${before}`,
+    goal: `Поздравь: у ${giver} кот в мешке, вопрос нужно отдать. ${count >= 3 && special?.recipientId == null ? 'Спроси, кому отдаст.' : ''}`,
+    constraints: [question?.cat?.knows === 'before' ? '' : 'Тему кота пока не называй.', 'Вопрос не читай.'],
+  })
+}
+
+export function catClarifyCue(context: GameContext): string {
+  const reason = context.special?.unclear || 'не расслышала имя'
+  return hostCue({
+    situation: `Кот в мешке: ${nameOf(context, context.special?.giverId)} выбирает, кому отдать вопрос. Причина переспроса: ${reason}.`,
+    goal: reason.includes('себе') ? 'Коротко скажи, что оставить кота себе нельзя, и попроси назвать другого игрока.' : 'Коротко скажи, что не расслышала, кому отдаёт, и попроси назвать имя ещё раз.',
+    constraints: ['Одна короткая фраза.'],
+  })
+}
+
+export function catStakeCue(context: GameContext): string {
+  const special = context.special
+  const recipient = nameOf(context, special?.recipientId)
+  const options = special?.stakeOptions ?? []
+  const fixed = options.length <= 1
+  return hostCue({
+    situation: `Кот в мешке у игрока ${recipient}. Тема: «${catTheme(context)}». ${fixed ? `Цена фиксированная: ${options[0] ?? special?.nominal}.` : `Ставка на выбор: минимум ${options[0]} или максимум ${options.at(-1)}.`}`,
+    goal: fixed
+      ? `Обратись к игроку ${recipient}: назови тему и цену вопроса. Сейчас прочитаешь вопрос.`
+      : `Обратись к игроку ${recipient}: назови тему и попроси выбрать ставку — минимум или максимум.`,
+    constraints: ['Вопрос не читай.', 'Одна-две короткие фразы.'],
+  })
+}
+
+export function catStakeClarifyCue(context: GameContext): string {
+  const options = context.special?.stakeOptions ?? []
+  return hostCue({
+    situation: `Кот в мешке: ${nameOf(context, context.special?.recipientId)} выбирает ставку. Не поняла ответ (${context.special?.unclear || 'неясно'}).`,
+    goal: `Коротко попроси выбрать: ${options[0]} или ${options.at(-1)}.`,
+    constraints: ['Одна короткая фраза.'],
+  })
+}
+
+export function auctionCue(context: GameContext): string {
+  const special = context.special
+  const giver = nameOf(context, special?.giverId)
+  const auto = special?.bid != null
+  return hostCue({
+    situation: `Выбрана ячейка-аукцион. Выбирал ${giver}. Номинал ${special?.nominal}. ${auto ? `Денег у ${giver} не больше номинала: ставка ${special?.bid}, автоматически.` : ''}`,
+    goal: auto
+      ? `Поздравь: у ${giver} вопрос-аукцион. Скажи, что ставка ${special?.bid}, автоматически.`
+      : `Поздравь: у ${giver} вопрос-аукцион. Попроси ${giver} сделать ставку, минимум ${special?.nominal}.`,
+    constraints: ['Варианты ставок целиком не перечисляй: они на экране.', 'Вопрос не читай.'],
+  })
+}
+
+export function auctionAskCue(context: GameContext): string {
+  const special = context.special
+  const bidder = nameOf(context, special?.recipientId)
+  return hostCue({
+    situation: `Аукцион. Сейчас ${special?.allIn ? 'ва-банк ' : ''}${special?.bid} у игрока ${nameOf(context, special?.leaderId)}. Спрашиваешь игрока ${bidder}.`,
+    goal: `Обратись к игроку ${bidder}: «Сейчас ${special?.bid} у ${nameOf(context, special?.leaderId)}, перекупаете?»`,
+    constraints: ['Варианты не перечисляй: они на экране.', 'Одна короткая фраза.'],
+  })
+}
+
+export function auctionClarifyCue(context: GameContext): string {
+  return hostCue({
+    situation: `Аукцион: ${nameOf(context, context.special?.recipientId)} делает ставку. Не поняла (${context.special?.unclear || 'неясно'}).`,
+    goal: 'Коротко попроси назвать один из вариантов на экране.',
+    constraints: ['Одна короткая фраза.'],
+  })
+}
+
+export function auctionWonCue(context: GameContext): string {
+  const special = context.special
+  return hostCue({
+    situation: `Торги закончены. Вопрос уходит игроку ${nameOf(context, special?.leaderId)} за ${special?.bid ?? special?.nominal}.`,
+    goal: `Скажи, что вопрос уходит игроку ${nameOf(context, special?.leaderId)} за ${special?.bid ?? special?.nominal}. Сейчас прочитаешь вопрос.`,
+    constraints: ['Вопрос не читай.', 'Одна короткая фраза.'],
+  })
+}
+
+export function specialAwayCue(context: GameContext): string {
+  return hostCue({
+    situation: `${nameOf(context, context.special?.awayPlayerId)} отключился. Ждём его до 15 секунд.`,
+    goal: `Коротко скажи, что ${nameOf(context, context.special?.awayPlayerId)} отключился и мы немного подождём.`,
+    constraints: ['Одна короткая фраза.'],
+  })
+}
+
+/** Объявление после ожидания отключившегося: очки 0, эталон вслух, кто выбирает. */
+export function awayAnnounceCue(context: GameContext): string {
+  const question = questionById(context.questions, context.activeQuestionId)
+  return hostCue({
+    situation: `${nameOf(context, context.activePlayerId)} не вернулся. Очки не меняются. Следующий вопрос выбирает ${nameOf(context, context.chooserId)}.`,
+    goal: `${spokenAnswerCue(question?.answers ?? [], question?.choices ?? [])} Коротко скажи, что идём дальше и выбирает ${nameOf(context, context.chooserId)}.`,
+    constraints: ['Одна-две короткие фразы.'],
+  })
+}
+
+/** Чьё слово сейчас решает в коте/аукционе (для микса модели и подписи «… делает ставку»). */
+export function specialListenerId(path: string, context: GameContext): number | null {
+  const special = context.special
+  if (!special) return null
+  if (path.startsWith('cat.picking') || path.startsWith('cat.clarifying') || path === 'cat.announcing') return special.recipientId == null ? special.giverId : null
+  if (path.startsWith('cat.staking')) return special.recipientId
+  if (path.startsWith('auction.') && path !== 'auction.won') return special.recipientId
+  return null
+}
+
 export function verbatimAnnouncement(context: GameContext): string | null {
   if (context.appeal?.activePlayerId) return null
   const kind = context.announceKind
@@ -1386,6 +1650,7 @@ export function verbatimAnnouncement(context: GameContext): string | null {
 }
 
 export function announceInstructions(context: GameContext): string {
+  if (context.announceKind === 'away') return awayAnnounceCue(context)
   if (context.appeal?.activePlayerId !== null && context.appeal && context.announceKind !== 'repeat') {
     const player = context.players.find((p) => p.id === context.activePlayerId)
     const row = context.outcomes?.[context.appeal.questionId]?.[context.activePlayerId ?? 0]

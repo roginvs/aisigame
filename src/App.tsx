@@ -27,7 +27,7 @@ import { createConferenceTransport } from './conference/transportFactory.ts'
 import { putPack, getPack } from './conference/packDb.ts'
 import { ownPackId, packCatalog } from './game/catalog.ts'
 import { messageRingEntries } from './conference/messageRing.ts'
-import { attachController, type GameControllerActions } from './game/controller.ts'
+import { attachController, specialListenerId, type GameControllerActions } from './game/controller.ts'
 import { defaultPlayerNames, playersFromNames } from './game/players.ts'
 import { appealRequestError } from './game/appeals.ts'
 import { gameMachine, statePath } from './game/machine.ts'
@@ -310,8 +310,10 @@ export default function App() {
     conferenceRole === 'master' && answerer?.clientId
       ? masterParticipantIds[answerer.clientId] ?? null
       : null
+  // Финальная ставка, а в коте/аукционе — тот, чьё слово сейчас решает.
+  const specialListener = specialListenerId(path, snapshot.context)
   const bettor = snapshot.context.players.find(
-    (player) => player.id === snapshot.context.finalists[snapshot.context.finalCursor],
+    (player) => player.id === (specialListener ?? snapshot.context.finalists[snapshot.context.finalCursor]),
   )
   const bettorParticipantId =
     conferenceRole === 'master' && bettor?.clientId
@@ -1277,6 +1279,19 @@ export default function App() {
         const appeal = actor.getSnapshot().context.appeal
         const accepted = appeal?.activePlayerId === request.playerId || Boolean(appeal?.queue.includes(request.playerId))
         return { accepted, reason: accepted ? '' : 'Заявка уже устарела' }
+      }}
+      onSpecialPick={(pick, playerId) => {
+        if (conferenceRole === 'joiner') {
+          const session = joinerSessionRef.current
+          if (!session) return
+          if (pick.target === 'player') session.sendSpecialPick({ target: 'player', playerId: pick.playerId })
+          else if (pick.target === 'stake') session.sendSpecialPick({ target: 'stake', amount: pick.amount })
+          else session.sendSpecialPick({ target: 'auction', choice: pick.option.kind === 'stake' ? pick.option.amount : pick.option.kind })
+          return
+        }
+        if (pick.target === 'player') send({ type: 'CAT_RECIPIENT', playerId: pick.playerId })
+        else if (pick.target === 'stake') send({ type: 'CAT_STAKE', playerId, amount: pick.amount })
+        else send({ type: 'AUCTION_BID', playerId, option: pick.option })
       }}
       onBuzz={(playerId: PlayerId) => {
         if (conferenceRole === 'joiner') {

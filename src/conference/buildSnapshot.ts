@@ -41,6 +41,7 @@ export function buildConferenceSnapshot(input: {
     outcomes: input.context.outcomes ?? {},
     appeal: input.context.appeal ?? null,
     appealSerial: input.context.appealSerial ?? 0,
+    special: input.context.special ?? null,
     commit: buildCommit(),
     pack: input.pack,
     phase: input.phase,

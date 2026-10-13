@@ -41,7 +41,7 @@ export function focusedModelParticipantId(
   const root = phase.split('.')[0] ?? phase
   if (root === 'choosing') return chooserParticipantId
   if (root === 'answering' || root === 'appealCue') return answererParticipantId
-  if (root === 'finalBets') return bettorParticipantId
+  if (root === 'finalBets' || root === 'cat' || root === 'auction') return bettorParticipantId
   if (!hearTurnOnly) return null
   // Лобби / меню: все; уже в партии вне выбора, ответа и ставки — тишина для модели.
   if (root === 'startMenu' || root === 'connecting' || root === 'failed') return null
