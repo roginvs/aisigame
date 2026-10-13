@@ -1725,11 +1725,17 @@ button.buzzer.chooser:disabled {
     aspect-ratio: 4 / 3;
     max-height: none;
   }
+  /* `.stage > .board` (flex: 1 1 0; min-height: 0) outranks a bare `.board`: on a scrolling page the
+     stage has auto height, so a zero flex-basis collapsed the board to 0 px on phones. Size by content. */
+  .stage > .board,
   .board {
+    flex: 0 0 auto;
     min-height: min(560px, 68dvh);
     height: auto;
   }
+  .stage > .question,
   .question {
+    flex: 0 0 auto;
     min-height: min(520px, 68dvh);
   }
   .board, .question, .play .players { grid-column: auto; grid-row: auto; }
