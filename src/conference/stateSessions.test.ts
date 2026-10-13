@@ -240,9 +240,10 @@ it('апелляции: подтверждение, чужой playerId, дуб�
     actor.send({ type: 'ANSWER_JUDGED', judgment: { questionId: 'history-100', playerId: 2, attemptId: attempt, status: 'correct', heard: 'Август', reason: '' } })
     await vi.advanceTimersByTimeAsync(0)
     expect(actor.getSnapshot().context.players.map((p) => p.score)).toEqual([100, 100])
-    // Partial updates may arrive a tick later than the machine change; wait for the joiner view.
-    for (let i = 0; i < 50 && joiner.snapshot()?.players[1]?.score !== 100; i += 1) await vi.advanceTimersByTimeAsync(20)
-    expect(joiner.snapshot()?.players.map((p) => p.score)).toEqual([100, 100])
+    // The reloaded joiner verifies the pack with real async crypto, so under load it can miss the
+    // score partialUpdate and only catch up on its next status request (heartbeat). waitFor advances
+    // fake time by `interval` and also waits real time, covering both.
+    await vi.waitFor(() => expect(joiner.snapshot()?.players.map((p) => p.score)).toEqual([100, 100]), { interval: 50, timeout: 8_000 })
     expect(joiner.snapshot()?.outcomes).toEqual(actor.getSnapshot().context.outcomes)
   } finally { joiner.dispose(); master.dispose(); actor.stop() }
 })
