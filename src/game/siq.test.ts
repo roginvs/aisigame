@@ -18,7 +18,7 @@ const v5 = `<?xml version="1.0" encoding="utf-8"?>
               </params>
               <right><answer>Каспийское море</answer><answer>в Каспийское море</answer></right>
             </question>
-            <question price="200" type="cat">
+            <question price="200" type="secret">
               <params><param name="question" type="content"><item>Кот</item></param></params>
               <right><answer>кот</answer></right>
             </question>
@@ -50,7 +50,7 @@ const v5 = `<?xml version="1.0" encoding="utf-8"?>
 </package>`
 
 describe('parseContentXml', () => {
-  it('keeps text, picture and the final, and skips a cat', () => {
+  it('keeps text, picture and the final, and skips a v5 secret', () => {
     const pack = parseContentXml(v5)
     expect(pack.name).toBe('Проверка')
     expect(pack.rounds.map((round) => round.kind)).toEqual(['normal', 'final'])
@@ -155,7 +155,7 @@ describe('parseContentXml', () => {
     expect(JSON.stringify(question)).not.toContain('Годы здесь')
   })
 
-  it('skips a fifth-version stake, the auction under its new name', () => {
+  it('reads a fifth-version stake as an auction', () => {
     const xml = `<?xml version="1.0" encoding="utf-8"?>
 <package name="Ставка">
   <rounds><round name="Раунд"><themes><theme name="Песни">
@@ -172,8 +172,10 @@ describe('parseContentXml', () => {
   </theme></themes></round></rounds>
 </package>`
     const pack = parseContentXml(xml)
-    expect(pack.questions.map((question) => question.text)).toEqual(['Обычный вопрос'])
-    expect(pack.warnings).toEqual(['Раунд, Песни, 200: пропущен спецвопрос «stake»'])
+    expect(pack.questions.map((question) => question.text)).toEqual(['Обычный вопрос', 'Вопрос со ставкой'])
+    expect(pack.questions[1]?.auction).toEqual({ source: 'stake' })
+    expect(pack.questions[0]?.auction).toBeUndefined()
+    expect(pack.warnings).toEqual([])
   })
 
   it('reads the same package from a zip and warns about a missing picture', async () => {
@@ -208,5 +210,43 @@ describe('parseContentXml', () => {
     const media = pack.questions.flatMap((question) => [...(question.media ?? []), ...(question.answerMedia ?? [])])
     expect(media.map((item) => item.kind)).toEqual(['image', 'audio', 'video', 'image', 'image'])
     expect(media.every((item) => item.url.startsWith('blob:'))).toBe(true)
+  })
+
+  it('reads v4 cat and bagcat: cost kinds, empty theme, knows, self ignored', () => {
+    const q = (type: string, price = 200) => `<question price="${price}">${type}<params><param name="question" type="content"><item>Q${price}</item></param></params><right><answer>a</answer></right></question>`
+    const xml = `<?xml version="1.0" encoding="utf-8"?>
+<package name="Коты"><rounds>
+  <round name="Р1"><themes>
+    <theme name="Обычная"><questions>${q('', 100)}${q('', 500)}</questions></theme>
+    <theme name="Коты"><questions>
+      ${q('<type name="cat"><param name="theme">Звери</param><param name="cost">300</param></type>', 200)}
+      ${q('<type name="cat"><param name="theme"></param><param name="cost">0</param></type>', 300)}
+      ${q('<type name="cat"><param name="theme">X</param><param name="cost"></param></type>', 400)}
+      ${q('<type name="bagcat"><param name="theme">Песни</param><param name="cost">[100;500]/100</param><param name="self">true</param><param name="knows">before</param></type>', 600)}
+      ${q('<type name="bagcat"><param name="theme">Т</param><param name="cost">200</param><param name="knows">never</param></type>', 700)}
+      ${q('<type name="auction"></type>', 0)}
+    </questions></theme>
+  </themes></round>
+  <round name="Финал" type="final"><themes><theme name="Ф"><questions>${q('<type name="cat"><param name="cost">100</param></type>', 0)}</questions></theme></themes></round>
+</rounds></package>`
+    const pack = parseContentXml(xml)
+    const cats = pack.questions.filter((question) => question.cat)
+    expect(cats.map((question) => question.cat?.price)).toEqual([
+      { kind: 'fixed', value: 300 },
+      { kind: 'roundMinMax' },
+      { kind: 'roundMinMax' },
+      { kind: 'range', min: 100, max: 500, step: 100 },
+    ])
+    expect(cats.map((question) => question.cat?.options)).toEqual([[300], [100, 700], [100, 700], [100, 500]])
+    expect(cats.map((question) => question.cat?.theme)).toEqual(['Звери', '', 'X', 'Песни'])
+    expect(cats.map((question) => question.cat?.knows)).toEqual(['after', 'after', 'after', 'before'])
+    expect(cats.map((question) => question.cat?.source)).toEqual(['cat', 'cat', 'cat', 'bagcat'])
+    const auction = pack.questions.find((question) => question.auction)
+    expect(auction?.auction).toEqual({ source: 'auction' })
+    // Цена 0 — минимальная цена раунда.
+    expect(auction?.value).toBe(100)
+    expect(pack.warnings.some((warning) => warning.includes('knows=never'))).toBe(true)
+    expect(pack.warnings.some((warning) => warning.includes('в финале'))).toBe(true)
+    expect(pack.warnings.some((warning) => warning.includes('цена аукциона выведена: 100'))).toBe(true)
   })
 })

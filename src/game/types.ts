@@ -23,6 +23,15 @@ export type SpeechPurpose =
   | 'falseStart'
   | 'appeal'
   | 'roundSummary'
+  | 'cat'
+  | 'catClarify'
+  | 'catStake'
+  | 'catStakeClarify'
+  | 'auction'
+  | 'auctionAsk'
+  | 'auctionClarify'
+  | 'auctionWon'
+  | 'specialAway'
 
 export type RoundKind = 'normal' | 'final'
 
@@ -39,12 +48,60 @@ export type QuestionPack = {
   warnings: string[]
 }
 
+/** Цена кота из `type/param cost` (по SIGame). */
+export type CatPrice =
+  | { kind: 'fixed'; value: number }
+  | { kind: 'range'; min: number; max: number; step: number }
+  | { kind: 'roundMinMax' }
+
+export type CatInfo = {
+  source: 'cat' | 'bagcat'
+  /** Пусто → тема ячейки. */
+  theme: string
+  price: CatPrice
+  knows: 'before' | 'after' | 'never'
+  /** Разобранные парсером варианты ставки (одна — фиксированная цена). */
+  options: number[]
+}
+
+export type AuctionOption =
+  | { kind: 'pass' }
+  | { kind: 'stake'; amount: number }
+  | { kind: 'allIn'; amount: number }
+
+/** Состояние кота или аукциона на текущей ячейке. */
+export type SpecialState = {
+  kind: 'cat' | 'auction'
+  questionId: string
+  /** Кот: кто отдаёт. Аукцион: кто открыл торги (выбравший). */
+  giverId: PlayerId
+  /** Кот: получатель. Аукцион: кого сейчас спрашиваем. */
+  recipientId: PlayerId | null
+  /** Кот: варианты ставки (одна — фиксированная). */
+  stakeOptions: number[]
+  stake: number | null
+  nominal: number
+  order: PlayerId[]
+  passed: PlayerId[]
+  leaderId: PlayerId | null
+  bid: number | null
+  allIn: boolean
+  options: AuctionOption[]
+  log: string[]
+  /** Что не разобрали в последней реплике — для переспроса. */
+  unclear: string
+  /** Кто отключился и откуда ушли в ожидание. */
+  awayPlayerId: PlayerId | null
+  awayFrom: 'staking' | 'bidding' | 'answering' | null
+  awayNextChooser: PlayerId | null
+}
+
 export type Bet = {
   playerId: PlayerId
   amount: number
 }
 
-export type AnnounceKind = 'correct' | 'incorrect' | 'silence' | 'nobody' | 'unclear' | 'repeat'
+export type AnnounceKind = 'correct' | 'incorrect' | 'silence' | 'nobody' | 'unclear' | 'repeat' | 'away'
 
 export type MediaKind = 'image' | 'audio' | 'video'
 
@@ -72,6 +129,8 @@ export type Question = {
   media?: QuestionMedia[]
   answerMedia?: QuestionMedia[]
   choices?: QuestionChoice[]
+  cat?: CatInfo
+  auction?: { source: 'auction' | 'stake' }
 }
 
 export type Player = {
@@ -145,6 +204,7 @@ export type SavedMatch = AppealFields & {
   announceKind: AnnounceKind | null
   judgmentStatus: JudgmentStatus | null
   phase: string
+  special?: SpecialState | null
 }
 
 export type GameEvent =
@@ -174,6 +234,14 @@ export type GameEvent =
   | { type: 'NEXT_ROUND' }
   | { type: 'RESET_GAME' }
   | { type: 'ADD_PLAYER'; player: Player }
+  | { type: 'CAT_RECIPIENT'; playerId: PlayerId }
+  | { type: 'CAT_PICK_UNCLEAR'; reason: string }
+  | { type: 'CAT_STAKE'; playerId: PlayerId; amount: number }
+  | { type: 'CAT_STAKE_UNCLEAR'; reason: string }
+  | { type: 'AUCTION_BID'; playerId: PlayerId; option: AuctionOption }
+  | { type: 'AUCTION_UNCLEAR'; reason: string }
+  | { type: 'SPECIAL_PLAYER_OFFLINE'; playerId: PlayerId; nextChooserId: PlayerId | null }
+  | { type: 'SPECIAL_PLAYER_BACK'; playerId: PlayerId }
 
 export type GameContext = AppealFields & {
   players: Player[]
@@ -223,4 +291,6 @@ export type GameContext = AppealFields & {
   pauseStartedAt: number | null
   /** Время фальстарта игрока на этом вопросе. Вспышка и запрет кнопки длятся falseStartMs от этой метки. */
   falseStarts: Partial<Record<PlayerId, number>>
+  /** Кот в мешке или аукцион на текущей ячейке. */
+  special?: SpecialState | null
 }
