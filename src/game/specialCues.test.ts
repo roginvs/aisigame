@@ -1,0 +1,49 @@
+import { describe, expect, it } from 'vitest'
+import { auctionAskCue, auctionCue, auctionWonCue, catCue, catStakeCue, specialListenerId, specialListening } from './controller.ts'
+import type { GameContext, SpecialState } from './types.ts'
+
+const special: SpecialState = {
+  kind: 'cat', questionId: 'q', giverId: 1, recipientId: null, stakeOptions: [100, 500], stake: null, nominal: 200,
+  order: [], passed: [], leaderId: null, bid: null, allIn: false, options: [], log: [], unclear: '',
+  awayPlayerId: null, awayFrom: null, awayNextChooser: null,
+}
+const question = { id: 'q', themeId: 't', themeName: 'Кот', roundIndex: 0, value: 200, text: 'СЕКРЕТНЫЙ ВОПРОС', answers: ['ЭТАЛОН'],
+  cat: { source: 'cat', theme: 'Звери', price: { kind: 'roundMinMax' }, knows: 'after', options: [100, 500] } }
+const context = {
+  players: [{ id: 1, name: 'Аня', score: 0 }, { id: 2, name: 'Боря', score: 0 }, { id: 3, name: 'Вася', score: 0 }],
+  questions: [question], activeQuestionId: 'q', special,
+} as unknown as GameContext
+
+describe('реплики кота и аукциона', () => {
+  it('кот: тему и вопрос до выбора не раскрывает, просит отдать', () => {
+    const cue = catCue(context)
+    expect(cue).toContain('Аня')
+    expect(cue).toContain('Кому отдадите')
+    expect(cue).not.toContain('СЕКРЕТНЫЙ ВОПРОС')
+    expect(cue).not.toContain('ЭТАЛОН')
+    expect(cue).toContain('Тему кота пока не называй')
+  })
+  it('кот на двоих — сразу называет получателя', () => {
+    expect(catCue({ ...context, players: context.players.slice(0, 2), special: { ...special, recipientId: 2 } })).toContain('автоматически уходит игроку Боря')
+  })
+  it('ставка кота: тема и мин/макс', () => {
+    const cue = catStakeCue({ ...context, special: { ...special, recipientId: 2 } })
+    expect(cue).toContain('Звери')
+    expect(cue).toContain('минимум 100 или максимум 500')
+  })
+  it('аукцион: авто-ставка, перекуп, итог', () => {
+    const auction = { ...special, kind: 'auction' as const }
+    expect(auctionCue({ ...context, special: { ...auction, bid: 200 } })).toContain('автоматически')
+    expect(auctionAskCue({ ...context, special: { ...auction, recipientId: 3, leaderId: 2, bid: 400 } })).toContain('Сейчас 400 у Боря')
+    expect(auctionWonCue({ ...context, special: { ...auction, leaderId: 2, bid: 400 } })).toContain('уходит игроку Боря за 400')
+    expect(auctionWonCue({ ...context, special: { ...auction, leaderId: 2, bid: 400 } })).not.toContain('СЕКРЕТНЫЙ')
+  })
+  it('кого слушаем', () => {
+    expect(specialListenerId('cat.picking', context)).toBe(1)
+    expect(specialListenerId('cat.staking.listening', { ...context, special: { ...special, recipientId: 3 } })).toBe(3)
+    expect(specialListenerId('auction.listening', { ...context, special: { ...special, kind: 'auction', recipientId: 2 } })).toBe(2)
+    expect(specialListenerId('auction.won', { ...context, special: { ...special, kind: 'auction', recipientId: 2 } })).toBeNull()
+    expect(specialListening('cat.picking')).toBe(true)
+    expect(specialListening('cat.placed')).toBe(false)
+  })
+})

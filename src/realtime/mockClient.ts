@@ -346,6 +346,18 @@ function hostLine(purpose: string, instructions = ''): string {
     const line = [...instructions.matchAll(/«([^»]+)»/g)].map((match) => match[1]?.trim() ?? '').find(Boolean)
     return line || 'Фальстарт.'
   }
+  const special: Record<string, string> = {
+    cat: 'Кот в мешке! Кому отдаёте вопрос?',
+    catClarify: 'Не расслышала. Кому отдаёте?',
+    catStake: 'Ваша ставка?',
+    catStakeClarify: 'Минимум или максимум?',
+    auction: 'Аукцион! Ваша ставка?',
+    auctionAsk: 'Перекупаете?',
+    auctionClarify: 'Не расслышала ставку.',
+    auctionWon: 'Торги закончены.',
+    specialAway: 'Игрок отключился, подождём.',
+  }
+  if (special[purpose]) return special[purpose]
   return 'Слушаю.'
 }
 
