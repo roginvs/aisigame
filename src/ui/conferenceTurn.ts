@@ -1,4 +1,5 @@
 import type { GameContext, Player, PlayerId } from '../game/types.ts'
+import { pickOpen } from '../game/machine.ts'
 
 /**
  * In conference mode only the client assigned to the chooser may use the board.
@@ -10,8 +11,9 @@ export function canPickCell(
   selfClientId: string | undefined,
   chooserId: PlayerId | null,
   players: readonly Player[],
+  context?: GameContext,
 ): boolean {
-  if (path !== 'choosing.listening') return false
+  if (!(context ? pickOpen(path, context) : path === 'choosing.listening')) return false
   if (!conferenceLayout) return true
   if (!selfClientId || chooserId === null) return false
   return players.some((player) => player.id === chooserId && player.clientId === selfClientId)

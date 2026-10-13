@@ -228,6 +228,26 @@ export function isReadingPath(path: string): boolean {
   return path === 'reading' || path.startsWith('reading.')
 }
 
+/**
+ * Обычный раунд, ячейка уже закрыта, в раунде ещё есть вопросы: пока ведущая
+ * комментирует итог, табло уже на экране и выбирающий может открыть следующий
+ * вопрос (выбор обрывает речь). Не во время апелляции, повтора и медиа ответа.
+ */
+export function earlyPickOpen(path: string, context: GameContext): boolean {
+  if (path !== 'announcing.speaking' && path !== 'announcing') return false
+  if (isFinal(context) || context.announceKind === 'repeat') return false
+  if (context.appeal?.activePlayerId != null) return false
+  const question = questionById(context.questions, context.activeQuestionId)
+  if (!question || !context.playedIds.includes(question.id)) return false
+  if (roundFinished(context)) return false
+  return !publicAnswerHasPlayable({ kind: context.announceKind, cellClosed: true, answerMedia: question.answerMedia })
+}
+
+/** Можно ли сейчас выбрать ячейку (голос/клик выбирающего). */
+export function pickOpen(path: string, context: GameContext): boolean {
+  return path === 'choosing.listening' || earlyPickOpen(path, context)
+}
+
 export function isAnnouncingPath(path: string): boolean {
   return path === 'announcing' || path.startsWith('announcing.')
 }
@@ -1303,6 +1323,11 @@ export const gameMachine = setup({
       states: {
         speaking: {
           on: {
+            QUESTION_SELECTED: {
+              guard: and([({ context }) => earlyPickOpen('announcing.speaking', context), 'questionAvailable']),
+              target: '#game.flashing',
+              actions: 'openQuestion',
+            },
             HOST_AUDIO_FINISHED: [
               { guard: 'samePlayerRepeats', target: '#game.answering', actions: 'rearmAnswer' },
               { guard: 'moreFinalists', target: '#game.turnCue', actions: 'nextFinalist' },

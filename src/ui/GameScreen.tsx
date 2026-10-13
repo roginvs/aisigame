@@ -2,7 +2,7 @@ import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from '
 import { flushSync } from 'react-dom'
 import type { SnapshotFrom } from 'xstate'
 import { appealButton } from '../game/appeals.ts'
-import { buttonsLive, falseStartCooling, falseStartOpen, gameMachine, statePath } from '../game/machine.ts'
+import { buttonsLive, earlyPickOpen, falseStartCooling, falseStartOpen, gameMachine, statePath } from '../game/machine.ts'
 import { falseStartMs } from '../options.ts'
 import { currentRound, nextInCell, questionById, roundPrices, roundThemes } from '../game/pack.ts'
 import { choiceIsAnswer } from '../game/choices.ts'
@@ -250,6 +250,7 @@ export function GameScreen(props: {
     conference?.selfClientId,
     context.chooserId,
     context.players,
+    context,
   )
   const hasMatchData = Boolean(!conference?.layout || conference.isMaster || conference.remoteContext)
   const turnTitle = conference?.awaitingPack
@@ -277,7 +278,9 @@ export function GameScreen(props: {
   const flashing = path === 'flashing' || (paused && context.resumePath === 'flashing')
   // During a closed-question appeal the board stays visible but not pickable.
   const appealBoard = context.appeal?.stage === 'closed'
-  const showQuestion = Boolean(question) && !flashing && !conference?.awaitingPack && !appealBoard
+  // После закрытой ячейки табло сразу на экране: выбирающий может перебить комментарий.
+  const earlyBoard = earlyPickOpen(path, context)
+  const showQuestion = Boolean(question) && !flashing && !conference?.awaitingPack && !appealBoard && !earlyBoard
   const showTimer = context.phaseStartedAt !== null && context.phaseDurationMs !== null
   const answerRevealed =
     path.startsWith('announcing') ||

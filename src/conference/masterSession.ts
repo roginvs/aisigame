@@ -2,7 +2,7 @@ import { appealRequestError } from '../game/appeals.ts'
 import type { Actor, SnapshotFrom } from 'xstate'
 import type { GameVoice } from '../realtime/client.ts'
 import { gameMachine } from '../game/machine.ts'
-import { statePath } from '../game/machine.ts'
+import { pickOpen, statePath } from '../game/machine.ts'
 import type { GameContext, Player, QuestionPack } from '../game/types.ts'
 import { buildConferenceSnapshot, timerRemainingMs } from './buildSnapshot.ts'
 import { createPackPipeHub, type PackPipeLinkState } from './packPipe.ts'
@@ -448,7 +448,7 @@ export class MasterSession {
       if (!this.gameStarted || !this.verified.has(message.clientId)) return
       const snap = this.actor.getSnapshot()
       const path = statePath(snap.value)
-      if (path !== 'choosing.listening') return
+      if (!pickOpen(path, snap.context)) return
       if (snap.context.chooserId !== this.roster.get(message.clientId)?.playerId) return
       this.actor.send({ type: 'QUESTION_SELECTED', themeId: message.themeId, value: message.value })
       return

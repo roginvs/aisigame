@@ -70,7 +70,7 @@ test('никто не нажал: сигнал и ответ пакета, сч�
       { timeout: 12_000 },
     )
     .toBe(true)
-  await expect(page.getByText('Герман Титов')).toBeVisible({ timeout: 8_000 })
+  await expect(page.getByText('Герман Титов').first()).toBeVisible({ timeout: 8_000 })
   await expect(page.getByRole('button', { name: 'Космос, 100, сыграно' })).toBeDisabled()
   await expect(page.getByRole('group', { name: 'Игрок 1: 0' })).toBeVisible()
   await expect(page.getByRole('group', { name: 'Игрок 2: 0' })).toBeVisible()

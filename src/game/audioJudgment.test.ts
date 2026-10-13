@@ -31,7 +31,10 @@ async function boot(client: MockRealtimeClient, mode: JudgmentInputMode, questio
   expect(statePath(actor.getSnapshot().value)).toBe('buzzing.open')
   actor.send({ type: 'BUZZER_PRESSED', playerId: 1 })
   return { actor, score: () => actor.getSnapshot().context.players[0]!.score,
-    lines: (title: string) => getTrace().filter((e) => e.id > cursor && e.kind === 'chat' && e.title === title).map((e) => (e.detail as { text: string }).text),
+    lines: (title: string) => getTrace().filter((e) => e.id > cursor && e.kind === 'chat' && e.title === title).map((e) => (e.detail as { text: string }).text)
+      // Эталон в чат пишется отдельной строкой «Оценки»; здесь считаем только вердикты.
+      .filter((text) => !text.startsWith('Правильный ответ:')),
+    answerLines: () => getTrace().filter((e) => e.id > cursor && e.kind === 'chat').map((e) => (e.detail as { text: string }).text).filter((text) => text.startsWith('Правильный ответ:')),
     notes: () => getTrace().filter((e) => e.id > cursor && e.kind === 'note') }
 }
 class DeferredJudge extends MockRealtimeClient {
@@ -56,10 +59,11 @@ describe('audio judging gameplay', () => {
   it('uses audio heard instead of a wrong ASR and publishes one caption', async () => {
     const client = new MockRealtimeClient()
     const audio = vi.spyOn(client, 'requestAudioJudgment')
-    const { score, lines } = await boot(client, 'audio')
+    const { score, lines, answerLines } = await boot(client, 'audio')
     client.hearAudio('пылесосел', 'пылесос и осел')
     await vi.advanceTimersByTimeAsync(180)
     expect(score()).toBe(100)
+    expect(answerLines()).toHaveLength(1)
     expect(lines('Игрок')).toEqual(['пылесосел'])
     expect(lines('Оценка')).toEqual(['Статус: correct\nУслышала: пылесосел'])
     expect(audio.mock.calls[0]![1]).not.toContain('Реплика игрока:')

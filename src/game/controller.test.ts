@@ -5,6 +5,7 @@ import type { ConferenceHistoryMessage } from '../conference/messages.ts'
 import { getTrace } from '../debug/trace.ts'
 import type { ToolCall } from '../realtime/client.ts'
 import { MockRealtimeClient } from '../realtime/mockClient.ts'
+vi.mock('../audio/beep.ts', () => ({ playTimeoutBeep: vi.fn(), unlockAudio: vi.fn() }))
 import { attachController, type GameControllerActions } from './controller.ts'
 import { gameMachine, statePath } from './machine.ts'
 import type { Question, QuestionPack } from './types.ts'
@@ -155,6 +156,25 @@ describe('attachController choice', () => {
     expect(judge?.[3]).toContain('другим фактически верным ответом')
     expect(judge?.[3]).not.toContain('CHAT_MARKER')
     expect(judge?.[4]).toBe(true)
+    stop()
+    actor.stop()
+  })
+
+  it('эталон пишется в чат ровно один раз, даже если речь ведущей не случилась', async () => {
+    const client = new MockRealtimeClient()
+    vi.spyOn(client, 'requestSpeech').mockImplementation(() => {})
+    const { actor, stop } = await boot(client, pack, () => [])
+    const start = getTrace().at(-1)?.id ?? 0
+    actor.send({ type: 'HOST_AUDIO_FINISHED', purpose: 'welcome' })
+    actor.send({ type: 'QUESTION_SELECTED', themeId: 's', value: 400 })
+    await vi.advanceTimersByTimeAsync(gameConfig.cellFlashMs + 100)
+    actor.send({ type: 'HOST_AUDIO_FINISHED', purpose: 'read' })
+    await vi.advanceTimersByTimeAsync(gameConfig.buzzerMs + 200)
+    expect(statePath(actor.getSnapshot().value)).toMatch(/^announcing/)
+    const answers = getTrace().filter((e) => e.id > start && e.kind === 'chat' &&
+      String((e.detail as { text?: string }).text ?? '').startsWith('Правильный ответ:'))
+    expect(answers).toHaveLength(1)
+    expect((answers[0]!.detail as { text: string }).text).toBe('Правильный ответ: ответ')
     stop()
     actor.stop()
   })

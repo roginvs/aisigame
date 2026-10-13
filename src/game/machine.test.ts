@@ -3,7 +3,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { gameConfig } from '../config.ts'
 import { announceInstructions } from './controller.ts'
 import { earlyBuzzerRoll } from './earlyBuzzer.ts'
-import { closeGuessCoin, falseStartCoin, gameMachine, phoneticRetryReason, statePath } from './machine.ts'
+import { closeGuessCoin, earlyPickOpen, falseStartCoin, gameMachine, phoneticRetryReason, statePath } from './machine.ts'
+import { answerChatLine } from './controller.ts'
 import { nextInCell } from './pack.ts'
 import { playersFromNames } from './players.ts'
 import { demoPack } from './questions.ts'
@@ -54,6 +55,42 @@ describe('game machine', () => {
     closeGuessCoin.flip = originalCloseGuessFlip
     earlyBuzzerRoll.unit = originalEarlyUnit
     vi.useRealTimers()
+  })
+
+  it('после верного ответа табло сразу доступно: выбор во время комментария открывает вопрос', () => {
+    const actor = reachBuzzing()
+    actor.send({ type: 'BUZZER_PRESSED', playerId: 1 })
+    actor.send({ type: 'PLAYER_SPEECH_FINISHED' })
+    actor.send({ type: 'ANSWER_JUDGED', judgment: { questionId: 'history-100', playerId: 1, attemptId: actor.getSnapshot().context.attemptId, status: 'correct', heard: 'x', reason: 'x' } })
+    const snap = actor.getSnapshot()
+    expect(statePath(snap.value)).toBe('announcing.speaking')
+    expect(earlyPickOpen('announcing.speaking', snap.context)).toBe(true)
+    expect(answerChatLine(snap.context)).toMatch(/^Правильный ответ: /)
+    actor.send({ type: 'QUESTION_SELECTED', themeId: 'history', value: 100 })
+    expect(statePath(actor.getSnapshot().value)).toBe('announcing.speaking')
+    actor.send({ type: 'QUESTION_SELECTED', themeId: 'history', value: 200 })
+    expect(statePath(actor.getSnapshot().value)).toBe('flashing')
+    expect(actor.getSnapshot().context.activeQuestionId).toBe('history-200')
+  })
+
+  it('неверный ответ с открытой ячейкой не даёт выбрать и не пишет эталон', () => {
+    const actor = reachBuzzing()
+    actor.send({ type: 'BUZZER_PRESSED', playerId: 1 })
+    actor.send({ type: 'PLAYER_SPEECH_FINISHED' })
+    actor.send({ type: 'ANSWER_JUDGED', judgment: { questionId: 'history-100', playerId: 1, attemptId: actor.getSnapshot().context.attemptId, status: 'incorrect', heard: 'x', reason: 'x' } })
+    const snap = actor.getSnapshot()
+    expect(statePath(snap.value)).toBe('announcing.speaking')
+    expect(earlyPickOpen('announcing.speaking', snap.context)).toBe(false)
+    expect(answerChatLine(snap.context)).toBe('')
+  })
+
+  it('никто не ответил: эталон в чате, табло доступно', () => {
+    const actor = reachBuzzing()
+    vi.advanceTimersByTime(gameConfig.buzzerMs + 50)
+    const snap = actor.getSnapshot()
+    expect(statePath(snap.value)).toBe('announcing.speaking')
+    expect(answerChatLine(snap.context)).toMatch(/^Правильный ответ: /)
+    expect(earlyPickOpen('announcing.speaking', snap.context)).toBe(true)
   })
 
   it('даёт право ответа только первому нажатию', () => {

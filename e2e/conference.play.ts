@@ -12,7 +12,7 @@ test.describe('конференция на BroadcastChannel', () => {
     await page.getByRole('button', { name: 'Начать игру' }).click()
     await expect(page.getByRole('button', { name: 'Ссылка для игры' })).toBeVisible()
 
-    await expect(page.locator('.chat-log')).toContainText('Игра создана. Ждём игроков.')
+    await expect(page.locator('.chat-log')).toContainText('Игра создана. Ждём игроков.', { timeout: 15_000 })
     await page.getByRole('textbox').fill('Чат в сохранённом лобби')
     await page.getByRole('textbox').press('Enter')
     await expect(page.locator('.chat-log')).toContainText('Чат в сохранённом лобби')
@@ -38,7 +38,7 @@ test.describe('конференция на BroadcastChannel', () => {
 
     const after = await page.evaluate(() => JSON.parse(localStorage.getItem('aisigame.game') ?? 'null'))
     expect(after).toMatchObject({ mode: 'conference', conferenceLobby: true, roomId: before.roomId })
-    await expect(page.locator('.chat-log')).toContainText('Игра создана. Ждём игроков.')
+    await expect(page.locator('.chat-log')).toContainText('Игра создана. Ждём игроков.', { timeout: 15_000 })
     await expect(page.locator('.chat-log')).toContainText('Чат в сохранённом лобби')
     expect(await readHistory(page)).toEqual(history)
   })

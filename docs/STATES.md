@@ -65,6 +65,7 @@ stateDiagram-v2
   announcing --> bridging: раунд кончился, дальше есть раунд
   announcing --> finished: дальше раунда нет
   announcing --> choosing: ячейка закрыта, раунд ещё идёт
+  announcing --> flashing: ячейка закрыта, выбирающий кликнул ячейку во время комментария (earlyPickOpen)
   bridging --> choosing: мост кончился
   finished --> finished: речь конца кончилась
   failed --> connecting: старт или продолжение
