@@ -8,6 +8,20 @@ export function speechMatches(said: string, expected: string): boolean {
   return heard.length <= want.length + 4
 }
 
+/**
+ * Дословная фраза уже произнесена целиком, а модель продолжает говорить
+ * (типично: дочитала вопрос и сама на него отвечает). По накопленной расшифровке.
+ */
+export function speechOverruns(said: string, expected: string): boolean {
+  const want = words(expected)
+  const heard = words(said)
+  if (!want.length) return false
+  if (heard.length <= want.length + 2) return false
+  const heardSet = new Set(heard)
+  const hits = want.filter((word) => heardSet.has(word)).length
+  return hits / want.length >= 0.75
+}
+
 export function verbatimSpeech(text: string): string {
   return text.trim()
 }
@@ -101,7 +115,7 @@ export function verbatimResponse(text: string, meta: { purpose: string; turn: nu
     tools: [] as const,
     metadata: { purpose: meta.purpose, turn: String(meta.turn), take: String(meta.take) },
     instructions:
-      'Ты ведущая и сейчас говоришь игрокам. Сообщение ниже — готовая фраза: сам вопрос или уже принятая реплика. Начни сразу с этой фразы и скажи только её, символ в символ. Не объявляй тему и номинал. Не говори, что ячейка выбрана. Не добавляй «вопрос», «отлично» и ничего до или после.',
+      'Ты ведущая и сейчас говоришь игрокам. Сообщение ниже — готовая фраза: сам вопрос или уже принятая реплика. Начни сразу с этой фразы и скажи только её, символ в символ. Если это вопрос, ты его только читаешь: не отвечай на него, не подсказывай и не называй ответ, даже если знаешь его. После последнего слова сразу замолчи. Не объявляй тему и номинал. Не говори, что ячейка выбрана. Не добавляй «вопрос», «отлично» и ничего до или после.',
     input: [
       {
         type: 'message' as const,

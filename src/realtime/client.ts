@@ -4,7 +4,7 @@ import { recordResponseUsage, resetUsage } from './usage.ts'
 import { logTrace, pushHostLine, pushPlayerLine, pushTrace } from '../debug/trace.ts'
 import { outputCut, outputFlushWaitMs, timersAfterPlaybackStarted, timersAfterResponseDone } from './playback.ts'
 import type { HostAudioTimers, OutputCutState } from './playback.ts'
-import { isolatedCue, isolatedToolResponse, speechMatches, verbatimResponse } from './speechMatch.ts'
+import { isolatedCue, isolatedToolResponse, speechMatches, speechOverruns, verbatimResponse } from './speechMatch.ts'
 import { AudioItems, type AudioReference, type AudioItemReady } from './audioItems.ts'
 import { audioJudgmentCapable, type JudgmentCapabilities, type JudgeRequestContext } from './judgmentRequest.ts'
 import { sessionTools } from './tools.ts'
@@ -37,6 +37,8 @@ type SpeechTurn = {
   ignoreResponseId: string | null
   itemId: string | null
   chatNote?: (spoken: string) => string
+  /** Накопленная расшифровка дословной фразы — чтобы оборвать «довесок» (ответ после вопроса). */
+  liveTranscript?: string
 }
 
 export type ToolCall = {
@@ -885,6 +887,22 @@ export class RealtimeClient {
       if (responseId) this.playbackResponseId = responseId
       this.syncHostAudioTimers(timersAfterPlaybackStarted(this.hostAudioTimers(), this.speech.ended))
       this.onLink({ host: 'speaking' })
+    }
+
+    if (type === 'response.output_audio_transcript.delta' && this.speech?.expect) {
+      const responseId = typeof event.response_id === 'string' ? event.response_id : ''
+      if (!responseId || !this.skipsResponse(responseId)) {
+        const delta = typeof event.delta === 'string' ? event.delta : ''
+        this.speech.liveTranscript = (this.speech.liveTranscript ?? '') + delta
+        if (speechOverruns(this.speech.liveTranscript, this.speech.expect)) {
+          // Фраза уже сказана; продолжение (часто — ответ на вопрос) игрокам не играем.
+          pushTrace('note', 'ведущая продолжила после дословной фразы — обрываем', { said: this.speech.liveTranscript })
+          this.send({ type: 'response.cancel' })
+          this.sendOutputClear()
+          this.finishSpeech('overrun')
+          return
+        }
+      }
     }
 
     if (type === 'response.output_audio_transcript.done' || type === 'response.output_text.done') {

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { isolatedCue, isolatedToolResponse, speechMatches, verbatimResponse, withPlayNote } from './speechMatch.ts'
+import { isolatedCue, isolatedToolResponse, speechMatches, speechOverruns, verbatimResponse, withPlayNote } from './speechMatch.ts'
 
 const newton = 'Кто сформулировал закон всемирного тяготения?'
 const melting = 'Как называется процесс, при котором вещество переходит из твердого состояния в жидкое, и наоборот?'
@@ -97,5 +97,28 @@ describe('verbatimResponse', () => {
     expect(response.input[0]?.content[0]?.text).toBe('Сколько струн у обычной скрипки?')
     expect(response.input[0]?.content[0]?.text).not.toContain('больше ничего')
     expect(response.input[0]?.content[0]?.text).not.toContain('смешок')
+  })
+})
+
+describe('speechOverruns', () => {
+  it('ловит ответ, произнесённый после дословного вопроса', () => {
+    expect(speechOverruns(`${newton} Исаак Ньютон, конечно.`, newton)).toBe(true)
+  })
+  it('не трогает сам вопрос и его начало', () => {
+    expect(speechOverruns(newton, newton)).toBe(false)
+    expect(speechOverruns('Кто сформулировал', newton)).toBe(false)
+  })
+  it('не считает чужую длинную речь «довеском»', () => {
+    expect(speechOverruns('Сейчас я расскажу вам совсем другую длинную историю про котов', newton)).toBe(false)
+  })
+})
+
+describe('verbatimResponse', () => {
+  it('отправляет только текст вопроса и запрещает на него отвечать', () => {
+    const body = verbatimResponse(newton, { purpose: 'read', turn: 1, take: 1 })
+    expect(body.conversation).toBe('none')
+    expect(body.input).toHaveLength(1)
+    expect(body.input[0]?.content[0]?.text).toBe(newton)
+    expect(body.instructions).toContain('не отвечай на него')
   })
 })

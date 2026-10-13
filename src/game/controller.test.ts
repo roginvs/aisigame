@@ -116,6 +116,26 @@ describe('attachController choice', () => {
     vi.unstubAllGlobals()
   })
 
+  it('до и во время чтения вопроса модель не видит эталон ответа', async () => {
+    const secret = 'ЭТАЛОНСЕКРЕТ'
+    const questions: QuestionPack = {
+      ...pack,
+      questions: pack.questions.map((q) => (q.id === 's-400' ? { ...q, text: 'Кто написал «Онегина»?', answers: [secret] } : q)),
+    }
+    const client = new MockRealtimeClient()
+    const speech = vi.spyOn(client, 'requestSpeech')
+    const tools = vi.spyOn(client, 'requestTool')
+    const prompts = vi.spyOn(client, 'setTranscriptionPrompt')
+    const { actor, stop } = await boot(client, questions, () => [])
+    actor.send({ type: 'QUESTION_SELECTED', themeId: 's', value: 400 })
+    await vi.advanceTimersByTimeAsync(gameConfig.cellFlashMs + 100)
+    const read = speech.mock.calls.find(([purpose]) => purpose === 'read')
+    expect(read?.[3]).toBe('Кто написал «Онегина»?')
+    const seen = JSON.stringify([speech.mock.calls, tools.mock.calls, prompts.mock.calls])
+    expect(seen).not.toContain(secret)
+    stop()
+  })
+
   it('shares chat with free cues but keeps reading and judgment isolated', async () => {
     const client = new MockRealtimeClient()
     const speech = vi.spyOn(client, 'requestSpeech')

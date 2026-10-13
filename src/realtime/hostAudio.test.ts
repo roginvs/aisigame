@@ -116,6 +116,20 @@ describe('host audio completion', () => {
     expect(finished).toEqual(['read'])
   })
 
+  it('cuts the host off when she keeps talking after the verbatim question (answer leak)', () => {
+    const { finished, sent, ask, feed } = open()
+    const question = 'Кто написал роман «Евгений Онегин»?'
+    ask(question)
+    feed({ type: 'response.created', response: { id: 'leak-1' } })
+    feed({ type: 'output_audio_buffer.started', response_id: 'leak-1' })
+    feed({ type: 'response.output_audio_transcript.delta', response_id: 'leak-1', delta: question })
+    expect(finished).toEqual([])
+    const before = sent.length
+    feed({ type: 'response.output_audio_transcript.delta', response_id: 'leak-1', delta: ' Конечно, это Александр Сергеевич Пушкин.' })
+    expect(finished).toEqual(['read'])
+    expect(sent.slice(before)).toEqual(expect.arrayContaining(['response.cancel', 'output_audio_buffer.clear']))
+  })
+
   it('a silent exact reading reaches completion without browser speech', () => {
     const { finished, ask } = open()
     ask('Посмотрите на картинку.')
