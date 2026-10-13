@@ -556,6 +556,7 @@ export async function connectJitsiConference(input: {
       localId: localId(),
       localStream: micLive ? localMicMedia : null,
       focusParticipantId: modelHearOnlyId,
+      presentIds: new Set(remoteNames.keys()),
     })
     modelMixer.setLocalMic(selected.local)
     modelMixer.setRemoteStreams(selected.remotes)
@@ -681,7 +682,9 @@ export async function connectJitsiConference(input: {
       if (el) jitsiTrack.detach(el)
       remoteVideo.delete(userId)
     } else if (jitsiTrack.getType() === 'audio') {
-      dropRemoteAudio(userId)
+      // Запоздалое «удалено» старой дорожки после replace/recover не должно
+      // выкинуть уже пришедшую новую дорожку того же участника.
+      if (remoteAudio.get(userId) === jitsiTrack) dropRemoteAudio(userId)
     }
     emitTiles()
   })

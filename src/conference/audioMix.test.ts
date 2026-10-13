@@ -118,6 +118,30 @@ describe('streamsForModelHear', () => {
       streamsForModelHear({ remotes, localId: 'local', localStream: local, focusParticipantId: false }),
     ).toEqual({ remotes: [], local: null })
   })
+
+  it('устаревший фокус (участника нет в комнате после reload) — слушаем всех', () => {
+    expect(
+      streamsForModelHear({
+        remotes, localId: 'local', localStream: local, focusParticipantId: 'gone', presentIds: new Set(['a', 'b']),
+      }),
+    ).toEqual({ remotes, local })
+  })
+
+  it('фокус на присутствующего, но заглушённого — по-прежнему никого лишнего', () => {
+    expect(
+      streamsForModelHear({
+        remotes: [remotes[0]!], localId: 'local', localStream: local, focusParticipantId: 'b', presentIds: new Set(['a', 'b']),
+      }),
+    ).toEqual({ remotes: [], local: null })
+  })
+
+  it('локальный фокус не считается устаревшим, даже если его нет в presentIds', () => {
+    expect(
+      streamsForModelHear({
+        remotes, localId: 'local', localStream: local, focusParticipantId: 'local', presentIds: new Set(['a']),
+      }),
+    ).toEqual({ remotes: [], local })
+  })
 })
 
 describe('createMicMixer', () => {
@@ -235,6 +259,20 @@ describe('createMicMixer', () => {
     mixer.setLocalMic(null)
 
     expect(localAudio.stop).not.toHaveBeenCalled()
+    mixer.dispose()
+  })
+
+  it('re-clones when a participant\'s track is replaced (late mic / recover)', () => {
+    const mixer = createMicMixer()
+    const stream = (track: FakeTrack) =>
+      ({ getAudioTracks: () => [track], getTracks: () => [track] }) as unknown as MediaStream
+    const first = new FakeTrack('audio', true, 'live', 'first')
+    const second = new FakeTrack('audio', true, 'live', 'second')
+    mixer.setRemoteStreams([{ id: 'guest', stream: stream(first) }])
+    const firstClone = first.clone.mock.results[0]!.value as FakeTrack
+    mixer.setRemoteStreams([{ id: 'guest', stream: stream(second) }])
+    expect(firstClone.stop).toHaveBeenCalled()
+    expect(second.clone).toHaveBeenCalledTimes(1)
     mixer.dispose()
   })
 })

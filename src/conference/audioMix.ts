@@ -37,8 +37,17 @@ export function streamsForModelHear(input: {
   localId: string
   localStream: MediaStream | null
   focusParticipantId: ModelHearFocus
+  /**
+   * Jitsi id участников, которые сейчас в комнате. Если фокус указывает на id,
+   * которого здесь нет (игрок перезагрузился, а hello с нового endpoint ещё не
+   * дошёл), фокус устарел — слушаем всех (fail open), а не «никого».
+   */
+  presentIds?: ReadonlySet<string>
 }): { remotes: Array<{ id: string; stream: MediaStream }>; local: MediaStream | null } {
-  const focus = input.focusParticipantId
+  let focus = input.focusParticipantId
+  if (typeof focus === 'string' && input.presentIds && focus !== input.localId && !input.presentIds.has(focus)) {
+    focus = null
+  }
   if (focus === false) {
     return { remotes: [], local: null }
   }
