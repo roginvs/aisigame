@@ -150,7 +150,7 @@ export type AnswerJudgment = {
   reason: string
 }
 
-export type OutcomeLedger = Record<string, Record<string, { amount: number; attemptId: number; correct?: boolean; /** Result this attempt replaced. */ previous?: number }>>
+export type OutcomeLedger = Record<string, Record<string, { amount: number; attemptId: number; correct?: boolean; /** Result this attempt replaced. */ previous?: number; /** Ставка кота/аукциона: апелляция меняет счёт на неё, а не на номинал. */ stake?: number }>>
 
 export type AppealContext = {
   questionId: string

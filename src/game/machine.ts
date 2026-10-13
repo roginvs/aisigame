@@ -1,7 +1,7 @@
 import { and, assign, not, or, setup, stateIn } from 'xstate'
 import { auctionOptions, nextAuctionBidder, sameOption } from './auction.ts'
 import { autoCatRecipient, nextInCircle } from './cat.ts'
-import { appealMsLeft, appealRequestError, appealWindowMs, eligibleAppealPlayers, settleOutcome } from './appeals.ts'
+import { appealMsLeft, appealRequestError, appealStake, appealWindowMs, eligibleAppealPlayers, settleOutcome } from './appeals.ts'
 import { gameConfig } from '../config.ts'
 import { catAwayWaitMs } from '../options.ts'
 import { questionSpeech } from './choices.ts'
@@ -372,18 +372,18 @@ export const gameMachine = setup({
     acceptAppeal: assign(({ context, event }) => {
       if (event.type !== 'APPEAL_REQUESTED' || !context.appeal) return {}
       return { appeal: { ...context.appeal, activePlayerId: event.playerId, startedAt: null, acceptedRequestIds: [...context.appeal.acceptedRequestIds ?? [], event.requestId] },
-        activeQuestionId: context.appeal.questionId, activePlayerId: event.playerId, activeStake: null,
+        activeQuestionId: context.appeal.questionId, activePlayerId: event.playerId,
+        activeStake: context.outcomes?.[context.appeal.questionId]?.[event.playerId]?.stake ?? null,
         attemptId: context.attemptId + 1, clarifications: 0, heard: '', judgmentStatus: null, announceKind: null,
         judgmentReason: '', phaseStartedAt: null, phaseDurationMs: null, statusLine: 'Повтор ответа' }
     }),
     confirmClosedAppeal: assign(({ context }) => {
-      const question = questionById(context.questions, context.activeQuestionId)
-      return { ...settleOutcome(context, question?.value ?? 0, true), announceKind: 'correct' as AnnounceKind, judgmentStatus: 'correct' as const,
+      const amount = context.activeQuestionId ? appealStake(context, context.activeQuestionId, context.activePlayerId) : 0
+      return { ...settleOutcome(context, amount, true), announceKind: 'correct' as AnnounceKind, judgmentStatus: 'correct' as const,
         judgmentReason: 'Апелляция: игрок подтвердил верный ответ', statusLine: 'Апелляция принята' }
     }),
     /** Минус только что получен — апелляция доступна сразу, ещё во время реплики ведущей. */
     openAppealNow: assign(({ context }) => {
-      if (isSpecial(context)) return { appeal: null }
       if (isFinal(context) || context.appeal?.activePlayerId != null || context.announceKind === 'repeat') return {}
       const questionId = context.activeQuestionId
       if (!questionId) return {}
@@ -1032,7 +1032,7 @@ export const gameMachine = setup({
     queuedAppeal: ({ context }) => Boolean(context.appeal?.queue.length),
     openStageAppeal: ({ context }) => context.appeal?.stage === 'open',
     closedStageAppeal: ({ context }) => context.appeal?.stage === 'closed',
-    hasAppeals: ({ context }) => !isFinal(context) && !isSpecial(context) && Boolean(context.activeQuestionId && eligibleAppealPlayers(context, context.appeal?.questionId ?? context.activeQuestionId).length),
+    hasAppeals: ({ context }) => !isFinal(context) && Boolean(context.activeQuestionId && eligibleAppealPlayers(context, context.appeal?.questionId ?? context.activeQuestionId).length),
     normalRound: ({ context }) => !isFinal(context),
 
     purposeWelcome: ({ event }) => event.type === 'HOST_AUDIO_FINISHED' && event.purpose === 'welcome',

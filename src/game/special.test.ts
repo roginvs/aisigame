@@ -53,6 +53,53 @@ function readAndAnswer(actor: Actor) {
 beforeEach(() => { vi.useFakeTimers() })
 afterEach(() => { vi.useRealTimers() })
 
+function appeal(actor: Actor, playerId: number) {
+  const a = ctx(actor).appeal!
+  actor.send({ type: 'APPEAL_REQUESTED', questionId: a.questionId, windowId: a.windowId, playerId, requestId: `r${Math.random()}` })
+}
+
+describe('апелляции кота и аукциона', () => {
+  it('кот: минус ставки → «Да, ответил верно» → плюс ставки, а не номинала', () => {
+    const actor = start(['Аня', 'Боря', 'Вася'])
+    actor.send({ type: 'QUESTION_SELECTED', themeId: 'c', value: 200 })
+    heard(actor, 'cat')
+    actor.send({ type: 'CAT_RECIPIENT', playerId: 3 })
+    heard(actor, 'catStake')
+    actor.send({ type: 'CAT_STAKE', playerId: 3, amount: 500 })
+    readAndAnswer(actor)
+    judge(actor, 'incorrect')
+    expect(score(actor, 3)).toBe(-500)
+    expect(ctx(actor).outcomes?.cat?.[3]).toMatchObject({ amount: -500, stake: 500 })
+    // Апелляция доступна сразу, ещё пока ведущая объявляет; подать может только ответивший.
+    appeal(actor, 1)
+    expect(path(actor)).toBe('announcing.speaking')
+    appeal(actor, 3)
+    expect(path(actor)).toBe('appealConfirm')
+    vi.advanceTimersByTime(1)
+    expect(score(actor, 3)).toBe(500)
+    heard(actor, 'announce')
+    expect(path(actor)).toBe('choosing.listening')
+  })
+
+  it('аукцион: апелляция в окне выбора тоже на ставку', () => {
+    const actor = start(['Аня', 'Боря', 'Вася'], [0, 700, 0])
+    actor.send({ type: 'QUESTION_SELECTED', themeId: 'a', value: 100 })
+    heard(actor, 'auction')
+    actor.send({ type: 'AUCTION_BID', playerId: 2, option: { kind: 'stake', amount: 300 } })
+    expect(path(actor)).toBe('auction.won')
+    heard(actor, 'auctionWon')
+    readAndAnswer(actor)
+    judge(actor, 'incorrect')
+    expect(score(actor, 2)).toBe(400)
+    heard(actor, 'announce')
+    expect(path(actor)).toBe('choosing.listening')
+    appeal(actor, 2)
+    expect(path(actor)).toBe('appealConfirm')
+    vi.advanceTimersByTime(1)
+    expect(score(actor, 2)).toBe(1000)
+  })
+})
+
 describe('кот в мешке', () => {
   it('3 игрока: выбор голосом/кликом, себе нельзя, ставка мин/макс, ±ставка, выбирает получатель, без перехвата', () => {
     const actor = start(['Аня', 'Боря', 'Вася'])
@@ -83,7 +130,8 @@ describe('кот в мешке', () => {
     judge(actor, 'incorrect')
     expect(score(actor, 3)).toBe(-500)
     expect(ctx(actor).playedIds).toContain('cat')
-    expect(ctx(actor).appeal).toBeNull()
+    // Ячейка закрыта сразу: апелляция только подтверждением (Да/Нет), на ставку.
+    expect(ctx(actor).appeal).toMatchObject({ questionId: 'cat', stage: 'closed' })
     heard(actor, 'announce')
     expect(path(actor)).toBe('choosing.listening')
     expect(ctx(actor).chooserId).toBe(3)
