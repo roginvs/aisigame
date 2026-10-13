@@ -1,3 +1,4 @@
+import type { AppealRequest } from '../game/types.ts'
 import { masterBuildMismatchMessage } from './buildMatch.ts'
 import { decidePackGate } from './packGate.ts'
 import { deletePack, getPack, putPack } from './packDb.ts'
@@ -43,6 +44,8 @@ const defaultPackCache: JoinerPackCache = {
 }
 
 export class JoinerSession {
+  private appealRequests = new Map<string, AppealRequest>()
+  private appealPending = new Map<string, { finish: (value: { accepted: boolean; reason: string }) => void; timer: number }>()
   private transport: ConferenceTransport
   private clientId: string
   private authToken: string
@@ -156,6 +159,21 @@ export class JoinerSession {
     this.packReceiver.setTamperFirstByte(value)
   }
 
+  sendAppeal(request: AppealRequest): Promise<{ accepted: boolean; reason: string }> {
+    if (this.disposed) return Promise.resolve({ accepted: false, reason: 'Нет связи с мастером' })
+    return new Promise((finish) => {
+      const timer = window.setTimeout(() => {
+        this.appealPending.delete(request.requestId)
+        this.appealRequests.delete(request.requestId)
+        this.requestStatus()
+        finish({ accepted: false, reason: 'Нет подтверждения мастера. Статус запрошен заново.' })
+      }, 4_000)
+      this.appealRequests.set(request.requestId, request)
+      this.appealPending.set(request.requestId, { finish, timer })
+      this.transport.send({ ...request, type: 'appeal', clientId: this.clientId, authToken: this.authToken })
+    })
+  }
+
   sendReady(): void {
     this.readyRequested = true
     if (!this.hashOk || this.readySent) return
@@ -182,6 +200,9 @@ export class JoinerSession {
 
   dispose(): void {
     this.disposed = true
+    for (const pending of this.appealPending.values()) { window.clearTimeout(pending.timer); pending.finish({ accepted: false, reason: 'Нет связи с мастером' }) }
+    this.appealPending.clear()
+    this.appealRequests.clear()
     window.clearInterval(this.heartbeatTimer)
     window.clearInterval(this.debugTimer)
     this.packPipe?.dispose()
@@ -246,6 +267,13 @@ export class JoinerSession {
 
   private async onMessage(message: ConferenceMessage, senderId: string): Promise<void> {
     if (this.buildRejected || this.disposed) return
+    if (message.type === 'appealReply') {
+      if (message.targetClientId !== this.clientId || !this.acceptMaster(message.authorityToken, senderId, false)) return
+      const pending = this.appealPending.get(message.requestId)
+      if (pending) { window.clearTimeout(pending.timer); this.appealPending.delete(message.requestId); this.appealRequests.delete(message.requestId); pending.finish({ accepted: message.accepted, reason: message.reason }) }
+      this.noteMasterAlive()
+      return
+    }
     if (message.type === 'packPipeOffer' || message.type === 'packPipeIce') {
       if (message.type === 'packPipeOffer') {
         if (message.targetClientId !== this.clientId) return
@@ -322,6 +350,19 @@ export class JoinerSession {
   }
 
   private emitSnapshot(): void {
+    const appeal = this.masterState?.appeal
+    if (appeal) {
+      // Pending requests retain their player/window below; snapshot is authoritative.
+      for (const [requestId, pending] of this.appealPending) {
+        const request = this.appealRequests.get(requestId)
+        if (request && request.questionId === appeal.questionId && request.windowId === appeal.windowId &&
+          (appeal.activePlayerId === request.playerId || appeal.queue.includes(request.playerId))) {
+          window.clearTimeout(pending.timer); this.appealPending.delete(requestId); this.appealRequests.delete(requestId)
+          pending.finish({ accepted: true, reason: '' })
+        }
+      }
+    }
+
     if (!this.masterState) return
     this.lastSnapshot = snapshotFromState(this.masterState)
     this.gameStarted = this.lastSnapshot.phase !== 'lobby'

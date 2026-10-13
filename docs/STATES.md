@@ -289,7 +289,7 @@ stateDiagram-v2
 
 ### Оценка
 
-66. `judging`, прошло `judgeMs` → `announcing`, повод `unclear`. Очки те же. В обычном раунде ячейка закрывается. В финале ячейка закрывается только на последнем финалисте. Фразы про близость нет. Когда ячейка закрылась, ответ пакета публикуется, как при `nobody`. Пока ячейка открыта, его нет.
+66. `judging`, прошло `judgeMs` → `announcing`, повод `unclear`. В обычном раунде итог попытки 0 (заменяет прежний итог пары, см. «Апелляции»), игрок в `missedIds`, ячейка остаётся открытой, если ещё есть кому жать. В финале ячейка закрывается только на последнем финалисте. Фразы про близость нет. Когда ячейка закрылась, ответ пакета публикуется, как при `nobody`. Пока ячейка открыта, его нет.
 67. `judging` + `ANSWER_ECHO` → `answering`. Оценка отброшена, окно ответа начинается заново.
 68. `judging` + `ANSWER_JUDGED`, тот же вопрос, игрок и попытка → `announcing`. Дальше правила счёта.
 
@@ -298,7 +298,7 @@ stateDiagram-v2
 - `correct`: плюс номинал или ставка. В обычном раунде ячейка закрывается. В финале ячейка закрывается только если это последний финалист. Выбирает следующий вопрос этот игрок. Ответ пакета не публикуется. Повод `correct`.
 - `incorrect`: минус номинал или ставка. Игрок в обычном раунде в `missedIds`. Ячейка остаётся, если ещё есть кому жать. Иначе закрывается по тому же правилу финала. Выбирает этот игрок. Повод `incorrect`. Если ячейка закрылась и в `wrongHeard` есть непустая реплика, монетка решает, говорить ли, что попытка была близкой.
 - `near_miss`, и повторов ещё меньше `maxClarifications`: очки те же, ячейка открыта, выбирающий не меняется, `clarifications` плюс один. Повод `repeat`. Следующий `near_miss` сверх лимита машина считает `incorrect`.
-- `unintelligible`, `ambiguous`, `needs_clarification`: очки те же. Ячейка закрывается, как при верном ответе. Повод `unclear`. Когда ячейка закрылась, ответ пакета публикуется. Пока ячейка открыта, его нет. Для `needs_clarification` статус прямо говорит, что в этом прототипе вопрос закрыт.
+- `unintelligible`, `ambiguous`, `needs_clarification`: итог попытки 0. В обычном раунде игрок в `missedIds`, ячейка остаётся, если ещё есть кому жать (перехват 5 секунд), выбирает этот игрок. Повод `unclear`. Когда ячейка закрылась, ответ пакета публикуется. Пока ячейка открыта, его нет. В финале — прежнее поведение.
 
 `wrongHeard` пополняется только настоящим `incorrect`, без причины «созвучие уже переспрашивали».
 
@@ -390,6 +390,47 @@ stateDiagram-v2
 
 Публичный контекст свободных реплик передаётся контроллером и не добавляет состояний/таймеров. Judge/selection/read не получают историю чата. Оценка может принять альтернативный фактически верный ответ вне списка эталонов, с проверкой исходного вопроса и прежними id/attempt/turn guards.
 
+
+### Апелляции обычного вопроса (13 октября 2026)
+
+Финал не затронут: там `outcomes` и `appeal` не заполняются, счёт меняет `changeScore`.
+
+Контекст: `outcomes[questionId][playerId] = { amount, attemptId, correct }` — один текущий итог пары (−номинал, 0, +номинал). `settleOutcome` начисляет `новый − прежний`; результат с `attemptId` не новее сохранённого ничего не меняет. `appeal` — текущее окно: `questionId`, `windowId` (из счётчика `appealSerial`), `stage` (`open` — вопрос ещё открыт, `closed` — после закрытия), FIFO `queue`, `activePlayerId`, `lastPlayerId` (право в окне перехвата), сохранённый `chooserId`, `remainingMs`/`startedAt` (`appealWindowMs` = 5 000, пауза хранит остаток). Право (`eligibleAppealPlayers`): есть итог по вопросу, `amount ≤ 0`, не `correct`.
+
+Новые узлы:
+
+- `afterQuestion` — развилка после объявления закрытого обычного вопроса (и после `announcing.holding`). Если есть право: последний вопрос раунда → `appealWindow`, иначе → `choosing` с открытым окном `closed` (`openClosedAppeals`). Без права — прежние ветки (`bridging` с `advanceRound`, `finished`, `choosing`).
+- `appealWindow` — только последний вопрос раунда: 5 секунд тишины, `roundIndex` не меняется, финалистов не собирают. По `appealLeft` → `appealEnd` → `bridging`/`finished`/`choosing`.
+- `appealCue` — ведущая по имени просит повторить ответ, вопрос не перечитывает. `HOST_AUDIO_FINISHED` purpose `appeal` → `answering` с новой `attemptId` и обычными таймерами.
+- `appealNext` — после объявления результата апелляции в серии `closed`: следующий из `queue` → `appealCue`, иначе → `afterQuestion` (новое 5-секундное окно, если ещё есть право).
+
+```mermaid
+stateDiagram-v2
+  announcing --> buzzing: 0/минус, есть кому жать (окно open)
+  buzzing --> appealCue: APPEAL_REQUESTED от lastPlayerId
+  announcing --> afterQuestion: вопрос закрыт
+  afterQuestion --> choosing: есть право (окно closed)
+  afterQuestion --> appealWindow: последний вопрос раунда, есть право
+  choosing --> appealCue: APPEAL_REQUESTED
+  appealWindow --> appealCue: APPEAL_REQUESTED
+  appealWindow --> appealEnd: appealLeft
+  appealEnd --> bridging
+  appealEnd --> finished
+  appealCue --> answering: purpose appeal
+  announcing --> appealNext: серия closed
+  appealNext --> appealCue: очередь не пуста
+  appealNext --> afterQuestion: очередь пуста
+```
+
+Переходы `APPEAL_REQUESTED` (из любого узла, кроме `paused`/`stopped`/`failed`, только если `validAppeal`: тот же `questionId`/`windowId`, есть право, игрок ещё не в серии):
+
+- серия `closed` уже идёт → в конец `queue` (`queueAppeal`), один playerId — одно место;
+- `buzzing.*` при `stage: open` и только от `lastPlayerId` → `appealCue` (`acceptAppeal`), окно перехвата прекращается;
+- `choosing.*` или `appealWindow` при `stage: closed` → `appealCue`; контроллер увеличивает `choiceEpoch`, поздний `selectQuestion` не откроет ячейку.
+
+Закрытие окна: `BUZZER_PRESSED` другого игрока (`assignAnswerer`) и `QUESTION_SELECTED` (`openQuestion`) обнуляют `appeal`; `choosing` по `appealLeft` (guard `idleClosedAppeal`) снимает окно, выбор продолжается; `advanceRound`, `clearActivePlay` (пропуск раунда), `STOP`, ошибка связи тоже обнуляют. `reopenBuzzers` после 0/минуса открывает окно `stage: open` с `lastPlayerId`. В серии `closed` `chooserId` не меняется, `playedIds` не трогается.
+
+Пауза: `rememberPause` сохраняет остаток окна, `RESUME` в `appealCue`/`appealWindow` возвращает туда же. Снимок хранит `outcomes`, `appeal`, `appealSerial`; восстановление `answering.*` с активным апеллянтом идёт через `appealCue`; окно чужого раунда отбрасывается; старые снимки без полей — без апелляций.
 
 ### Уточнение judging: нативное аудио (13 октября 2026)
 

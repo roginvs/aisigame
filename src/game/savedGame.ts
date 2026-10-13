@@ -1,5 +1,6 @@
 import type { ConferenceMessageRing } from '../conference/messages.ts'
 import { messageRingFromLegacyChat, readMessageRing } from '../conference/messageRing.ts'
+import { appealMsLeft, readAppeal, readOutcomes } from './appeals.ts'
 import { questionById } from './pack.ts'
 import { openingChooser } from './players.ts'
 import type {
@@ -122,6 +123,8 @@ const judgmentStatuses: JudgmentStatus[] = [
 
 /** Фазы, в которые можно войти заново после нового голосового сеанса. */
 const canonicalPhases: Record<string, string> = {
+  appealCue: 'appealCue',
+  appealWindow: 'appealWindow',
   welcoming: 'welcoming',
   choosing: 'choosing.listening',
   'choosing.listening': 'choosing.listening',
@@ -154,6 +157,8 @@ const canonicalPhases: Record<string, string> = {
 }
 
 const questionPhases = new Set([
+  'appealCue',
+  'appealWindow',
   'flashing',
   'reading.sealed',
   'reading.armed',
@@ -293,6 +298,9 @@ export function persistMatch(
 
 export function restoredMatch(pack: QuestionPack, saved: SavedMatch): Pick<
   GameContext,
+  | 'outcomes'
+  | 'appeal'
+  | 'appealSerial'
   | 'players'
   | 'roundIndex'
   | 'playedIds'
@@ -326,8 +334,16 @@ export function restoredMatch(pack: QuestionPack, saved: SavedMatch): Pick<
   if ((phase === 'finalBets.asking' || phase === 'turnCue') && (round?.kind !== 'final' || saved.finalists.length === 0)) {
     phase = 'choosing.listening'
   }
+  let appeal = saved.appeal ?? null
+  if (appeal && (questionById(pack.questions, appeal.questionId)?.roundIndex !== roundIndex || round?.kind === 'final')) appeal = null
+  if (appeal?.activePlayerId !== null && appeal && phase === 'answering.waiting') phase = 'appealCue'
+  if ((phase === 'appealCue' || phase === 'appealWindow') && !appeal) phase = 'choosing.listening'
   const openQuestion = questionOk && questionPhases.has(phase)
+
   return {
+    outcomes: saved.outcomes ?? {},
+    appeal: appeal ? { ...appeal, startedAt: null } : null,
+    appealSerial: saved.appealSerial ?? 0,
     players: saved.players,
     roundIndex,
     playedIds: saved.playedIds.filter((id) => pack.questions.some((question) => question.id === id)),
@@ -406,6 +422,9 @@ function patchHearTurnOnly(input: boolean | undefined, storage: Storage): SavedG
 
 function matchFromContext(context: GameContext, phase: string): SavedMatch {
   return {
+    outcomes: context.outcomes ?? {},
+    appeal: context.appeal ? { ...context.appeal, remainingMs: appealMsLeft(context.appeal), startedAt: null } : null,
+    appealSerial: context.appealSerial ?? 0,
     players: context.players.map((player) => ({
       id: player.id,
       name: player.name,
@@ -478,6 +497,10 @@ function sanitize(value: unknown): SavedGame | null {
   if (typeof record.packFile !== 'string') return null
   if (typeof record.packName !== 'string') return null
   const packHash = typeof record.packHash === 'string' ? record.packHash.trim().toLowerCase() : ''
+  const outcomes = readOutcomes(record.outcomes)
+  const appeal = readAppeal(record.appeal)
+  const appealSerial = whole(record.appealSerial ?? 0)
+  if (!outcomes || appeal === undefined || appealSerial === null) return null
   const players = normalizePlayers(record.players)
   const playedIds = stringList(record.playedIds)
   const missedIds = playerList(record.missedIds)
@@ -526,6 +549,9 @@ function sanitize(value: unknown): SavedGame | null {
     packName: record.packName,
     packHash,
     ...conference,
+    outcomes,
+    appeal,
+    appealSerial,
     players,
     roundIndex,
     playedIds,

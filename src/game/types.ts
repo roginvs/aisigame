@@ -21,6 +21,7 @@ export type SpeechPurpose =
   | 'chooserHandoff'
   | 'micWarning'
   | 'falseStart'
+  | 'appeal'
 
 export type RoundKind = 'normal' | 'final'
 
@@ -89,7 +90,36 @@ export type AnswerJudgment = {
   reason: string
 }
 
-export type SavedMatch = {
+export type OutcomeLedger = Record<string, Record<string, { amount: number; attemptId: number; correct?: boolean }>>
+
+export type AppealContext = {
+  questionId: string
+  windowId: number
+  stage: 'open' | 'closed'
+  queue: PlayerId[]
+  acceptedRequestIds?: string[]
+  activePlayerId: PlayerId | null
+  lastPlayerId: PlayerId | null
+  chooserId: PlayerId
+  /** Только окно заявок, не таймер ответа; пауза хранит остаток. */
+  remainingMs: number
+  startedAt: number | null
+}
+
+export type AppealRequest = {
+  questionId: string
+  playerId: PlayerId
+  windowId: number
+  requestId: string
+}
+
+export type AppealFields = {
+  outcomes?: OutcomeLedger
+  appeal?: AppealContext | null
+  appealSerial?: number
+}
+
+export type SavedMatch = AppealFields & {
   players: Player[]
   roundIndex: number
   playedIds: string[]
@@ -113,6 +143,7 @@ export type SavedMatch = {
 }
 
 export type GameEvent =
+  | ({ type: 'APPEAL_REQUESTED' } & AppealRequest)
   | { type: 'START_GAME'; pack: QuestionPack; players?: Player[] }
   | { type: 'CONTINUE_GAME'; pack: QuestionPack; saved: SavedMatch }
   | { type: 'BET_PLACED'; playerId: PlayerId; amount: number }
@@ -139,7 +170,7 @@ export type GameEvent =
   | { type: 'RESET_GAME' }
   | { type: 'ADD_PLAYER'; player: Player }
 
-export type GameContext = {
+export type GameContext = AppealFields & {
   players: Player[]
   packName: string
   rounds: RoundInfo[]

@@ -29,6 +29,7 @@ import { ownPackId, packCatalog } from './game/catalog.ts'
 import { messageRingEntries } from './conference/messageRing.ts'
 import { attachController, type GameControllerActions } from './game/controller.ts'
 import { defaultPlayerNames, playersFromNames } from './game/players.ts'
+import { appealRequestError } from './game/appeals.ts'
 import { gameMachine, statePath } from './game/machine.ts'
 import {
   clearSavedGame,
@@ -1262,6 +1263,19 @@ export default function App() {
     <GameScreen
       snapshot={snapshot}
       link={link}
+      onAppeal={async (request) => {
+        if (conferenceRole === 'joiner') return joinerSessionRef.current?.sendAppeal(request) ?? { accepted: false, reason: 'Нет связи с мастером' }
+        const current = actor.getSnapshot()
+        if (conferenceRole === 'master' && current.context.players.find((p) => p.id === request.playerId)?.clientId !== masterClientId) {
+          return { accepted: false, reason: 'Чужой игрок' }
+        }
+        const reason = appealRequestError(current.context, statePath(current.value), request)
+        if (reason) return { accepted: false, reason }
+        send({ type: 'APPEAL_REQUESTED', ...request })
+        const appeal = actor.getSnapshot().context.appeal
+        const accepted = appeal?.activePlayerId === request.playerId || Boolean(appeal?.queue.includes(request.playerId))
+        return { accepted, reason: accepted ? '' : 'Заявка уже устарела' }
+      }}
       onBuzz={(playerId: PlayerId) => {
         if (conferenceRole === 'joiner') {
           joinerSessionRef.current?.sendBuzz()

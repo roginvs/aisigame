@@ -395,6 +395,22 @@ export function attachController(options: {
       return
     }
     // Без conversation:none приветствие продолжает лобби и отвечает на «ты меня слышишь».
+    if (path === 'appealCue') {
+      choiceEpoch += 1
+      buzzEpoch += 1
+      buzzerEarAt = 0
+      openSpeechItemId = null
+      openSpeechStartedAt = 0
+      expectingToolTurn = null
+      dropAnswerAttempt()
+      client.interruptSpeech()
+      speak('appeal', hostCue({
+        situation: `Ручная апелляция. Сейчас повторяет ответ ${context.players.find((p) => p.id === context.activePlayerId)?.name ?? 'игрок'}.`,
+        goal: 'Обратись по имени и коротко попроси повторить ответ.',
+        constraints: ['Не перечитывай вопрос. Эталон не называй. Одна короткая фраза.'],
+      }), undefined, true)
+    }
+    if (path === 'appealWindow') { client.setMicEnabled(false); client.interruptSpeech() }
     if (path === 'welcoming') speak('welcome', welcomeInstructions(context), undefined, true)
     if (path === 'bridging') speak('bridge', bridgeInstructions(context), undefined, true)
     if (path === 'chooserHandoff') {
@@ -504,7 +520,7 @@ export function attachController(options: {
     attemptJudgmentMode = modeFor(actor.getSnapshot().context)
     client.gatePlayerChat(true)
     // Кнопка посреди длинной реплики: ту же utterance несём в попытку.
-    if (openSpeechItemId && openSpeechStartedAt > 0) {
+    if (!actor.getSnapshot().context.appeal?.activePlayerId && openSpeechItemId && openSpeechStartedAt > 0) {
       answerCarryItemId = openSpeechItemId
       liveSpeechItemId = openSpeechItemId
       pushTrace('note', 'речь ответа подхвачена с кнопки / buzz')
@@ -984,6 +1000,8 @@ function machineView(context: GameContext) {
     judgmentStatus: context.judgmentStatus,
     judgmentReason: context.judgmentReason,
     announceKind: context.announceKind,
+    appeal: context.appeal,
+    outcomes: context.outcomes,
     playedIds: context.playedIds,
     missedIds: context.missedIds,
     error: context.error,
@@ -1012,6 +1030,7 @@ function isSpeechPurpose(purpose: string): purpose is SpeechPurpose {
   return (
     purpose === 'welcome' ||
     purpose === 'read' ||
+    purpose === 'appeal' ||
     purpose === 'announce' ||
     purpose === 'clarify' ||
     purpose === 'finished' ||
@@ -1302,6 +1321,7 @@ function withCloseGuess(cue: string, context: GameContext): string {
 
 /** Дословная реплика, когда ответ один: модель не должна пересказывать задание. */
 export function verbatimAnnouncement(context: GameContext): string | null {
+  if (context.appeal?.activePlayerId) return null
   const kind = context.announceKind
   if (kind !== 'nobody' && kind !== 'unclear') return null
   if (kind === 'nobody' && closeGuessApplies(context)) return null
@@ -1317,6 +1337,18 @@ export function verbatimAnnouncement(context: GameContext): string | null {
 }
 
 export function announceInstructions(context: GameContext): string {
+  if (context.appeal?.activePlayerId !== null && context.appeal && context.announceKind !== 'repeat') {
+    const player = context.players.find((p) => p.id === context.activePlayerId)
+    const amount = context.outcomes?.[context.appeal.questionId]?.[context.activePlayerId ?? 0]?.amount ?? 0
+    const question = questionById(context.questions, context.appeal.questionId)
+    const closed = context.playedIds.includes(context.appeal.questionId)
+    return hostCue({
+      situation: `Апелляция ${player?.name ?? 'игрока'}: ${context.announceKind === 'correct' ? 'верно' : context.announceKind === 'unclear' ? 'ответ не разобран' : context.announceKind === 'silence' ? 'ничего не услышала' : 'неверно'}. Новый итог этого вопроса: ${amount}; общий счёт ${player?.score ?? 0}. Прежний итог уже заменён машиной.`,
+      goal: `Коротко объяви решение и новый итог за вопрос (${amount}), при желании общий счёт. Это замена прежнего результата, не повторное списание. ${closed && context.announceKind !== 'correct' ? spokenAnswerCue(question?.answers ?? [], question?.choices ?? []) : ''}`,
+      constraints: [closed ? 'Не приглашай выбирать следующий вопрос: ещё обрабатываются апелляции.' : 'Эталон не называй и не намекай. Не приглашай выбирать следующий вопрос. При неясном ответе скажи, что итог за вопрос нулевой.', 'Одна-две короткие фразы.'],
+    })
+  }
+
   const question = questionById(context.questions, context.activeQuestionId)
   const player = context.players.find((item) => item.id === context.activePlayerId)
   const playerNameLine = player?.name ?? ''
@@ -1429,6 +1461,10 @@ export function announceInstructions(context: GameContext): string {
       goal: `${cue} Затем коротко скажи, что ответ не засчитан и очки не изменились, и предложи выбрать следующий вопрос.`,
       constraints: [boardSecrets, finalNote],
     })
+  }
+  if (kind === 'unclear' && !finalRound && hidden) {
+    return hostCue({ situation: 'Ответ не удалось уверенно засчитать. Итог за вопрос нулевой, другим доступен перехват.',
+      goal: 'Коротко скажи, что ответ не разобран или спорный, итог нулевой.', constraints: ['Эталон не называй и не намекай. Не зови выбирать следующий вопрос.'] })
   }
   if (context.judgmentStatus === 'needs_clarification') {
     return hostCue({

@@ -1,4 +1,5 @@
 import { and, assign, not, setup, stateIn } from 'xstate'
+import { appealMsLeft, appealRequestError, appealWindowMs, eligibleAppealPlayers, settleOutcome } from './appeals.ts'
 import { gameConfig } from '../config.ts'
 import { questionSpeech } from './choices.ts'
 import { earlyBuzzerMsFor } from './earlyBuzzer.ts'
@@ -35,6 +36,9 @@ function blankMatch(pack: QuestionPack, players?: Player[]): GameContext {
     roundIndex: pack.rounds[0]?.index ?? 0,
     warnings: pack.warnings,
     questions: pack.questions,
+    outcomes: {},
+    appeal: null,
+    appealSerial: 0,
     playedIds: [],
     missedIds: [],
     finalists: [],
@@ -269,6 +273,7 @@ export const gameMachine = setup({
     events: {} as GameEvent,
   },
   delays: {
+    appealLeft: ({ context }) => context.appeal ? appealMsLeft(context.appeal) : appealWindowMs,
     buzzerMs: gameConfig.buzzerMs,
     buzzerLeft: ({ context }) => buzzerMsLeft(context),
     answerMs: gameConfig.answerMs,
@@ -279,8 +284,35 @@ export const gameMachine = setup({
     answerMediaHoldMs: gameConfig.answerMediaHoldMs,
   },
   actions: {
+    clearAppeals: assign({ appeal: () => null }),
+    restartAppealClock: assign(({ context }) => context.appeal ? { appeal: { ...context.appeal, startedAt: Date.now() } } : {}),
+    openClosedAppeals: assign(({ context }) => {
+      const questionId = context.appeal?.questionId ?? context.activeQuestionId
+      if (!questionId || isFinal(context) || eligibleAppealPlayers(context, questionId).length === 0) return { appeal: null }
+      const windowId = (context.appealSerial ?? 0) + 1
+      return { appealSerial: windowId, appeal: { questionId, windowId, stage: 'closed' as const, queue: [], activePlayerId: null,
+        lastPlayerId: null, chooserId: context.appeal?.stage === 'closed' ? context.appeal.chooserId : context.chooserId,
+        remainingMs: appealWindowMs, startedAt: Date.now() } }
+    }),
+    acceptAppeal: assign(({ context, event }) => {
+      if (event.type !== 'APPEAL_REQUESTED' || !context.appeal) return {}
+      return { appeal: { ...context.appeal, activePlayerId: event.playerId, startedAt: null, acceptedRequestIds: [...context.appeal.acceptedRequestIds ?? [], event.requestId] },
+        activeQuestionId: context.appeal.questionId, activePlayerId: event.playerId, activeStake: null,
+        attemptId: context.attemptId + 1, clarifications: 0, heard: '', judgmentStatus: null, announceKind: null,
+        judgmentReason: '', phaseStartedAt: null, phaseDurationMs: null, statusLine: 'Повтор ответа' }
+    }),
+    queueAppeal: assign(({ context, event }) => event.type === 'APPEAL_REQUESTED' && context.appeal
+      ? { appeal: { ...context.appeal, queue: [...context.appeal.queue, event.playerId], acceptedRequestIds: [...context.appeal.acceptedRequestIds ?? [], event.requestId] } } : {}),
+    nextAppeal: assign(({ context }) => {
+      const appeal = context.appeal!
+      const playerId = appeal.queue[0]!
+      return { appeal: { ...appeal, activePlayerId: playerId, queue: appeal.queue.slice(1) },
+        activeQuestionId: appeal.questionId, activePlayerId: playerId, attemptId: context.attemptId + 1,
+        clarifications: 0, heard: '', judgmentReason: '', judgmentStatus: null, announceKind: null, statusLine: 'Повтор ответа' }
+    }),
     clearError: assign({ error: () => null }),
     setError: assign({
+      appeal: () => null,
       error: ({ event }) =>
         event.type === 'CONNECTION_FAILED' || event.type === 'CONNECTION_LOST'
           ? event.message
@@ -289,6 +321,7 @@ export const gameMachine = setup({
     }),
     resetMatch: assign(() => freshContext()),
     rememberPause: assign({
+      appeal: ({ context }) => context.appeal ? { ...context.appeal, remainingMs: appealMsLeft(context.appeal), startedAt: null } : null,
       resumePath: ({ event }) => (event.type === 'PAUSE' ? event.path : ''),
       resumeStatus: ({ context }) => context.statusLine,
       statusLine: () => 'Пауза. Микрофон выключен, ведущая не ждёт',
@@ -299,6 +332,7 @@ export const gameMachine = setup({
       pauseStartedAt: () => Date.now(),
     }),
     rememberStop: assign({
+      appeal: () => null,
       statusLine: () => 'Остановлена',
       phaseStartedAt: () => null,
       phaseDurationMs: () => null,
@@ -307,6 +341,7 @@ export const gameMachine = setup({
       pauseStartedAt: () => null,
     }),
     resumeClock: assign({
+      appeal: ({ context }) => context.appeal ? { ...context.appeal, startedAt: context.appeal.activePlayerId === null ? Date.now() : null } : null,
       statusLine: ({ context }) => context.resumeStatus || 'Дальше',
       phaseStartedAt: ({ context }) => (showsClock(context.resumePath) ? Date.now() : null),
       phaseDurationMs: ({ context }) => clockMs(context.resumePath, context.missedIds, context.clarifications),
@@ -351,8 +386,8 @@ export const gameMachine = setup({
       announceKind: () => null,
       clarifyReason: () => '',
       clarifications: () => 0,
-      phaseStartedAt: () => null,
-      phaseDurationMs: () => null,
+      phaseStartedAt: ({ context }) => context.appeal?.stage === 'closed' ? Date.now() : null,
+      phaseDurationMs: ({ context }) => context.appeal?.stage === 'closed' ? appealMsLeft(context.appeal) : null,
     }),
     setResolvingStatus: assign({
       statusLine: () => 'Ведущая разбирает выбор',
@@ -393,6 +428,7 @@ export const gameMachine = setup({
       clarifyReason: () => '',
     }),
     openQuestion: assign({
+      appeal: () => null,
       activeQuestionId: ({ context, event }) => {
         if (event.type !== 'QUESTION_SELECTED') return null
         return (
@@ -474,6 +510,13 @@ export const gameMachine = setup({
       sayFalseStart: ({ context }) => hasFalseStarts(context) && falseStartCoin.flip(),
     }),
     reopenBuzzers: assign({
+      appealSerial: ({ context }) => (context.appealSerial ?? 0) + 1,
+      appeal: ({ context }) => context.activeQuestionId ? {
+        questionId: context.activeQuestionId, windowId: (context.appealSerial ?? 0) + 1, stage: 'open' as const,
+        queue: [], activePlayerId: null, lastPlayerId: context.activePlayerId, chooserId: context.chooserId,
+        remainingMs: appealWindowMs, startedAt: Date.now(),
+      } : null,
+
       activePlayerId: () => null,
       heard: () => '',
       sayCloseGuess: () => false,
@@ -491,6 +534,7 @@ export const gameMachine = setup({
       },
     }),
     assignAnswerer: assign({
+      appeal: () => null,
       activePlayerId: ({ event }) => (event.type === 'BUZZER_PRESSED' ? event.playerId : null),
       attemptId: ({ context }) => context.attemptId + 1,
       clarifications: () => 0,
@@ -509,22 +553,28 @@ export const gameMachine = setup({
       phaseDurationMs: () => null,
     }),
     applyJudgment: assign({
+      outcomes: ({ context, event }) => {
+        const status = outcomeStatus(context, event)
+        if (isFinal(context) || status === 'near_miss') return context.outcomes
+        return settleOutcome(context, status === 'correct' ? stakeOf(context) : status === 'incorrect' ? -stakeOf(context) : 0, status === 'correct').outcomes
+      },
       players: ({ context, event }) => {
         if (event.type !== 'ANSWER_JUDGED') return context.players
         const status = outcomeStatus(context, event)
         const stake = stakeOf(context)
         const delta = status === 'correct' ? stake : status === 'incorrect' ? -stake : 0
-        return changeScore(context, event.judgment.playerId, delta)
+        if (status === 'near_miss') return context.players
+        return isFinal(context) ? changeScore(context, event.judgment.playerId, delta) : settleOutcome(context, delta, status === 'correct').players
       },
       missedIds: ({ context, event }) => {
         const status = outcomeStatus(context, event)
-        if (status !== 'incorrect' || isFinal(context) || event.type !== 'ANSWER_JUDGED') return context.missedIds
+        if (status === 'near_miss' || isFinal(context) || event.type !== 'ANSWER_JUDGED') return context.missedIds
         return addMissed(context.missedIds, event.judgment.playerId)
       },
       playedIds: ({ context, event }) => {
         const status = outcomeStatus(context, event)
         if (status === 'near_miss') return context.playedIds
-        if (status === 'incorrect' && !isFinal(context) && event.type === 'ANSWER_JUDGED') {
+        if (status !== 'correct' && !isFinal(context) && event.type === 'ANSWER_JUDGED') {
           const missed = addMissed(context.missedIds, event.judgment.playerId)
           if (othersCanBuzz(context, missed)) return context.playedIds
         }
@@ -549,7 +599,7 @@ export const gameMachine = setup({
       },
       chooserId: ({ context, event }) => {
         const status = outcomeStatus(context, event)
-        if (status === 'near_miss' || event.type !== 'ANSWER_JUDGED') return context.chooserId
+        if (context.appeal?.stage === 'closed' || status === 'near_miss' || event.type !== 'ANSWER_JUDGED') return context.chooserId
         return event.judgment.playerId
       },
       clarifications: ({ context, event }) => (asksRepeat(context, event) ? context.clarifications + 1 : context.clarifications),
@@ -560,7 +610,7 @@ export const gameMachine = setup({
         if (status === 'near_miss') return 'Повторите, пожалуйста'
         if (status === 'unintelligible') return 'Ответ не разобран'
         if (status === 'ambiguous') return 'Ответ спорный'
-        if (status === 'needs_clarification') return 'Нужно было уточнить, в этом прототипе вопрос закрыт'
+        if (status === 'needs_clarification') return 'Ответ не удалось уверенно засчитать'
         return 'Оценка получена'
       },
     }),
@@ -583,7 +633,8 @@ export const gameMachine = setup({
       phaseDurationMs: () => null,
     }),
     silencePenalty: assign({
-      players: ({ context }) => changeScore(context, context.activePlayerId, -stakeOf(context)),
+      players: ({ context }) => isFinal(context) ? changeScore(context, context.activePlayerId, -stakeOf(context)) : settleOutcome(context, -stakeOf(context)).players,
+      outcomes: ({ context }) => isFinal(context) ? context.outcomes : settleOutcome(context, -stakeOf(context)).outcomes,
       missedIds: ({ context }) =>
         isFinal(context) ? context.missedIds : addMissed(context.missedIds, context.activePlayerId),
       playedIds: ({ context }) => {
@@ -596,7 +647,7 @@ export const gameMachine = setup({
       sayCloseGuess: ({ context }) => (silenceReveals(context) ? rollCloseGuess(context.wrongHeard) : false),
       announceKind: () => 'silence' as AnnounceKind,
       judgmentStatus: () => 'incorrect' as const,
-      chooserId: ({ context }) => context.activePlayerId ?? context.chooserId,
+      chooserId: ({ context }) => context.appeal?.stage === 'closed' ? context.chooserId : context.activePlayerId ?? context.chooserId,
       statusLine: ({ context }) => {
         if (isFinal(context)) return 'Время на ответ вышло'
         const missed = addMissed(context.missedIds, context.activePlayerId)
@@ -606,8 +657,14 @@ export const gameMachine = setup({
       phaseDurationMs: () => null,
     }),
     judgeTimeout: assign({
-      playedIds: ({ context }) =>
-        closeQuestion(context) ? withPlayed(context.playedIds, context.activeQuestionId) : context.playedIds,
+      players: ({ context }) => isFinal(context) ? context.players : settleOutcome(context, 0).players,
+      outcomes: ({ context }) => isFinal(context) ? context.outcomes : settleOutcome(context, 0).outcomes,
+      missedIds: ({ context }) => isFinal(context) ? context.missedIds : addMissed(context.missedIds, context.activePlayerId),
+      chooserId: ({ context }) => context.appeal?.stage === 'closed' ? context.chooserId : context.activePlayerId ?? context.chooserId,
+      playedIds: ({ context }) => {
+        if (!isFinal(context) && othersCanBuzz(context, addMissed(context.missedIds, context.activePlayerId))) return context.playedIds
+        return closeQuestion(context) ? withPlayed(context.playedIds, context.activeQuestionId) : context.playedIds
+      },
       sayCloseGuess: () => false,
       announceKind: () => 'unclear' as AnnounceKind,
       statusLine: () => 'Оценка не пришла вовремя, очки не меняются',
@@ -625,6 +682,7 @@ export const gameMachine = setup({
       phaseDurationMs: () => null,
     }),
     advanceRound: assign({
+      appeal: () => null,
       roundIndex: ({ context }) => {
         const next = nextPlayableRound(context.rounds, context.questions, context.roundIndex)
         return next === -1 ? context.roundIndex : next
@@ -660,6 +718,7 @@ export const gameMachine = setup({
       },
     }),
     clearActivePlay: assign({
+      appeal: () => null,
       activeQuestionId: () => null,
       activePlayerId: () => null,
       missedIds: () => [],
@@ -752,6 +811,15 @@ export const gameMachine = setup({
     }),
   },
   guards: {
+    validAppeal: ({ context, event }) => event.type === 'APPEAL_REQUESTED' &&
+      appealRequestError(context, context.appeal?.activePlayerId !== null && context.appeal?.stage === 'closed' ? 'answering.waiting' : context.appeal?.stage === 'open' ? 'buzzing.open' : 'choosing.listening', event) === null,
+    closedAppeal: ({ context }) => context.appeal?.stage === 'closed' && context.appeal.activePlayerId !== null,
+    // Only a closed-question window with nobody answering expires; without it the choosing clock stays untouched.
+    idleClosedAppeal: ({ context }) => context.appeal?.stage === 'closed' && context.appeal.activePlayerId === null,
+    queuedAppeal: ({ context }) => Boolean(context.appeal?.queue.length),
+    hasAppeals: ({ context }) => !isFinal(context) && Boolean(context.activeQuestionId && eligibleAppealPlayers(context, context.appeal?.questionId ?? context.activeQuestionId).length),
+    normalRound: ({ context }) => !isFinal(context),
+
     purposeWelcome: ({ event }) => event.type === 'HOST_AUDIO_FINISHED' && event.purpose === 'welcome',
     purposeRead: ({ event }) => event.type === 'HOST_AUDIO_FINISHED' && event.purpose === 'read',
     purposeClarify: ({ event }) => event.type === 'HOST_AUDIO_FINISHED' && event.purpose === 'clarify',
@@ -861,7 +929,7 @@ export const gameMachine = setup({
       event.type === 'HOST_AUDIO_FINISHED' &&
       event.purpose === 'announce' &&
       !isFinal(context) &&
-      (context.announceKind === 'incorrect' || context.announceKind === 'silence') &&
+      (context.announceKind === 'incorrect' || context.announceKind === 'silence' || context.announceKind === 'unclear') &&
       Boolean(context.activeQuestionId) &&
       !context.playedIds.includes(context.activeQuestionId ?? ''),
     hasNextRound: ({ context }) =>
@@ -884,6 +952,12 @@ export const gameMachine = setup({
   initial: 'startMenu',
   context: freshContext,
   on: {
+    APPEAL_REQUESTED: [
+      { guard: and([not(stateIn('paused')), not(stateIn('stopped')), not(stateIn('failed')), 'closedAppeal', 'validAppeal']), actions: 'queueAppeal' },
+      { guard: and([not(stateIn('paused')), 'validAppeal', stateIn('buzzing')]), target: '.appealCue', actions: 'acceptAppeal' },
+      { guard: and([not(stateIn('paused')), 'validAppeal', stateIn('choosing')]), target: '.appealCue', actions: 'acceptAppeal' },
+      { guard: and([not(stateIn('paused')), 'validAppeal', stateIn('appealWindow')]), target: '.appealCue', actions: 'acceptAppeal' },
+    ],
     RESET_GAME: { target: '.startMenu', actions: 'resetMatch' },
     CONNECTION_LOST: { target: '.failed', actions: 'setError' },
     PAUSE: {
@@ -928,6 +1002,8 @@ export const gameMachine = setup({
     },
     restoring: {
       always: [
+        { guard: ({ context }) => context.resumePath === 'appealCue', target: 'appealCue', actions: 'clearResume' },
+        { guard: ({ context }) => context.resumePath === 'appealWindow', target: 'appealWindow', actions: ['clearResume', 'restartAppealClock'] },
         { guard: ({ context }) => context.resumePath === 'welcoming', target: 'welcoming', actions: 'clearResume' },
         { guard: ({ context }) => context.resumePath === 'choosing.listening', target: 'choosing.listening', actions: 'clearResume' },
         { guard: ({ context }) => context.resumePath === 'flashing', target: 'flashing', actions: 'clearResume' },
@@ -964,6 +1040,7 @@ export const gameMachine = setup({
       },
     },
     choosing: {
+      after: { appealLeft: { guard: 'idleClosedAppeal', actions: ['clearAppeals', 'clearTimer'] } },
       initial: 'listening',
       entry: 'setChoosingStatus',
       on: {
@@ -1076,6 +1153,36 @@ export const gameMachine = setup({
         BUZZER_PRESSED: { guard: 'validPlayer', target: '#game.answering', actions: 'assignAnswerer' },
       },
     },
+    afterQuestion: {
+      always: [
+        { guard: and(['hasAppeals', 'roundDoneHasNext']), target: 'appealWindow', actions: 'openClosedAppeals' },
+        { guard: and(['hasAppeals', 'roundDoneNoNext']), target: 'appealWindow', actions: 'openClosedAppeals' },
+        { guard: 'hasAppeals', target: 'choosing', actions: 'openClosedAppeals' },
+        { guard: 'roundDoneHasNext', target: 'bridging', actions: 'advanceRound' },
+        { guard: 'roundDoneNoNext', target: 'finished', actions: 'clearAppeals' },
+        { target: 'choosing', actions: 'clearAppeals' },
+      ],
+    },
+    appealWindow: {
+      entry: assign(({ context }) => ({ statusLine: 'Апелляции · 5 секунд', phaseStartedAt: Date.now(), phaseDurationMs: appealMsLeft(context.appeal) })),
+      after: { appealLeft: { target: 'appealEnd', actions: 'clearAppeals' } },
+    },
+    appealEnd: {
+      always: [
+        { guard: 'roundDoneHasNext', target: 'bridging', actions: 'advanceRound' },
+        { guard: 'roundDoneNoNext', target: 'finished' },
+        { target: 'choosing' },
+      ],
+    },
+    appealCue: {
+      on: { HOST_AUDIO_FINISHED: { guard: ({ event }) => event.type === 'HOST_AUDIO_FINISHED' && event.purpose === 'appeal', target: 'answering' } },
+    },
+    appealNext: {
+      always: [
+        { guard: 'queuedAppeal', target: 'appealCue', actions: 'nextAppeal' },
+        { target: 'afterQuestion' },
+      ],
+    },
     bridging: {
       on: {
         HOST_AUDIO_FINISHED: { guard: 'purposeBridge', target: 'choosing' },
@@ -1180,8 +1287,10 @@ export const gameMachine = setup({
             HOST_AUDIO_FINISHED: [
               { guard: 'samePlayerRepeats', target: '#game.answering', actions: 'rearmAnswer' },
               { guard: 'moreFinalists', target: '#game.turnCue', actions: 'nextFinalist' },
+              { guard: and(['purposeAnnounce', 'closedAppeal']), target: '#game.appealNext' },
               { guard: 'othersCanAnswer', target: '#game.buzzing', actions: 'reopenBuzzers' },
               { guard: 'announceMediaHold', target: 'holding' },
+              { guard: and(['purposeAnnounce', 'normalRound']), target: '#game.afterQuestion' },
               { guard: 'roundOverAndNext', target: '#game.bridging', actions: 'advanceRound' },
               { guard: 'roundOver', target: '#game.finished' },
               { guard: 'purposeAnnounce', target: '#game.choosing' },
@@ -1191,6 +1300,7 @@ export const gameMachine = setup({
         holding: {
           after: {
             answerMediaHoldMs: [
+              { guard: 'normalRound', target: '#game.afterQuestion' },
               { guard: 'roundDoneHasNext', target: '#game.bridging', actions: 'advanceRound' },
               { guard: 'roundDoneNoNext', target: '#game.finished' },
               { target: '#game.choosing' },
@@ -1203,6 +1313,8 @@ export const gameMachine = setup({
     paused: {
       on: {
         RESUME: [
+        { guard: ({ context }) => context.resumePath === 'appealCue', target: 'appealCue', actions: 'resumeClock' },
+        { guard: ({ context }) => context.resumePath === 'appealWindow', target: 'appealWindow', actions: ['resumeClock', 'restartAppealClock'] },
           { guard: ({ context }) => context.resumePath === 'welcoming', target: 'welcoming', actions: 'resumeClock' },
           { guard: ({ context }) => context.resumePath === 'bridging', target: 'bridging', actions: 'resumeClock' },
           { guard: ({ context }) => context.resumePath === 'choosing.listening', target: 'choosing.listening', actions: 'resumeClock' },

@@ -23,7 +23,7 @@ export function focusedModelParticipantId(
 ): ModelHearFocus {
   const root = phase.split('.')[0] ?? phase
   if (root === 'choosing') return chooserParticipantId
-  if (root === 'answering') return answererParticipantId
+  if (root === 'answering' || root === 'appealCue') return answererParticipantId
   if (root === 'finalBets') return bettorParticipantId
   if (!hearTurnOnly) return null
   // Лобби / меню: все; уже в партии вне выбора, ответа и ставки — тишина для модели.

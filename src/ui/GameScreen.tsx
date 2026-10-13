@@ -1,6 +1,7 @@
-import { useEffect, useRef, useState, useSyncExternalStore } from 'react'
+import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from 'react'
 import { flushSync } from 'react-dom'
 import type { SnapshotFrom } from 'xstate'
+import { appealButton } from '../game/appeals.ts'
 import { buttonsLive, falseStartCooling, falseStartOpen, gameMachine, statePath } from '../game/machine.ts'
 import { falseStartMs } from '../options.ts'
 import { currentRound, nextInCell, questionById, roundPrices, roundThemes } from '../game/pack.ts'
@@ -9,7 +10,7 @@ import { answerIsPublic, stageMedia } from '../game/reveal.ts'
 import type { LinkStatus } from '../realtime/client.ts'
 import { voiceById, voiceModels } from '../realtime/models.ts'
 import { billedTokens, formatTokens, getUsageSnapshot, subscribeUsage, type UsageTotals } from '../realtime/usage.ts'
-import type { GameContext, PlayerId } from '../game/types.ts'
+import type { AppealRequest, GameContext, PlayerId } from '../game/types.ts'
 import type { ConferenceMessageRing, ConferenceSnapshot } from '../conference/messages.ts'
 import type { RosterEntry } from '../conference/roster.ts'
 import { copyDebugDump, formatDebugSize } from '../debug/trace.ts'
@@ -107,6 +108,7 @@ function usageHint(totals: UsageTotals): string {
 export function GameScreen(props: {
   snapshot: SnapshotFrom<typeof gameMachine>
   link: LinkStatus
+  onAppeal?: (request: AppealRequest) => Promise<{ accepted: boolean; reason: string }>
   onBuzz: (playerId: PlayerId) => void
   onPick: (themeId: string, value: number) => void
   onPause: () => void
@@ -164,6 +166,37 @@ export function GameScreen(props: {
   const [inviteOpen, setInviteOpen] = useState(false)
   const path = conference?.remotePath ?? statePath(liveSnapshot.value)
   const context = liveSnapshot.context
+  const [sendingAppeals, setSendingAppeals] = useState<Record<number, string>>({})
+  const sendingRef = useRef(new Set<number>())
+  const [appealError, setAppealError] = useState('')
+  const onAppeal = props.onAppeal
+  useEffect(() => {
+    if (!appealError) return
+    const timer = window.setTimeout(() => setAppealError(''), 4_000)
+    return () => window.clearTimeout(timer)
+  }, [appealError])
+  const appealStates = Object.fromEntries(context.players.map((p) => {
+    const state = appealButton(context, path, p.id)
+    return [p.id, state?.enabled && sendingAppeals[p.id] ? { label: 'Отправляется…', enabled: false } : state]
+  }))
+  const onPlayerAction = useCallback((playerId: PlayerId) => {
+    const player = context.players.find((p) => p.id === playerId)
+    if (!player || !canBuzzPlayer(Boolean(conference?.layout), conference?.selfClientId, player)) return
+    const state = appealButton(context, path, playerId)
+    if (!state) { onBuzz(playerId); return }
+    if (!state.enabled || sendingRef.current.has(playerId) || !onAppeal || !context.appeal) return
+    const request: AppealRequest = { questionId: context.appeal.questionId, windowId: context.appeal.windowId, playerId, requestId: crypto.randomUUID() }
+    sendingRef.current.add(playerId)
+    setSendingAppeals((previous) => ({ ...previous, [playerId]: request.requestId }))
+    setAppealError('')
+    void onAppeal(request).then((reply) => {
+      if (!reply.accepted) setAppealError(reply.reason)
+    }).catch(() => setAppealError('Не удалось отправить апелляцию')).finally(() => {
+      sendingRef.current.delete(playerId)
+      setSendingAppeals((previous) => { const next = { ...previous }; delete next[playerId]; return next })
+    })
+  }, [context, path, conference?.layout, conference?.selfClientId, onAppeal, onBuzz])
+
   async function copyDebug() {
     const result = await copyDebugDump({ path, context })
     setCopyFeedback(result.ok ? `Скопировано ${formatDebugSize(result.bytes)}` : 'Не скопировалось')
@@ -216,7 +249,7 @@ export function GameScreen(props: {
     if (root === 'choosing') {
       return context.players.find((player) => player.id === context.chooserId)?.name ?? null
     }
-    if (root === 'answering') {
+    if (root === 'answering' || root === 'appealCue') {
       return context.players.find((player) => player.id === context.activePlayerId)?.name ?? null
     }
     if (root === 'finalBets') {
@@ -279,7 +312,7 @@ export function GameScreen(props: {
         const target = event.target
         if (target instanceof HTMLElement && target.closest('input, textarea, select, .model-name, [contenteditable="true"]')) return
         event.preventDefault()
-        onBuzz(selfPlayerId)
+        onPlayerAction(selfPlayerId)
       }
       window.addEventListener('keydown', onKeyDown)
       return () => window.removeEventListener('keydown', onKeyDown)
@@ -296,11 +329,11 @@ export function GameScreen(props: {
       })
       if (!playerId) return
       event.preventDefault()
-      onBuzz(playerId)
+      onPlayerAction(playerId)
     }
     window.addEventListener('keydown', onKeyDown)
     return () => window.removeEventListener('keydown', onKeyDown)
-  }, [onBuzz, conference?.layout, conference?.lobby, conference?.selfClientId, context.players])
+  }, [onPlayerAction, conference?.layout, conference?.lobby, conference?.selfClientId, context.players])
 
   const mainClass = [
     'table',
@@ -537,6 +570,10 @@ export function GameScreen(props: {
         )}
         </div>
 
+      {context.appeal?.activePlayerId && context.appeal.stage === 'closed' ? (
+        <p className="status-line" role="status">Апелляции: {[context.appeal.activePlayerId, ...context.appeal.queue].map((id) => context.players.find((p) => p.id === id)?.name).join(' → ')}</p>
+      ) : null}
+      {appealError ? <p role="status" className="status-line">{appealError}</p> : null}
       {conference?.layout ? (
         <ConferencePlayersRow
           mode={conference.lobby || conference.awaitingPack ? 'lobby' : 'match'}
@@ -556,7 +593,8 @@ export function GameScreen(props: {
           buttonsOpen={buttonsOpen}
           canFalseStart={canFalseStart}
           earlyLive={earlyLive}
-          onBuzz={onBuzz}
+          appealStates={appealStates}
+          onBuzz={onPlayerAction}
           layout
         />
       ) : (
@@ -565,6 +603,7 @@ export function GameScreen(props: {
             const playerId = player.id
             const active = context.activePlayerId === playerId
             const missed = context.missedIds.includes(playerId)
+            const appealState = appealStates[playerId]
             const chooses = path.startsWith('choosing') && context.chooserId === playerId
             const flareAt = context.falseStarts[playerId]
             const cooling = falseStartCooling(flareAt, penaltyClock)
@@ -594,10 +633,10 @@ export function GameScreen(props: {
                         }
                       : undefined
                   }
-                  disabled={cooling || ((missed || !buttonsOpen) && !canFalseStart)}
-                  onClick={() => onBuzz(playerId)}
+                  disabled={appealState ? !appealState.enabled : cooling || ((missed || !buttonsOpen) && !canFalseStart)}
+                  onClick={() => onPlayerAction(playerId)}
                 >
-                  {chooses ? 'выбирайте вопрос' : missed ? 'Уже отвечал' : player.name}
+                  {appealState?.label ?? (chooses ? 'выбирайте вопрос' : missed ? 'Уже отвечал' : player.name)}
                   {earlyLive ? <span className="visually-hidden">, вопрос ещё читается</span> : null}
                 </button>
                 <p className="key-hint">{key ? (earlyLive ? `${key} · уже можно` : key) : ''}</p>

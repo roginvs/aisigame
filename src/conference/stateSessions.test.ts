@@ -16,6 +16,8 @@ class Room {
   members: RoomTransport[] = []
   dropNextUpdateFor = ''
   dropPackOffers = false
+  dropAppealReplies = false
+  dropAppealRequests = false
   connect(id: string): RoomTransport {
     const transport = new RoomTransport(this, id)
     this.members.push(transport)
@@ -34,6 +36,8 @@ class RoomTransport implements ConferenceTransport {
     if (!isConferenceMessage(wire)) throw new Error('invalid wire message')
     this.sent.push(wire)
     if (wire.type === 'packOffer' && this.room.dropPackOffers) return
+    if (wire.type === 'appealReply' && this.room.dropAppealReplies) return
+    if (wire.type === 'appeal' && this.room.dropAppealRequests) return
     for (const member of this.room.members) {
       if (member === this) continue
       if (member.id === this.room.dropNextUpdateFor && wire.type === 'partialUpdate') {
@@ -173,4 +177,71 @@ it.each([false, true])('перезагрузка сверяет кеш по гл
     master.dispose()
     actor.stop()
   }
+})
+
+
+it('апелляции: подтверждение, чужой playerId, дубли, lost ACK по snapshot и потеря запроса', async () => {
+  const room = new Room()
+  const transport = room.connect('master')
+  const actor = createActor(gameMachine).start()
+  const players = [{ id: 1, name: 'Мастер', score: 0, clientId: 'master' }, { id: 2, name: 'Гость', score: 0, clientId: 'guest' }]
+  actor.send({ type: 'START_GAME', pack: demoPack, players })
+  actor.send({ type: 'CONNECTED' }); actor.send({ type: 'HOST_AUDIO_FINISHED', purpose: 'welcome' })
+  actor.send({ type: 'QUESTION_SELECTED', themeId: 'history', value: 100 })
+  await vi.advanceTimersByTimeAsync(1080)
+  actor.send({ type: 'HOST_AUDIO_FINISHED', purpose: 'read' })
+  const normal = (playerId: number, status: 'incorrect' | 'correct') => {
+    actor.send({ type: 'BUZZER_PRESSED', playerId }); actor.send({ type: 'PLAYER_SPEECH_FINISHED' })
+    actor.send({ type: 'ANSWER_JUDGED', judgment: { questionId: 'history-100', playerId, attemptId: actor.getSnapshot().context.attemptId, status, heard: 'ответ', reason: '' } })
+    actor.send({ type: 'HOST_AUDIO_FINISHED', purpose: 'announce' })
+  }
+  normal(2, 'incorrect'); normal(1, 'correct')
+  const bytes = new Uint8Array([1, 2, 3])
+  const hash = await sha256Hex(bytes)
+  const master = new MasterSession({ transport, actor, client: { requestSpeech: vi.fn() } as unknown as GameVoice,
+    masterClientId: 'master', masterName: 'Мастер', pack: demoPack, packBytes: bytes, packHash: hash, authorityToken: 'master-token', onRoster: () => {}, resumePlayers: players })
+  const guest = room.connect('guest-endpoint')
+  const callbacks = { onSnapshot: vi.fn(), onLobby: vi.fn(), onPackReady: vi.fn(), onError: vi.fn(), onFatalError: vi.fn() }
+  let joiner = new JoinerSession({ transport: guest, clientId: 'guest', authToken: 'guest-token', name: 'Гость', callbacks,
+    packCache: { get: async () => bytes, put: async () => {}, delete: async () => {} } })
+  try {
+    await vi.advanceTimersByTimeAsync(0)
+    await vi.waitFor(() => expect(master.rosterList().find((entry) => entry.clientId === 'guest')?.hashOk).toBe(true), { interval: 1 })
+    const a = actor.getSnapshot().context.appeal!
+    const request = { questionId: a.questionId, windowId: a.windowId, playerId: 2, requestId: 'accepted' }
+    const foreign = joiner.sendAppeal({ ...request, playerId: 1, requestId: 'foreign' })
+    await vi.advanceTimersByTimeAsync(0)
+    expect(await foreign).toEqual({ accepted: false, reason: 'Чужой игрок' })
+    const stale = joiner.sendAppeal({ ...request, windowId: 9999, requestId: 'stale' })
+    await vi.advanceTimersByTimeAsync(0)
+    expect((await stale).accepted).toBe(false)
+    room.dropAppealRequests = true
+    const lost = joiner.sendAppeal({ ...request, requestId: 'lost' })
+    await vi.advanceTimersByTimeAsync(4000)
+    expect(await lost).toMatchObject({ accepted: false, reason: expect.stringContaining('Нет подтверждения') })
+    room.dropAppealRequests = false; room.dropAppealReplies = true
+    const accepted = joiner.sendAppeal(request)
+    await vi.advanceTimersByTimeAsync(0)
+    expect(await accepted).toEqual({ accepted: true, reason: '' })
+    expect(joiner.snapshot()?.appeal?.activePlayerId).toBe(2)
+    expect(joiner.snapshot()?.phase).toBe('appealCue')
+    const attempt = actor.getSnapshot().context.attemptId
+    guest.send({ ...request, type: 'appeal', clientId: 'guest', authToken: 'guest-token' })
+    expect(actor.getSnapshot().context.attemptId).toBe(attempt)
+    expect(actor.getSnapshot().context.appeal?.queue).toEqual([])
+    // Reload with the same authenticated clientId restores the authoritative active request.
+    joiner.dispose()
+    joiner = new JoinerSession({ transport: room.connect('guest-reloaded'), clientId: 'guest', authToken: 'guest-token', name: 'Гость', callbacks,
+      packCache: { get: async () => bytes, put: async () => {}, delete: async () => {} } })
+    await vi.advanceTimersByTimeAsync(0)
+    expect(joiner.snapshot()?.appeal?.activePlayerId).toBe(2)
+    actor.send({ type: 'HOST_AUDIO_FINISHED', purpose: 'appeal' })
+    actor.send({ type: 'PLAYER_SPEECH_FINISHED' })
+    actor.send({ type: 'ANSWER_JUDGED', judgment: { questionId: 'history-100', playerId: 2, attemptId: attempt, status: 'correct', heard: 'Август', reason: '' } })
+    await vi.advanceTimersByTimeAsync(0)
+    // Partial updates may arrive a tick later than the machine change; wait for the joiner view.
+    for (let i = 0; i < 50 && joiner.snapshot()?.players[1]?.score !== 100; i += 1) await vi.advanceTimersByTimeAsync(20)
+    expect(joiner.snapshot()?.players.map((p) => p.score)).toEqual([100, 100])
+    expect(joiner.snapshot()?.outcomes).toEqual(actor.getSnapshot().context.outcomes)
+  } finally { joiner.dispose(); master.dispose(); actor.stop() }
 })

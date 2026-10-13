@@ -1,5 +1,6 @@
 /** Сообщения конференции — plain JSON, без классов. */
-import type { AnnounceKind, JudgmentStatus } from '../game/types.ts'
+import { readAppeal, readOutcomes } from '../game/appeals.ts'
+import type { AppealFields, AppealRequest, AnnounceKind, JudgmentStatus } from '../game/types.ts'
 
 /** Общий кольцевой буфер текстового чата и реплик «Разговора». */
 export const CONFERENCE_HISTORY_LIMIT = 200
@@ -55,7 +56,7 @@ export type ConferencePackManifest = {
   summary: string
 }
 
-export type ConferenceSnapshot = {
+export type ConferenceSnapshot = AppealFields & {
   /** Хеш коммита сборки мастера (`buildCommit`); joiner сверяет со своим. Старые мастера могут не слать. */
   commit?: string
   /** Пакет — часть глобального статуса, доступная без отдельного packOffer. */
@@ -209,6 +210,16 @@ export type PackStatusMessage = {
   packPhase: 'connecting' | 'downloading' | 'verifying'
 }
 
+export type AppealMessage = { type: 'appeal'; clientId: string; authToken: string } & AppealRequest
+export type AppealReplyMessage = {
+  type: 'appealReply'
+  authorityToken: string
+  targetClientId: string
+  requestId: string
+  accepted: boolean
+  reason: string
+}
+
 export type BuzzMessage = {
   type: 'buzz'
   clientId: string
@@ -262,6 +273,8 @@ export type ConferenceMessage =
   | PackVerifiedMessage
   | PackStatusMessage
   | ReadyMessage
+  | AppealMessage
+  | AppealReplyMessage
   | BuzzMessage
   | PickMessage
   | ChatMessage
@@ -320,6 +333,10 @@ export function isConferenceMessage(value: unknown): value is ConferenceMessage 
     case 'ready':
     case 'buzz':
       return client()
+    case 'appeal':
+      return client() && shortString(value.questionId, 2_000) && integer(value.playerId, 1) && integer(value.windowId, 1) && shortString(value.requestId, 200)
+    case 'appealReply':
+      return authority(value) && shortString(value.targetClientId, 200) && shortString(value.requestId, 200) && typeof value.accepted === 'boolean' && validText(value.reason)
     case 'pick':
       return client() && shortString(value.themeId, 500) && Number.isFinite(value.value)
     case 'chat':
@@ -395,6 +412,9 @@ function validPackPipeIce(value: Record<string, unknown>): boolean {
 
 type StateFields = Omit<ConferenceSnapshot, keyof ConferenceMessageRing>
 const stateValidators = {
+  outcomes: (value: unknown) => readOutcomes(value) !== null,
+  appeal: (value: unknown) => readAppeal(value) !== undefined,
+  appealSerial: (value: unknown) => value === undefined || integer(value, 0),
   commit: (value: unknown) => optionalString(value, 80),
   pack: (value: unknown) => value === null || validPackManifest(value),
   phase: (value: unknown) => shortString(value, 100),

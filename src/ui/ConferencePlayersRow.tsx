@@ -39,6 +39,7 @@ export function ConferencePlayersRow(props: {
   buttonsOpen: boolean
   canFalseStart: boolean
   earlyLive: boolean
+  appealStates?: Record<number, { label: string; enabled: boolean } | null>
   onBuzz: (playerId: PlayerId) => void
   layout: boolean
 }) {
@@ -120,6 +121,7 @@ export function ConferencePlayersRow(props: {
         const label = conferencePlayerLabel(player.name, hasMatchData)
         const active = activePlayerId === playerId
         const missed = missedIds.includes(playerId)
+        const appealState = props.appealStates?.[playerId]
         const chooses = path.startsWith('choosing') && chooserId === playerId
         const flareAt = falseStarts[playerId]
         const cooling = falseStartCooling(flareAt, penaltyClock)
@@ -174,10 +176,10 @@ export function ConferencePlayersRow(props: {
                       }
                     : undefined
                 }
-                disabled={displayOnly || cooling || ((missed || !buttonsOpen) && !canFalseStart)}
+                disabled={displayOnly || (appealState ? !appealState.enabled : cooling || ((missed || !buttonsOpen) && !canFalseStart))}
                 onClick={() => onBuzz(playerId)}
               >
-                {chooses
+                {appealState ? appealState.label : chooses
                   ? 'выбирайте вопрос'
                   : missed
                     ? 'Уже отвечал'

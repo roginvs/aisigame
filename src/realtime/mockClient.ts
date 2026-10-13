@@ -327,6 +327,7 @@ function hostLine(purpose: string, instructions = ''): string {
   if (purpose === 'finished') return 'Игра окончена.'
   if (purpose === 'bet') return 'Назовите ставку.'
   if (purpose === 'turn') return 'Ваш ответ.'
+  if (purpose === 'appeal') return 'Повторите ответ, пожалуйста.'
   if (purpose === 'micWarning') {
     const name =
       /Имя игрока:\s*(.+)/.exec(instructions)?.[1]?.split('\n')[0]?.trim() ||
@@ -352,6 +353,11 @@ function announceLine(instructions: string): string {
   instructions = instructions.split('\n\nПубличный контекст')[0] ?? instructions
   const folded = instructions.toLowerCase().replaceAll('ё', 'е')
   const quoted = [...instructions.matchAll(/«([^»]+)»/g)].map((match) => match[1]?.trim() ?? '').filter(Boolean)
+  if (folded.includes('прежний итог уже заменён машиной')) {
+    const amount = instructions.match(/Новый итог этого вопроса: (-?\d+)/)?.[1] ?? '0'
+    const decision = /апелляция [^\n]+: верно\./i.test(instructions) ? 'Верно.' : folded.includes('ответ не разобран') ? 'Ответ не разобран.' : folded.includes('ничего не услышала') ? 'Ничего не услышала.' : 'Неверно.'
+    return `${decision} Итог за вопрос: ${amount}.`
+  }
   if (folded.includes('произнеси') && quoted[0]) return quoted[0]
   if (folded.includes('исход: молчание')) return 'Ничего не услышала, минус.'
   if (folded.includes('исход: повтор') || folded.includes('попроси повторить')) return 'Повторите, пожалуйста.'

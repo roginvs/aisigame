@@ -1,3 +1,4 @@
+import { appealRequestError } from '../game/appeals.ts'
 import type { Actor, SnapshotFrom } from 'xstate'
 import type { GameVoice } from '../realtime/client.ts'
 import { gameMachine } from '../game/machine.ts'
@@ -59,6 +60,7 @@ export type MasterSessionOptions = {
 }
 
 export class MasterSession {
+  private appealReplies = new Map<string, Extract<ConferenceMessage, { type: 'appealReply' }>>()
   private transport: ConferenceTransport
   private client: GameVoice
   private actor: GameActor
@@ -380,6 +382,27 @@ export class MasterSession {
       this.onRosterCb()
       this.broadcastCurrentSnapshot()
       this.maybeLobbySpeech()
+      return
+    }
+    if (message.type === 'appeal') {
+      const key = `${message.clientId}:${message.requestId}`
+      const cached = this.appealReplies.get(key)
+      if (cached) { this.transport.send(cached); this.broadcastCurrentSnapshot(); return }
+      const snap = this.actor.getSnapshot()
+      const player = snap.context.players.find((p) => p.id === message.playerId && p.clientId === message.clientId)
+      let reason = !this.gameStarted || !this.verified.has(message.clientId) ? 'Пакет ещё не сверен' : !player ? 'Чужой игрок' :
+        appealRequestError(snap.context, statePath(snap.value), message)
+      if (!reason) {
+        this.actor.send({ ...message, type: 'APPEAL_REQUESTED' })
+        const appeal = this.actor.getSnapshot().context.appeal
+        if (appeal?.activePlayerId !== message.playerId && !appeal?.queue.includes(message.playerId)) reason = 'Заявка уже устарела'
+      }
+      const reply: Extract<ConferenceMessage, { type: 'appealReply' }> = { type: 'appealReply', authorityToken: this.authorityToken,
+        targetClientId: message.clientId, requestId: message.requestId, accepted: !reason, reason: reason ?? '' }
+      this.appealReplies.set(key, reply)
+      if (this.appealReplies.size > 500) this.appealReplies.delete(this.appealReplies.keys().next().value!)
+      this.transport.send(reply)
+      this.broadcastCurrentSnapshot()
       return
     }
     if (message.type === 'buzz') {

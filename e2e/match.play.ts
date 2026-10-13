@@ -50,7 +50,7 @@ test('неверный ответ не закрывает ячейку, пока
   await hear(page, 'Наполеон')
   await expect(page.getByText('Неверно.')).toBeVisible()
   await expect(page.getByRole('group', { name: 'Игрок 1: -100' })).toBeVisible()
-  await expect(page.getByRole('button', { name: 'Уже отвечал' })).toBeDisabled()
+  await expect(page.getByRole('button', { name: 'Апелляция' })).toBeEnabled()
   await expect(page.getByRole('button', { name: 'Игрок 2', exact: true })).toBeEnabled()
   await expect(page.getByRole('article')).not.toContainText('Правильный ответ')
 })
@@ -85,7 +85,7 @@ test('кнопка без ответа списывает номинал', async
     timeout: 20_000,
   })
   await expect(page.getByRole('group', { name: 'Игрок 1: -100' })).toBeVisible()
-  await expect(page.getByRole('button', { name: 'Уже отвечал' })).toBeDisabled()
+  await expect(page.getByRole('button', { name: 'Апелляция' })).toBeEnabled()
   await expect(page.getByRole('button', { name: 'Игрок 2', exact: true })).toBeEnabled()
 })
 

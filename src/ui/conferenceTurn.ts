@@ -45,7 +45,7 @@ export function conferenceTurnTitle(
     playerId = context.chooserId
     const finalRound = context.rounds.find((round) => round.index === context.roundIndex)?.kind === 'final'
     action = finalRound ? 'выбирает тему финала' : 'выбирает вопрос'
-  } else if (path === 'answering.waiting' || path === 'answering.hearing') {
+  } else if (path === 'answering.waiting' || path === 'answering.hearing' || path === 'appealCue') {
     playerId = context.activePlayerId
     action = 'отвечает'
   } else if (path === 'finalBets.hearing') {
@@ -72,7 +72,7 @@ export function conferenceSoloListenHint(
   if (!conferenceLayout) return null
   const root = path.split('.')[0] ?? path
   const name = options.focusName?.trim() || ''
-  if (root === 'choosing' || root === 'answering' || root === 'finalBets') {
+  if (root === 'choosing' || root === 'answering' || root === 'appealCue' || root === 'finalBets') {
     return name ? `Слушаю ${name}` : 'Слушаю одного игрока'
   }
   if (!options.hearTurnOnly) return null

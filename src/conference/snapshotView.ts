@@ -10,6 +10,9 @@ export function contextFromSnapshot(snapshot: ConferenceSnapshot, pack: Question
   for (const [id, stamp] of Object.entries(snapshot.falseStarts)) falseStarts[Number(id)] = stamp
 
   return {
+    outcomes: snapshot.outcomes ?? {},
+    appeal: snapshot.appeal ?? null,
+    appealSerial: snapshot.appealSerial ?? 0,
     players: snapshot.players.map((player) => ({
       id: player.id,
       name: player.name,

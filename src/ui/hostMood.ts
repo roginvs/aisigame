@@ -11,6 +11,7 @@ const speechPaths = new Set([
   'bridging',
   'finalBets.asking',
   'turnCue',
+  'appealCue',
   'falseStartCue',
 ])
 
