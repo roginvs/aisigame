@@ -12,6 +12,7 @@ import type {
   PlayerId,
   QuestionPack,
   SavedMatch,
+  SpecialState,
 } from './types.ts'
 
 /** Снимок партии. Не путать с `aisigame.openaiApiKey`. */
@@ -111,7 +112,7 @@ export function readMatchMode(saved: SavedGame | null | undefined): 'table' | 'c
   return 'table'
 }
 
-const announceKinds: AnnounceKind[] = ['correct', 'incorrect', 'silence', 'nobody', 'unclear', 'repeat']
+const announceKinds: AnnounceKind[] = ['correct', 'incorrect', 'silence', 'nobody', 'unclear', 'repeat', 'away']
 const judgmentStatuses: JudgmentStatus[] = [
   'correct',
   'incorrect',
@@ -154,6 +155,21 @@ const canonicalPhases: Record<string, string> = {
   'finalBets.resolving': 'finalBets.asking',
   'finalBets.placed': 'finalBets.asking',
   finished: 'finished',
+  // Кот и аукцион: восстанавливаемся в узел resume, он сам выберет шаг по контексту.
+  'cat.resume': 'cat.resume',
+  'cat.announcing': 'cat.resume',
+  'cat.picking': 'cat.resume',
+  'cat.clarifying': 'cat.resume',
+  'cat.staking.asking': 'cat.resume',
+  'cat.staking.listening': 'cat.resume',
+  'cat.staking.clarifying': 'cat.resume',
+  'auction.resume': 'auction.resume',
+  'auction.announcing': 'auction.resume',
+  'auction.asking': 'auction.resume',
+  'auction.listening': 'auction.resume',
+  'auction.clarifying': 'auction.resume',
+  'auction.won': 'auction.resume',
+  specialAway: 'specialAway',
 }
 
 const questionPhases = new Set([
@@ -168,6 +184,9 @@ const questionPhases = new Set([
   'announcing',
   'turnCue',
   'finalBets.asking',
+  'cat.resume',
+  'auction.resume',
+  'specialAway',
 ])
 
 export function readSavedGame(storage: Storage = localStorage): SavedGame | null {
@@ -322,6 +341,7 @@ export function restoredMatch(pack: QuestionPack, saved: SavedMatch): Pick<
   | 'judgmentStatus'
   | 'resumePath'
   | 'statusLine'
+  | 'special'
 > {
   const roundIndex = pack.rounds.some((round) => round.index === saved.roundIndex)
     ? saved.roundIndex
@@ -338,6 +358,8 @@ export function restoredMatch(pack: QuestionPack, saved: SavedMatch): Pick<
   if (appeal && (questionById(pack.questions, appeal.questionId)?.roundIndex !== roundIndex || round?.kind === 'final')) appeal = null
   if (appeal?.activePlayerId !== null && appeal && phase === 'answering.waiting') phase = 'appealCue'
   if ((phase === 'appealCue' || phase === 'appealWindow') && !appeal) phase = 'choosing.listening'
+  const special = questionOk && saved.special?.questionId === saved.activeQuestionId ? saved.special : null
+  if ((phase === 'cat.resume' || phase === 'auction.resume' || phase === 'specialAway') && !special) phase = 'choosing.listening'
   const openQuestion = questionOk && questionPhases.has(phase)
 
   return {
@@ -363,6 +385,7 @@ export function restoredMatch(pack: QuestionPack, saved: SavedMatch): Pick<
     sayCloseGuess: phase === 'announcing' && openQuestion ? saved.sayCloseGuess : false,
     announceKind: phase === 'announcing' ? saved.announceKind : null,
     judgmentStatus: phase === 'announcing' ? saved.judgmentStatus : null,
+    special: openQuestion ? special : null,
     resumePath: phase,
     statusLine: statusFor(phase, pack.name, round?.name ?? 'Раунд', round?.kind === 'final', saved.activePlayerId),
   }
@@ -450,6 +473,7 @@ function matchFromContext(context: GameContext, phase: string): SavedMatch {
     announceKind: context.announceKind,
     judgmentStatus: context.judgmentStatus,
     phase,
+    special: context.special ? { ...context.special } : null,
   }
 }
 
@@ -572,6 +596,7 @@ function sanitize(value: unknown): SavedGame | null {
     announceKind,
     judgmentStatus,
     phase,
+    special: readSpecialState(record.special, roster),
   }
 }
 
@@ -660,4 +685,22 @@ function whole(value: unknown): number | null {
 
 function isPlayerId(value: unknown): value is PlayerId {
   return typeof value === 'number' && Number.isInteger(value) && value >= 1
+}
+
+/** Сохранённое состояние кота/аукциона; битое — null (игра продолжится с выбора). */
+function readSpecialState(value: unknown, roster: Set<number>): SpecialState | null {
+  if (!value || typeof value !== 'object') return null
+  const v = value as Record<string, unknown>
+  const id = (x: unknown) => typeof x === 'number' && roster.has(x)
+  const idOrNull = (x: unknown) => x === null || id(x)
+  const ids = (x: unknown) => Array.isArray(x) && x.every(id)
+  const num = (x: unknown) => typeof x === 'number' && Number.isFinite(x)
+  const options = Array.isArray(v.options) && v.options.every((o) => o && typeof o === 'object' &&
+    (((o as Record<string, unknown>).kind === 'pass') || (((o as Record<string, unknown>).kind === 'stake' || (o as Record<string, unknown>).kind === 'allIn') && num((o as Record<string, unknown>).amount))))
+  const ok = (v.kind === 'cat' || v.kind === 'auction') && typeof v.questionId === 'string' && id(v.giverId) && idOrNull(v.recipientId) &&
+    Array.isArray(v.stakeOptions) && v.stakeOptions.every(num) && (v.stake === null || num(v.stake)) && num(v.nominal) &&
+    ids(v.order) && ids(v.passed) && idOrNull(v.leaderId) && (v.bid === null || num(v.bid)) && typeof v.allIn === 'boolean' && options &&
+    Array.isArray(v.log) && v.log.every((line) => typeof line === 'string') && typeof v.unclear === 'string' &&
+    idOrNull(v.awayPlayerId) && (v.awayFrom === null || v.awayFrom === 'staking' || v.awayFrom === 'bidding' || v.awayFrom === 'answering') && idOrNull(v.awayNextChooser)
+  return ok ? (value as SpecialState) : null
 }
