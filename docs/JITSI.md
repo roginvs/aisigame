@@ -200,6 +200,8 @@ is mod_turncredentials or similar installed and configured?
 
 Это не nginx и не ошибка игры. Сигнализация уже жива: в том же логе есть `SASL authentication succeeded`, `Strophe connected` и Jabber ID. Для нашей схемы (JVB, `ENABLE_P2P=0`, открытый UDP 10000 и верный `JVB_ADVERTISE_IPS`) TURN не обязателен: медиа идёт на мост напрямую. Сообщение можно игнорировать, пока комната открывается и звук/видео доходят.
 
+Готовая инструкция coturn: [TURN.md](TURN.md).
+
 Если сигнализация есть, а медиа нет — сначала проверить `JVB_ADVERTISE_IPS` и UDP 10000 в файрволе, не TURN. Для Jitsi-медиа coturn может понадобиться, когда у игроков режут UDP к JVB (жёсткий NAT, сети «только TCP 443»). Тогда поднимают отдельный coturn и в `.env` рядом с остальными строками:
 
 ```bash

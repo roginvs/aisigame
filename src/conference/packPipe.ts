@@ -12,7 +12,16 @@ import { isConferenceMessage } from './messages.ts'
 import { PACK_CHANNEL_HIGH_WATER_BYTES, PACK_CHANNEL_LOW_WATER_BYTES } from './chunks.ts'
 
 const PACK_DC_LABEL = 'aisigame-pack'
-const ICE_SERVERS: RTCIceServer[] = [{ urls: 'stun:stun.l.google.com:19302' }]
+// TURN на fallout-nevada.ru (coturn, use-auth-secret). Логин/пароль выведены из static-auth-secret
+// для срока до 2100 года, см. docs/TURN.md.
+const ICE_SERVERS: RTCIceServer[] = [
+  { urls: 'stun:stun.l.google.com:19302' },
+  {
+    urls: ['turn:fallout-nevada.ru:3478?transport=udp', 'turn:fallout-nevada.ru:3478?transport=tcp'],
+    username: '4102444800:aisigame',
+    credential: 'sNgOnTytKaMZseeWPmUAl780Kb8=',
+  },
+]
 
 export type PackPipeLinkState = 'idle' | 'connecting' | 'open' | 'failed' | 'closed'
 
