@@ -12,7 +12,7 @@ export function meterLevel(samples: Uint8Array): number {
   return Math.min(1, rms * 4)
 }
 
-const WIDTH = 80
+const WIDTH = 160
 const HEIGHT = 20
 
 /**

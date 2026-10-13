@@ -36,7 +36,7 @@ h1, h2, p { margin: 0; }
 
 .model-meter {
   display: inline-block;
-  width: 80px;
+  width: 160px;
   height: 20px;
   vertical-align: middle;
   background: rgba(255, 255, 255, 0.06);
