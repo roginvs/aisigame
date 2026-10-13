@@ -24,6 +24,9 @@ export type PackTransferMaster = {
   start: () => void
   /** Новый endpoint того же клиента: прежние offer/ACK больше не относятся к его странице. */
   resetClient: (clientId: string) => void
+  /** WebRTC не поднялся: этот клиент получает offer/куски по Jitsi (как до a23ff71). */
+  useBridge: (clientId: string) => void
+  isBridge: (clientId: string) => boolean
   pumpClient: (clientId: string) => void
   handleAck: (clientId: string, nextIndex: number) => void
   dispose: () => void
@@ -43,6 +46,9 @@ export function createPackTransferMaster(input: {
   const chunks = splitChunks(input.bytes)
   const senders = new Map<string, ChunkSender>()
   const offered = new Set<string>()
+  const bridgeClients = new Set<string>()
+  const pipeFor = (clientId: string): PackClientPipe | undefined =>
+    bridgeClients.has(clientId) ? undefined : input.pipe
 
   function senderFor(clientId: string): ChunkSender {
     let sender = senders.get(clientId)
@@ -79,9 +85,10 @@ export function createPackTransferMaster(input: {
   }
 
   function sendChunkWire(clientId: string, chunk: SplitChunk): boolean {
-    if (input.pipe) {
-      if (!input.pipe.ready(clientId)) return false
-      return input.pipe.sendChunk(clientId, input.hash, chunk.index, chunk.total, chunk.bytes)
+    const pipe = pipeFor(clientId)
+    if (pipe) {
+      if (!pipe.ready(clientId)) return false
+      return pipe.sendChunk(clientId, input.hash, chunk.index, chunk.total, chunk.bytes)
     }
     const wire = chunkToWire(input.hash, chunk)
     const message: PackChunkMessage = {
@@ -95,17 +102,18 @@ export function createPackTransferMaster(input: {
   }
 
   function pump(clientId: string): void {
-    if (input.pipe && !input.pipe.ready(clientId)) return
+    const pipe = pipeFor(clientId)
+    if (pipe && !pipe.ready(clientId)) return
     if (!offered.has(clientId)) {
-      if (input.pipe) {
-        if (!input.pipe.canSend(clientId) || !offerViaPipe(clientId)) return
+      if (pipe) {
+        if (!pipe.canSend(clientId) || !offerViaPipe(clientId)) return
       } else {
         offerViaTransport(clientId)
       }
     }
     const sender = senderFor(clientId)
     for (;;) {
-      if (input.pipe && !input.pipe.canSend(clientId)) break
+      if (pipe && !pipe.canSend(clientId)) break
       const index = sender.nextToSend()
       if (index === null) break
       const chunk = chunks[index]
@@ -115,9 +123,10 @@ export function createPackTransferMaster(input: {
   }
 
   function pumpForClient(clientId: string): void {
-    if (input.pipe && !input.pipe.ready(clientId)) return
+    const pipe = pipeFor(clientId)
+    if (pipe && !pipe.ready(clientId)) return
     offered.delete(clientId)
-    if (input.pipe) {
+    if (pipe) {
       if (!offerViaPipe(clientId)) return
     } else {
       offerViaTransport(clientId)
@@ -129,7 +138,15 @@ export function createPackTransferMaster(input: {
     resetClient(clientId) {
       senders.delete(clientId)
       offered.delete(clientId)
+      bridgeClients.delete(clientId)
     },
+    useBridge(clientId) {
+      if (bridgeClients.has(clientId)) return
+      bridgeClients.add(clientId)
+      senders.delete(clientId)
+      pumpForClient(clientId)
+    },
+    isBridge: (clientId) => bridgeClients.has(clientId),
     start() {
       for (const clientId of input.targetClientIds()) pumpForClient(clientId)
     },
@@ -156,6 +173,7 @@ export function createPackTransferMaster(input: {
     dispose() {
       senders.clear()
       offered.clear()
+      bridgeClients.clear()
     },
   }
 }

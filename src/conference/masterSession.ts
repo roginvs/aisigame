@@ -96,6 +96,10 @@ export class MasterSession {
   private transferPace = new Map<string, TransferPace>()
   private packPipe: ReturnType<typeof createPackPipeHub> | null = null
   private usePackPipe = false
+  /** clientId → таймер fallback на Jitsi, если data channel не открылся за PACK_PIPE_FALLBACK_MS. */
+  private pipeFallbackTimers = new Map<string, number>()
+  private pipeOpened = new Set<string>()
+  private disposedFallback = false
   private statePublisher: ConferenceStatePublisher | null = null
   private traceCursor = 0
   private traceUnsub: () => void
@@ -128,6 +132,8 @@ export class MasterSession {
         authorityToken: this.authorityToken,
         sendSignal: (message) => this.transport.send(message),
         onOpen: (clientId) => {
+          this.pipeOpened.add(clientId)
+          if (this.packTransfer.isBridge(clientId)) return
           this.roster.updateProgress(clientId, { packPhase: 'downloading' })
           if (this.packRequested.has(clientId)) this.packTransfer.pumpClient(clientId)
           this.onRosterCb()
@@ -276,7 +282,31 @@ export class MasterSession {
     this.traceUnsub()
     this.unsub()
     this.packPipe?.dispose()
+    this.disposedFallback = true
+    for (const timer of this.pipeFallbackTimers.values()) window.clearTimeout(timer)
+    this.pipeFallbackTimers.clear()
     this.packTransfer.dispose()
+  }
+
+  private armPipeFallback(clientId: string): void {
+    if (this.pipeFallbackTimers.has(clientId) || this.packTransfer.isBridge(clientId)) return
+    this.pipeOpened.delete(clientId)
+    const timer = window.setTimeout(() => {
+      if (this.disposedFallback) return
+      // Канал так и не открылся (ни одного куска по WebRTC) — шлём пакет по Jitsi.
+      if (this.pipeOpened.has(clientId) || this.verified.has(clientId)) return
+      this.packTransfer.useBridge(clientId)
+      this.roster.updateProgress(clientId, { packPhase: 'downloading' })
+      this.onRosterCb()
+    }, PACK_PIPE_FALLBACK_MS)
+    this.pipeFallbackTimers.set(clientId, timer)
+  }
+
+  private clearPipeFallback(clientId: string): void {
+    const timer = this.pipeFallbackTimers.get(clientId)
+    if (timer !== undefined) window.clearTimeout(timer)
+    this.pipeFallbackTimers.delete(clientId)
+    this.pipeOpened.delete(clientId)
   }
 
   private applyPackAck(clientId: string, hash: string, nextIndex: number): void {
@@ -318,6 +348,7 @@ export class MasterSession {
         this.packTransfer.resetClient(message.clientId)
         this.packRequested.delete(message.clientId)
         this.packPipe?.reset(message.clientId)
+        this.clearPipeFallback(message.clientId)
       }
       if (this.gameStarted && message.clientId) {
         void this.addMidGamePlayer(message.clientId, message.name)
@@ -326,6 +357,7 @@ export class MasterSession {
         // Повторный hello (heartbeat) не сбрасывает percent/фазу — только поднимает peer при нужде.
         // Новому гостю upsertHello уже ставит packPhase: connecting.
         this.packPipe.ensure(message.clientId)
+        this.armPipeFallback(message.clientId)
       }
       if (this.packRequested.has(message.clientId)) {
         this.packTransfer.pumpClient(message.clientId)
@@ -646,6 +678,9 @@ export class MasterSession {
     )
   }
 }
+
+/** Сколько ждать WebRTC data channel до перехода на старую передачу кусками через Jitsi. */
+export const PACK_PIPE_FALLBACK_MS = 30_000
 
 function pipeStateToPhase(state: PackPipeLinkState): PackPhase {
   if (state === 'open') return 'downloading'

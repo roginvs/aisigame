@@ -297,8 +297,8 @@ export class JoinerSession {
     ) {
       return
     }
-    // В режиме pipe куски идут только по DC; по Bridge их игнорируем.
-    if (this.usePackPipe && (message.type === 'packOffer' || message.type === 'packChunk')) return
+    // Fallback: если WebRTC не поднялся за 30 с, мастер шлёт offer/куски по Jitsi — принимаем.
+    if (this.usePackPipe && (message.type === 'packOffer' || message.type === 'packChunk')) this.pipeState = 'open'
     if (message.type === 'snapshot' || message.type === 'packOffer') {
       if (!this.acceptMaster(message.authorityToken, senderId, true)) return
       if (!this.acceptMasterBuild(message.commit)) return

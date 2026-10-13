@@ -452,6 +452,66 @@ describe('MasterSession resume', () => {
     vi.unstubAllGlobals()
   })
 
+  it('fallback: если WebRTC не открылся за 30 с, пакет идёт кусками через Jitsi; открытый канал fallback не включает', () => {
+    const peers: { dc: { readyState: string; onopen: (() => void) | null } }[] = []
+    class FakePc {
+      dc = {
+        bufferedAmount: 0, bufferedAmountLowThreshold: 0, binaryType: 'arraybuffer', readyState: 'connecting',
+        onopen: null as (() => void) | null, onclose: null, onerror: null, onmessage: null, onbufferedamountlow: null,
+        send: vi.fn(), close: vi.fn(),
+      }
+      constructor() { peers.push(this) }
+      connectionState = 'new'
+      localDescription: unknown = null
+      onicecandidate: unknown = null
+      onconnectionstatechange: unknown = null
+      createDataChannel() { return this.dc }
+      async createOffer() { return { type: 'offer', sdp: 'v=0' } }
+      async setLocalDescription(desc: unknown) { this.localDescription = desc }
+      close = vi.fn()
+    }
+    vi.stubGlobal('RTCPeerConnection', FakePc)
+    const make = () => {
+      const actor = createActor(gameMachine)
+      actor.start()
+      const transport = new MemoryTransport()
+      new MasterSession({
+        transport,
+        client: { requestSpeech: vi.fn() } as unknown as GameVoice,
+        actor,
+        masterClientId: 'master-client',
+        masterName: 'Мастер',
+        pack: demoPack,
+        packBytes: new Uint8Array(CHUNK_BYTES * 3),
+        packHash: 'hash',
+        authorityToken: 'master-token',
+        onRoster: () => {},
+        usePackPipe: true,
+      })
+      return transport
+    }
+    const hello = { type: 'hello', clientId: 'guest-client', authToken: 'guest-token', name: 'Игрок' } as const
+    const bridged = (transport: MemoryTransport) =>
+      transport.sent.filter((m) => m.type === 'packOffer' || m.type === 'packChunk').map((m) => m.type)
+
+    const slow = make()
+    slow.receive(hello)
+    vi.advanceTimersByTime(29_000)
+    slow.receive(hello)
+    expect(bridged(slow)).toEqual([])
+    vi.advanceTimersByTime(1_000)
+    expect(bridged(slow)).toEqual(['packOffer', 'packChunk', 'packChunk', 'packChunk'])
+
+    peers.length = 0
+    const fast = make()
+    fast.receive(hello)
+    const peer = peers[0]!
+    peer.dc.readyState = 'open'
+    peer.dc.onopen?.()
+    vi.advanceTimersByTime(31_000)
+    expect(bridged(fast)).toEqual([])
+  })
+
   it('не перезапускает речь ведущей на каждом проценте загрузки', () => {
     const actor = createActor(gameMachine)
     actor.start()
