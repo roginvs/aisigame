@@ -1,5 +1,4 @@
 import { unlockAudio } from '../audio/beep.ts'
-import { speakExact } from '../audio/localSpeech.ts'
 import { gameConfig, hostInstructions } from '../config.ts'
 import { recordResponseUsage, resetUsage } from './usage.ts'
 import { logTrace, pushHostLine, pushPlayerLine, pushTrace } from '../debug/trace.ts'
@@ -30,7 +29,6 @@ type SpeechTurn = {
   expect?: string
   isolated: boolean
   retries: number
-  local: boolean
   ended: boolean
   liveResponseId: string | null
   dropResponseId: string | null
@@ -475,7 +473,6 @@ export class RealtimeClient {
     this.pendingSpeak = null
     this.clearFlushTimer()
     this.clearSpeechTimers()
-    window.speechSynthesis?.cancel()
     this.send({ type: 'response.cancel' })
     if (this.outputFlush !== 'inflight') this.sendOutputClear()
     this.playbackResponseId = null
@@ -506,7 +503,6 @@ export class RealtimeClient {
       expect,
       isolated,
       retries: 0,
-      local: false,
       ended: false,
       liveResponseId: null,
       dropResponseId: null,
@@ -858,7 +854,7 @@ export class RealtimeClient {
   }
 
   private onPlaybackStopped(event: LooseEvent): void {
-    if (!this.speech || this.speech.local) return
+    if (!this.speech) return
     const responseId = typeof event.response_id === 'string' ? event.response_id : ''
     if (responseId && responseId === this.speech.dropResponseId) {
       pushTrace('note', 'сброшено аудио не той реплики')
@@ -912,7 +908,7 @@ export class RealtimeClient {
 
   private rejectSpokenLine(responseId: string, said: string): void {
     const speech = this.speech
-    if (!speech?.expect || speech.local) return
+    if (!speech?.expect) return
     const heardId = responseId || speech.liveResponseId
     if (heardId && speech.dropResponseId === heardId) return
     speech.dropResponseId = heardId
@@ -933,12 +929,8 @@ export class RealtimeClient {
       return
     }
     this.sendOutputClear()
-    speech.local = true
-    pushTrace('note', `голос модели заменён на точную фразу: ${said}`)
-    this.onLink({ host: 'speaking' })
-    void speakExact(speech.expect).then(() => {
-      if (this.speech === speech) this.finishSpeech('local')
-    })
+    pushTrace('note', `модель не прочитала точную фразу; продолжаем по тексту на экране: ${said}`)
+    this.finishSpeech('screen-text')
   }
 
   private sendSpeech(instructions: string): boolean {
@@ -1004,10 +996,6 @@ export class RealtimeClient {
   }
 
   private onOutputCleared(event: LooseEvent): void {
-    if (this.speech?.local) {
-      this.outputFlush = 'idle'
-      return
-    }
     const responseId = typeof event.response_id === 'string' ? event.response_id : ''
     const decision = outputCut(this.cutState(), { kind: 'cleared', responseId })
     this.outputFlush = 'idle'
@@ -1028,7 +1016,7 @@ export class RealtimeClient {
   }
 
   private onTruncated(event: LooseEvent): void {
-    if (!this.speech || this.speech.local) return
+    if (!this.speech) return
     const itemId = typeof event.item_id === 'string' ? event.item_id : ''
     if (outputCut(this.cutState(), { kind: 'truncated', itemId }) !== 'finish') return
     this.finishSpeech('truncated')
@@ -1115,12 +1103,12 @@ export class RealtimeClient {
     if (this.hardTimer !== null) window.clearTimeout(this.hardTimer)
     this.hardTimer = window.setTimeout(() => {
       const speech = this.speech
-      if (speech?.expect && !speech.done && !speech.local) {
+      if (speech?.expect && !speech.done) {
         speech.retries = 1
         this.rejectSpokenLine(speech.liveResponseId ?? '', '')
         return
       }
-      if (speech && !speech.started && !speech.local && !this.canSend()) {
+      if (speech && !speech.started && !this.canSend()) {
         this.dropLink('Связь с ведущей прервалась. Начните игру ещё раз.')
         return
       }

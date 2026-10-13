@@ -96,6 +96,33 @@ describe('host audio completion', () => {
     return { finished, sent, ask, done, started, stopped, feed, client }
   }
 
+  it('after a failed retry continues once without invoking browser speech', () => {
+    const { finished, ask, feed } = open()
+    const synthSpeak = vi.fn()
+    vi.stubGlobal('speechSynthesis', { speak: synthSpeak, cancel: vi.fn() })
+    ask('Посмотрите на картинку.')
+    for (const id of ['bad-1', 'bad-2']) {
+      feed({ type: 'response.created', response: { id } })
+      feed({ type: 'response.output_audio_transcript.done', response_id: id, transcript: 'Совсем другой вопрос.' })
+      if (id === 'bad-1') {
+        expect(finished).toEqual([])
+        vi.advanceTimersByTime(outputFlushWaitMs)
+      }
+    }
+    expect(finished).toEqual(['read'])
+    expect(synthSpeak).not.toHaveBeenCalled()
+    feed({ type: 'output_audio_buffer.stopped', response_id: 'bad-2' })
+    vi.advanceTimersByTime(gameConfig.hostAudioHardLimitMs)
+    expect(finished).toEqual(['read'])
+  })
+
+  it('a silent exact reading reaches completion without browser speech', () => {
+    const { finished, ask } = open()
+    ask('Посмотрите на картинку.')
+    vi.advanceTimersByTime(gameConfig.hostAudioHardLimitMs)
+    expect(finished).toEqual(['read'])
+  })
+
   it('снимает 8 с, когда звук начался после конца генерации, и ждёт stopped', () => {
     const { finished, sent, ask, done, started, stopped } = open()
     ask()

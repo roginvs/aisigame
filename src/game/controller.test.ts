@@ -82,7 +82,6 @@ async function boot(client: MockRealtimeClient, questions = pack) {
   vi.stubGlobal('window', {
     setTimeout: (handler: TimerHandler, timeout?: number) => globalThis.setTimeout(handler, timeout),
     clearTimeout: (id: number) => globalThis.clearTimeout(id),
-    speechSynthesis: { cancel() {} },
   })
   const actor = createActor(gameMachine)
   actor.start()
