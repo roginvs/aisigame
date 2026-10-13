@@ -30,6 +30,8 @@ test('ключи моделей помнятся по отдельности', a
 
 test('верный ответ голосом', async ({ page }) => {
   await startDemo(page)
+  await expect(page.locator('[data-air="link"]')).toHaveCount(1)
+  await expect(page.locator('[data-air="mic"], [data-air="host"]')).toHaveCount(0)
   await hear(page, 'Текст 100')
   await expect(page.getByRole('heading', { name: 'Как звали первого римского императора?' })).toBeVisible()
   await buzz(page, 'Игрок 1')
