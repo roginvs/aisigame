@@ -10,6 +10,17 @@ const seasons = {
 }
 
 describe('settleJudgment', () => {
+  it('accepts a valid alternative title not listed in package answers', () => {
+    const result = settleJudgment({
+      ...seasons, activeQuestionId: 'book', reportedQuestionId: 'book',
+      reportedPlayerId: 2, reportedAttemptId: 2,
+      questionText: 'Назовите роман Булгакова', answers: ['Мастер и Маргарита'],
+      status: 'correct', heard: 'Белая гвардия', transcript: 'Белая гвардия',
+      reason: '«Белая гвардия» — тоже роман Булгакова и удовлетворяет вопросу.',
+    })
+    expect(result.status).toBe('correct')
+  })
+
   it('не засчитывает Бетховена за «Времена года», если модель оценила другой вопрос', () => {
     const settled = settleJudgment({
       ...seasons,

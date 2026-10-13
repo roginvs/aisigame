@@ -23,6 +23,11 @@ function entry(patch: Partial<RosterEntry> & Pick<RosterEntry, 'clientId' | 'nam
   }
 }
 
+it('includes explicit public chat context in lobby cues', () => {
+  const text = lobbySpeechInstructions({ kind: 'idle', packName: 'Демо', packSummary: 'Один раунд', roster: [], publicContext: 'Маша: CHAT_MARKER' })
+  expect(text).toContain('Маша: CHAT_MARKER')
+})
+
 describe('lobbySpeechInstructions', () => {
   it('разрешает коротко участвовать в разговоре игроков без длинного монолога', () => {
     const instructions = lobbySpeechInstructions({

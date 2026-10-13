@@ -4,6 +4,10 @@ import { gameConfig } from '../config.ts'
 import { noteLink, pushJudgeLine, pushPlayerLine, pushTrace } from '../debug/trace.ts'
 import type { GameVoice, LinkStatus, ToolCall } from '../realtime/client.ts'
 import { verbatimSpeech, withPlayNote } from '../realtime/speechMatch.ts'
+import type { ConferenceHistoryMessage } from '../conference/messages.ts'
+import { conversationLineFromTrace } from '../conference/traceConversation.ts'
+import { getTrace } from '../debug/trace.ts'
+import { withCommentary } from './commentary.ts'
 import { parseBet } from './bet.ts'
 import { questionSpeech, spokenChoiceForms } from './choices.ts'
 import { matchSpokenCell, selectionChatText } from './choiceMatch.ts'
@@ -52,8 +56,18 @@ export function attachController(options: {
   voiceAlreadyConnected?: () => boolean
   /** Дополнительные реплики конференции, которые не меняют состояние партии. */
   onActions?: (actions: GameControllerActions | null) => void
+  getPublicHistory?: () => readonly ConferenceHistoryMessage[] | null
 }): () => void {
   const { actor, client, getApiKey, setLink, keepVoiceSession, voiceAlreadyConnected, onActions } = options
+  let historyStartId = getTrace().at(-1)?.id ?? 0
+  function publicHistory(): readonly ConferenceHistoryMessage[] {
+    const provided = options.getPublicHistory?.()
+    if (provided) return provided
+    return getTrace().filter((entry) => entry.id > historyStartId).flatMap((entry) => {
+      const line = conversationLineFromTrace(entry)
+      return line ? [{ kind: 'conversation' as const, ...line }] : []
+    })
+  }
   let previousPath = statePath(actor.getSnapshot().value)
   let connectToken = 0
   let speechTurn = 0
@@ -322,6 +336,7 @@ export function attachController(options: {
     }
     if (!isAnnouncingPath(path)) dropAnnounceWait()
     if (path === 'connecting') {
+      historyStartId = getTrace().at(-1)?.id ?? 0
       const token = ++connectToken
       const apiKey = getApiKey().trim()
       if (!apiKey) {
@@ -503,7 +518,7 @@ export function attachController(options: {
   function speakWhileListening(purpose: SpeechPurpose, instructions: string, expect?: string): void {
     speechTurn += 1
     // conversation:none — подсказка про микрофон и уточнение выбора не продолжают лобби/партию.
-    client.requestSpeech(purpose, speechTurn, instructions, expect, true)
+    client.requestSpeech(purpose, speechTurn, expect ? instructions : withCommentary(instructions, actor.getSnapshot().context, publicHistory()), expect, true)
     client.setMicEnabled(true)
   }
 
@@ -516,7 +531,7 @@ export function attachController(options: {
   ): void {
     speechTurn += 1
     client.setMicEnabled(false)
-    client.requestSpeech(purpose, speechTurn, instructions, expect, isolated, chatNote)
+    client.requestSpeech(purpose, speechTurn, expect ? instructions : withCommentary(instructions, actor.getSnapshot().context, publicHistory()), expect, isolated || !expect, chatNote)
   }
 
   function requestSelection(context: GameContext): void {
@@ -1075,16 +1090,16 @@ questionId: ${context.activeQuestionId ?? ''}
 playerId: ${context.activePlayerId ?? ''}
 attemptId: ${context.attemptId}
 Вопрос: ${question ? questionSpeech(question) : ''}
-Эталон, с которым нужно сравнить смысл: ${(question?.answers ?? []).join('; ')}${question?.choices?.length ? '\nБуква варианта и текст этого варианта — один и тот же ответ. Текст другого варианта — неправильный ответ.' : ''}
+Эталонные ответы пакета (список может быть неполным): ${(question?.answers ?? []).join('; ')}${question?.choices?.length ? '\nБуква варианта и текст этого варианта — один и тот же ответ. Текст другого варианта — неправильный ответ.' : ''}
 Верни те же questionId, playerId и attemptId.
-correct — смысл реплики совпал с эталоном этого вопроса, даже другими словами. Повтор самого эталона — то же имя, та же фраза или та же буква — тоже correct. Не требуй объяснять код, загадку или условие вопроса, если эталон уже назван. Слово эталона, сказанное по слогам или с паузами внутри («пы ле со сел» при «пылесосел»), — это то же слово: correct, не needs_clarification и не другой ответ.
+correct — реплика верно отвечает именно на данный вопрос: совпадает с эталоном по смыслу или является другим фактически верным ответом, удовлетворяющим всем ограничениям вопроса, даже если его нет в списке. Не отвергай только из-за отсутствия в эталонах. Не додумывай условия и не принимай просто похожее/связанное слово. Если не можешь уверенно подтвердить альтернативу, верни ambiguous. Повтор самого эталона — то же имя, та же фраза или та же буква — тоже correct. Не требуй объяснять код, загадку или условие вопроса, если эталон уже назван. Слово эталона, сказанное по слогам или с паузами внутри («пы ле со сел» при «пылесосел»), — это то же слово: correct, не needs_clarification и не другой ответ.
 Если эталон — число и пояснение, как «0. На берёзе нет яблок», реплика верна, когда игрок даёт это число или ту же мысль другими словами («нисколько», «ноль», «яблок нет», «на берёзе яблоки не растут»), без требования повторить устройство пояснения из пакета и без incorrect только потому, что игрок объяснил загадку, а не назвал цифру.
-incorrect — смысл другой или реплика отвечает на другой вопрос. Совсем другое слово, даже короткое, — тоже incorrect, даже если оно тоже имя.
+incorrect — смысл другой или реплика отвечает на другой вопрос. Другое слово/имя — incorrect, если оно не удовлетворяет условиям данного вопроса; само отличие от эталона не доказывает ошибку.
 unintelligible — реплику не разобрать.
 ambiguous — нельзя уверенно решить.
 needs_clarification — реплика созвучна эталону и могла быть тем же ответом, который распознавание исказило. Это не correct и не incorrect. Один звук или одна буква не туда: «Читов» при «Титов» или при «Герман Титов». То же имя, но другая запись: «Твэнсдей» или «Венсдей» при «Уэнсдэй». Короткая фраза, которую расслышали одним похожим словом: «Новоселов» при «Ногу свело».
 heard — короткая запись реплики выше.
-reason — одна фраза, почему выбран статус. Не называй другое произведение и другой ответ.
+reason — одна фраза, почему выбран статус. При альтернативном верном ответе объясни, почему реплика удовлетворяет условиям данного вопроса. Не ссылайся на посторонний вопрос.
 `.trim()
 }
 

@@ -26,6 +26,7 @@ import type { ConferenceHandle, ConferenceTile } from './conference/media.ts'
 import { createConferenceTransport } from './conference/transportFactory.ts'
 import { putPack, getPack } from './conference/packDb.ts'
 import { ownPackId, packCatalog } from './game/catalog.ts'
+import { messageRingEntries } from './conference/messageRing.ts'
 import { attachController, type GameControllerActions } from './game/controller.ts'
 import { defaultPlayerNames, playersFromNames } from './game/players.ts'
 import { gameMachine, statePath } from './game/machine.ts'
@@ -260,6 +261,9 @@ export default function App() {
       actor,
       client,
       getApiKey: () => keyRef.current,
+      getPublicHistory: () => masterSessionRef.current
+        ? messageRingEntries(masterHistoryRef.current).map(({ message }) => message)
+        : null,
       setLink,
       keepVoiceSession: () => conferenceLobbyRef.current,
       voiceAlreadyConnected: () => voiceConnectedRef.current,

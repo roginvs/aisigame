@@ -18,6 +18,7 @@ export type LobbySpeechFacts = {
   packSummary: string
   roster: RosterEntry[]
   waitingForMaster?: boolean
+  publicContext?: string
 }
 
 /** Видимые гости (не мастер): все скачали и нажали «готов». */
@@ -98,6 +99,7 @@ export function lobbySpeechInstructions(facts: LobbySpeechFacts): string {
   if (facts.waitingForMaster) {
     lines.push('Мастер-игрок ещё не в комнате — можно коротко сказать, что ждём его.')
   }
+  if (facts.publicContext) lines.push(facts.publicContext)
   return lines.join('\n')
 }
 
@@ -106,7 +108,7 @@ let lobbyTurn = 0
 export function requestLobbySpeech(client: GameVoice, facts: LobbySpeechFacts): void {
   lobbyTurn += 1
   const instructions = lobbySpeechInstructions(facts)
-  client.requestSpeech('lobby', lobbyTurn, instructions)
+  client.requestSpeech('lobby', lobbyTurn, instructions, undefined, true)
 }
 
 export function packLobbySummary(pack: QuestionPack): string {

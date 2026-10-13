@@ -26,6 +26,8 @@ import { ConferenceRoster } from './roster.ts'
 import type { ConferenceTransport } from './transport.ts'
 import { PRESENCE_HEARTBEAT_MS, PRESENCE_STALE_MS } from './presence.ts'
 import { appendRemoteDebug, clearRemoteDebug, getTrace, subscribeTrace } from '../debug/trace.ts'
+import { messageRingEntries } from './messageRing.ts'
+import { commentaryContext } from '../game/commentary.ts'
 import { emptyMessageRing } from './messageRing.ts'
 import { ConferenceStatePublisher } from './stateProtocol.ts'
 import { conversationLineFromTrace } from './traceConversation.ts'
@@ -534,6 +536,8 @@ export class MasterSession {
       packName: this.pack.name,
       packSummary: packLobbySummary(this.pack),
       roster: this.roster.list(),
+      publicContext: commentaryContext(null,
+        messageRingEntries(this.statePublisher?.history() ?? this.initialHistory).map(({ message }) => message)),
     })
     this.scheduleLobbySpeech(LOBBY_IDLE_INTERVAL_MS)
   }

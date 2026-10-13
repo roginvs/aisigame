@@ -1,6 +1,7 @@
 import { createActor } from 'xstate'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { gameConfig } from '../config.ts'
+import type { ConferenceHistoryMessage } from '../conference/messages.ts'
 import { getTrace } from '../debug/trace.ts'
 import type { ToolCall } from '../realtime/client.ts'
 import { MockRealtimeClient } from '../realtime/mockClient.ts'
@@ -77,7 +78,7 @@ function judgeLines(): string[] {
   })
 }
 
-async function boot(client: MockRealtimeClient, questions = pack) {
+async function boot(client: MockRealtimeClient, questions = pack, getPublicHistory?: () => readonly ConferenceHistoryMessage[]) {
   vi.useFakeTimers()
   vi.stubGlobal('window', {
     setTimeout: (handler: TimerHandler, timeout?: number) => globalThis.setTimeout(handler, timeout),
@@ -90,6 +91,7 @@ async function boot(client: MockRealtimeClient, questions = pack) {
     actor,
     client,
     getApiKey: () => 'test-key',
+    getPublicHistory,
     setLink: () => {},
     onActions: (next) => {
       actions = next
@@ -112,6 +114,29 @@ describe('attachController choice', () => {
   afterEach(() => {
     vi.useRealTimers()
     vi.unstubAllGlobals()
+  })
+
+  it('shares chat with free cues but keeps reading and judgment isolated', async () => {
+    const client = new MockRealtimeClient()
+    const speech = vi.spyOn(client, 'requestSpeech')
+    const tools = vi.spyOn(client, 'requestTool')
+    const { actor, stop } = await boot(client, pack, () => [{ kind: 'chat', name: 'Маша', text: 'CHAT_MARKER' }])
+    expect(speech.mock.calls[0]?.[2]).toContain('CHAT_MARKER')
+    actor.send({ type: 'QUESTION_SELECTED', themeId: 's', value: 400 })
+    await vi.advanceTimersByTimeAsync(gameConfig.cellFlashMs + 100)
+    const read = speech.mock.calls.find(([purpose]) => purpose === 'read')
+    expect(read?.[2]).not.toContain('CHAT_MARKER')
+    actor.send({ type: 'BUZZER_PRESSED', playerId: 1 })
+    client.hear('ответ', 1200)
+    await vi.advanceTimersByTimeAsync(100)
+    const judge = tools.mock.calls.find(([purpose]) => purpose === 'judge')
+    expect(judge?.[3]).toContain('Вопрос: Вопрос')
+    expect(judge?.[3]).toContain('ответ')
+    expect(judge?.[3]).toContain('другим фактически верным ответом')
+    expect(judge?.[3]).not.toContain('CHAT_MARKER')
+    expect(judge?.[4]).toBe(true)
+    stop()
+    actor.stop()
   })
 
   it('оставляет выбор открытым, если распознавание повторило каталог', async () => {

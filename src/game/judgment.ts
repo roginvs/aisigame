@@ -25,7 +25,7 @@ export function settleJudgment(input: {
   if (!sameQuestion) {
     status = heard ? (sharesAnswer(heard, input.answers) ? 'correct' : 'incorrect') : 'unintelligible'
     reason = 'Оценка ссылалась на другой вопрос. Игра сверила реплику с эталоном этой ячейки.'
-  } else if (status === 'correct' && quotesForeignTitle(reason, input.questionText, input.answers)) {
+  } else if (status === 'correct' && quotesForeignTitle(reason, input.questionText, [...input.answers, heard])) {
     status = 'incorrect'
     reason = 'Пояснение назвало другой вопрос. Для этой ячейки ответ не засчитывается.'
   } else if (status === 'correct' && !heard) {
