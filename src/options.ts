@@ -62,3 +62,6 @@ export const {
   timeoutBeepMs,
   answerMediaHoldMs,
 } = matchTimings
+
+/** Native audio judging budgets; the game's judgeMs is unchanged. */
+export const audioJudgmentTimings = { readyMs: 1500, responseMs: 12_000 } as const

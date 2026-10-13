@@ -62,3 +62,18 @@ describe('mock judgment', () => {
 function judgment(heard: string, answers: string): string {
   return `questionId: q1\nplayerId: 1\nattemptId: 1\nРеплика игрока: «${heard}»\nЭталон, с которым нужно сравнить смысл: ${answers}`
 }
+
+it('mock silence cue wins over negative constraints and past commentary', async () => {
+  vi.useFakeTimers()
+  vi.stubGlobal('window', { setTimeout: globalThis.setTimeout, clearTimeout: globalThis.clearTimeout })
+  const client = new MockRealtimeClient()
+  const { getTrace } = await import('../debug/trace.ts')
+  const cursor = getTrace().at(-1)?.id ?? 0
+  client.requestSpeech('announce', 1,
+    'Ситуация: Исход: молчание.\nОграничения: Не говори, что ответ неверный.\n\nПубличный контекст\nИсход: верно. Старый ответ верный.')
+  await vi.advanceTimersByTimeAsync(50)
+  const lines = getTrace().filter((e) => e.id > cursor && e.kind === 'chat').map((e) => (e.detail as { text: string }).text)
+  expect(lines).toEqual(['Ничего не услышала, минус.'])
+  client.stopSession()
+  vi.useRealTimers()
+})

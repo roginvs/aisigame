@@ -59,6 +59,7 @@ import {
   writeProviderKey,
   writeVoiceModelId,
 } from './realtime/models.ts'
+import { audioJudgmentCapable, judgmentModeFromUrl, writeJudgmentMode, type JudgmentInputMode } from './realtime/judgmentRequest.ts'
 import { createVoice } from './realtime/voice.ts'
 import { emptyMessageRing, readMessageRing } from './conference/messageRing.ts'
 import type { ConferenceMessageRing, ConferenceSnapshot } from './conference/messages.ts'
@@ -102,6 +103,17 @@ function questionsLabel(count: number): string {
 export default function App() {
   const [snapshot, send, actor] = useMachine(gameMachine)
   const [modelId, setModelId] = useState(() => (queryMock ? 'mock' : readVoiceModelId()))
+  const [judgmentMode, setJudgmentMode] = useState<JudgmentInputMode>(() => judgmentModeFromUrl(window.location.href, modelId, localStorage))
+  const judgmentModeRef = useRef(judgmentMode)
+  function changeAudioJudgment(enabled: boolean): void {
+    const mode = enabled ? 'audio' : 'text'
+    judgmentModeRef.current = mode
+    setJudgmentMode(mode)
+    writeJudgmentMode(mode, localStorage)
+    const url = new URL(window.location.href)
+    url.searchParams.delete('judge')
+    window.history.replaceState(window.history.state, '', url)
+  }
   const [apiKey, setApiKey] = useState(() => readProviderKey('openai'))
   const [xaiKey, setXaiKey] = useState(() => readProviderKey('xai'))
   const [googleKey, setGoogleKey] = useState(() => readProviderKey('google'))
@@ -252,6 +264,7 @@ export default function App() {
     voiceClientRef.current = client
     if (client instanceof MockRealtimeClient) {
       window.__aisigame = {
+        hearAudio: (audioText, asrText, durationMs) => client.hearAudio(audioText, asrText, durationMs),
         hear: (text, durationMs) => client.hear(text, durationMs),
         setSpeechMs: (ms) => client.setSpeechMs(ms),
         flipPackByte: () => joinerFlipPackRef.current?.(),
@@ -261,6 +274,7 @@ export default function App() {
       actor,
       client,
       getApiKey: () => keyRef.current,
+      getJudgmentMode: () => judgmentModeRef.current,
       getPublicHistory: () => masterSessionRef.current
         ? messageRingEntries(masterHistoryRef.current).map(({ message }) => message)
         : null,
@@ -1297,6 +1311,9 @@ export default function App() {
       onNextRound={() => send({ type: 'NEXT_ROUND' })}
       modelId={modelId}
       onModel={switchModel}
+      audioJudgment={judgmentMode === 'audio'}
+      audioJudgmentSupported={modelId === 'mock' || audioJudgmentCapable(modelId)}
+      onAudioJudgmentChange={conferenceRole !== 'joiner' ? changeAudioJudgment : undefined}
       conference={
         conferenceRole
           ? {

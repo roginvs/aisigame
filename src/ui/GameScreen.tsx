@@ -115,6 +115,9 @@ export function GameScreen(props: {
   onNextRound: () => void
   modelId: string
   onModel: (id: string) => void
+  audioJudgment?: boolean
+  audioJudgmentSupported?: boolean
+  onAudioJudgmentChange?: (value: boolean) => void
   conference?: {
     layout: boolean
     lobby: boolean
@@ -628,6 +631,9 @@ export function GameScreen(props: {
                 : (conference?.mediaError ?? context.error)
             }
             conferenceSpeaking={conference?.hostSpeaking}
+            audioJudgment={props.audioJudgment}
+            audioJudgmentSupported={props.audioJudgmentSupported}
+            onAudioJudgmentChange={props.onAudioJudgmentChange}
             hearTurnOnly={conference?.hearTurnOnly}
             onHearTurnOnlyChange={conference?.isMaster ? conference.onHearTurnOnlyChange : undefined}
           />

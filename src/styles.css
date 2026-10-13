@@ -1310,10 +1310,22 @@ button.continue-with-file .continue-file {
   padding-bottom: 32px;
 }
 
-.host-hear-less {
+.host-with-two-switches {
+  padding-bottom: 62px;
+}
+
+.host-switches {
   position: absolute;
   right: 10px;
   bottom: 8px;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 4px;
+}
+
+.host-hear-less {
+  position: relative;
   display: inline-flex;
   align-items: center;
   gap: 8px;
@@ -1332,6 +1344,23 @@ button.continue-with-file .continue-file {
     color 160ms ease,
     border-color 160ms ease,
     background 160ms ease;
+}
+
+.host-hear-less.is-disabled {
+  opacity: 0.55;
+  cursor: default;
+}
+
+/* The real checkbox spans the visible switch, including keyboard/touch targeting. */
+.host-switch-input {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  margin: 0;
+  opacity: 0;
+  cursor: inherit;
+  z-index: 1;
 }
 
 .host-hear-less:hover {

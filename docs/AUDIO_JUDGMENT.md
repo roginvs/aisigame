@@ -1,12 +1,12 @@
 # План: оценка ответа по аудио текущей попытки
 
-Дата: 13 октября 2026. База: master `0195e6d` (публичный контекст и альтернативные верные ответы). Статус: **план готов к реализации; код не изменён**. Основной этап — OpenAI; Grok/Gemini сохраняют текущий текстовый путь до подтверждения соответствующих возможностей. Решения продукта ниже зафиксированы; живые API-проверки — обязательные этапы приёмки, а не обещание качества.
+Дата: 13 октября 2026. База: master `0195e6d` (публичный контекст и альтернативные верные ответы). Статус: **runtime реализован; аудио включено по умолчанию по уточнению автора**. Реализация: 13 октября 2026. Основной этап — OpenAI; Grok/Gemini сохраняют текущий текстовый путь до подтверждения соответствующих возможностей. Ниже зафиксированы реализованные контракты и критерии дальнейшей приёмки; живые API-проверки — обязательные этапы приёмки, а не обещание качества.
 
 ## 1. Цель, реализуемость и границы
 
 Игрок говорит в существующий поток; после конца принятой реплики судья получает **аудио этой реплики + исходный вопрос + эталонные ответы**. Текст ASR не должен подменять аудио при выставлении результата. Отдельная запись файла, MediaRecorder, загрузка после ответа, новый backend и второе микрофонное разрешение не нужны для основного OpenAI-пути.
 
-Это умеренная по объёму, но чувствительная к событиям переделка OpenAI: генератор изолированного запроса, готовность серверного audio item, выбор источника heard, маршрутизация ответов и проверки гонок. Универсальный нативный путь всех провайдеров значительно сложнее и **не входит** в первый этап. Готовность API-примитива подтверждена документацией; работоспособность конкретных моделей/режимов проверяется live-smoke до включения по умолчанию.
+Это умеренная по объёму, но чувствительная к событиям переделка OpenAI: генератор изолированного запроса, готовность серверного audio item, выбор источника heard, маршрутизация ответов и проверки гонок. Универсальный нативный путь всех провайдеров значительно сложнее и **не входит** в первый этап. Готовность API-примитива подтверждена документацией; работоспособность конкретных моделей/режимов ещё требует live-smoke. Автор явно попросил включить новый путь по умолчанию и добавить UI-откат; это уточнение заменяет прежний rollout gate, но не подтверждает живую точность.
 
 Остаются прежними: XState — источник счёта; questionId/playerId/attemptId/turn guards; смысловая оценка и допустимые альтернативы; ordinary/final правила текущего кода; ранняя кнопка, фальстарт, 13/5/10/20 секунд; объявление после принятого результата; текст вопроса на экране; изолированное чтение без браузерного TTS. Выбор ячейки и ставки остаются по транскрипту. Свободные реплики получают публичную историю, судья её не получает.
 
@@ -22,7 +22,7 @@
 - [xAI: Voice reference](https://docs.x.ai/developers/rest-api-reference/inference/voice): streaming audio, commit/VAD, transcript и response events есть; точный аналог item_reference + stateless custom input в изученной справке не подтверждён.
 - [Google: Live protocol](https://ai.google.dev/api/live) и [capabilities](https://ai.google.dev/gemini-api/docs/live-api/capabilities): realtimeInput — поток, clientContent дополняет текущую историю. Сочетание потокового аудио и добавленного текстового хода не даёт само по себе изолированный серверный audio item. Отдельный эквивалент OpenAI reference-пути не установлен.
 
-В коде сейчас:
+В исходном коде базы `0195e6d` до реализации:
 
 1. `client.ts` отправляет WebRTC-аудио OpenAI; рядом включён `gpt-4o-mini-transcribe` с фазовыми подсказками.
 2. `controller.ts` по speech_stopped принимает конкретный item, записывает answerItemId и переводит машину в judging.
@@ -36,7 +36,7 @@
 
 | Провайдер / модели проекта | Нативная изолированная аудиооценка | Режим первого этапа |
 | --- | --- | --- |
-| OpenAI `gpt-realtime-2.1-mini`, `gpt-realtime-2.1` | item_reference + explicit input; проверить каждую модель live | text по умолчанию во время внедрения; затем shadow/audio только для прошедшей проверку модели |
+| OpenAI `gpt-realtime-2.1-mini`, `gpt-realtime-2.1` | item_reference + explicit input; проверить каждую модель live | audio по умолчанию по решению автора; UI-переключатель возвращает text, shadow доступен через query |
 | xAI `grok-voice-latest`, `grok-voice-think-fast-2.0` | Нельзя выводить поддержку из схожести JSON | text; capability=false, никаких неизвестных reference-полей в сокет |
 | Gemini `gemini-3.8-live`, Extended Thinking | Локальный id и persistent clientContent не обеспечивают нужной изоляции | text; capability=false; существующие ограничения изоляции остаются документированными |
 | mock | Нет настоящего аудио | Детерминированная имитация lifecycle/reference/results для тестов; явно не проверяет качество распознавания |
@@ -45,15 +45,15 @@
 
 ## 4. Режимы запуска и rollout
 
-Один тип `JudgmentInputMode = 'text' | 'shadow' | 'audio'`. Для разработки — явный query `?judge=text|shadow|audio`, по умолчанию text до приёмки. Производственный default хранить в конфигурации по точному model id, не одной галкой «любой OpenAI». Несовместимый provider/model → text с trace о причине. Query не даёт unsupported-провайдеру фиктивную capability.
+Один тип `JudgmentInputMode = 'text' | 'shadow' | 'audio'`. Для разработки сохраняется явный query `?judge=text|shadow|audio`. По уточнению автора production preference по умолчанию audio; на неподдержанном provider и в финале фактический путь остаётся text. Производственный default хранить в конфигурации по точному model id, не одной галкой «любой OpenAI». Несовместимый provider/model → text с trace о причине. Query не даёт unsupported-провайдеру фиктивную capability.
 
 - **text:** нынешний судья; новый код сборки аудио не влияет на счёт.
 - **shadow:** text authoritative; отдельный аудиокандидат только для сравнения. Не создаёт ANSWER_JUDGED, не меняет счёт/chooser/missedIds и не пишет вторую оценку в публичный чат. Не задерживает объявления/перехват.
 - **audio:** результат оценки аудио authoritative. ASR параллельно для экрана/диагностики, не обязательная предпосылка генерации оценки. При технической невозможности — не больше одного text fallback той же попытки в пределах её judging deadline.
 
-Порядок поставки: lifecycle и unit → text-compatible dispatcher → shadow live → audio opt-in live → default audio у конкретной прошедшей модели. Rollback `judge=text`/конфигурацией без миграции партии. Не включать default по результатам только unit-тестов.
+Уточнение автора 13 октября: новый путь включён по умолчанию; рядом с «Меньше слышать» добавлен «Оценивать по аудио». Выключение возвращает text без переподключения и применяется со следующей попытки ответа. Preference сохраняется на этом устройстве в aisigame.judgmentInputMode; при смене провайдера не теряется. Неподдержанная модель показывает выключенный disabled switch с title о причине. Joiner переключателем не управляет. Query имеет приоритет при загрузке; ручное переключение снимает judge query. Shadow/live-приёмка остаются способами проверки качества; улучшение точности не обещано. Откат также доступен через `?judge=text`.
 
-Каждый шаг — отдельный проверяемый commit: (1) реестр/capabilities без изменения запросов; (2) dispatcher и адресная отмена с прежним text; (3) reference builder + source-aware settlement/UI, audio только opt-in; (4) независимый shadow и диагностика сравнения; (5) live fixtures/измерения и точечная конфигурация default. После каждого шага проходят существующие unit/build и новые проверки соответствующего слоя. Изменение правил unclear/апелляций не смешивать с этими commits.
+Первоначальная последовательность работ (уточнена решением автора о default audio): (1) реестр/capabilities без изменения запросов; (2) dispatcher и адресная отмена с прежним text; (3) reference builder + source-aware settlement/UI, audio и UI-откат; (4) независимый shadow и диагностика сравнения; (5) live fixtures/измерения и точечная конфигурация default. После каждого шага проходят существующие unit/build и новые проверки соответствующего слоя. Изменение правил unclear/апелляций не смешивать с этими commits.
 
 ## 5. Поток попытки (OpenAI)
 
@@ -84,21 +84,19 @@ Audio item — вся принятая utterance. Открытие кнопки 
 
 ```ts
 type AudioReference = { itemId: string; sessionGeneration: number }
-type AudioJudgeCapabilities = { isolatedAudioReference: boolean; parallelOutOfBand: boolean }
+type JudgmentCapabilities = { isolatedAudioReference: boolean; parallelOutOfBand: boolean; model: string }
 type JudgeRequestContext = {
   requestId: string
-  sessionGeneration: number
   questionId: string
   playerId: number
   attemptId: number
   turn: number
-  source: 'text' | 'audio'
   role: 'primary' | 'shadow'
-  audio?: AudioReference
+  audio: AudioReference
 }
 ```
 
-`GameVoice` получает `judgmentCapabilities()` и `waitForAudioItem(refId, deadlineAt, signal?)`; `requestTool` получает optional последний параметр JudgeRequestContext, чтобы существующие calls/mocks не сломались. Для shadow выделить отдельный `requestShadowJudgment`/callback: он не вызывает destructive requestTool. Конкретные callback types задаются в client.ts/типах рядом, общие id обязательны.
+`GameVoice` получил `judgmentCapabilities()`, `audioReference(itemId)`, `waitForAudioItem(ref, deadlineAt, signal?)`, `requestAudioJudgment(context, instructions, signal?)` и `publishAudioPlayerChat(itemId, heard)`. `requestAudioJudgment` возвращает Promise<ToolCall> и обслуживает primary/shadow по context.role, не вызывает destructive requestTool. Прежний requestTool и его callback оставлены для text/select. Session generation лежит в обязательном audio reference; source явно задан отдельным методом и metadata. Типы — `src/realtime/judgmentRequest.ts`. Это уточнение интерфейса сохраняет разделение потоков из плана.
 
 На принятии speech_stopped зафиксировать snapshot вопроса/эталонов, question/player/attempt/turn, режима, модели и sessionGeneration для всего primary/shadow/fallback. Асинхронный callback не строит запрос из нового actor.getSnapshot() после смены вопроса. Перед отправкой и применением результата проверить, что попытка ещё допустима; во время паузы допускается только удержание результата. Сравнение shadow соединяет оба результата по одному snapshot/request context, даже если text уже объявлен; оно не сравнивает соседние попытки по времени.
 
@@ -140,7 +138,7 @@ Tools placeholder в примере заменяется настоящим об
 
 - `heard` для оценки берётся из аудиосудьи. ASR-text/confidence сохраняются как отдельные debug поля, не как transcript при settleJudgment.
 - Пустой heard не может получить correct, даже если модель вернула его. Ошибка ids **не** исправляется автоматическим сравнением ASR с эталоном; нативный запрос с чужими ids отклонить и не начислять. Legacy поведение неправильного questionId не расширять на новый путь.
-- Exact/слоговой эталон и near_miss применяются к **аудио-derived heard**, не к ASR. Сохранить maxClarifications и игровую реакцию. Quotes guard учитывает текущий вопрос/эталоны/принятую реплику, как в 0195e6d.
+- При ambiguous/unintelligible аудиосудьи совпадение heard с эталоном не форсирует correct: неопределённость остаётся неопределённостью. Exact/слоговой эталон и near_miss применяются к **аудио-derived heard**, не к ASR. Сохранить maxClarifications и игровую реакцию. Quotes guard учитывает текущий вопрос/эталоны/принятую реплику, как в 0195e6d.
 - Echo/phantomListedAnswer нынешнего ASR-пути сохраняются в text fallback. Низкий ASR-confidence или короткая ASR-фраза не отменяют сами по себе валидный audio-result. Также нельзя разрешить шуму начислять очки: пустая реплика, отсутствие принятой speech/item и несогласованные события не проходят; unit/live-сет включает шум и короткие настоящие ответы «ноль», букву варианта, имя.
 - В первичном запросе не ставить эталонный текст в распознанную реплику и не давать вторую транскрипцию как якобы истинную. Подсказку ASR со словарём оставить для caption/text fallback; аудиосудья не получает её transcript как доказательство.
 
@@ -200,7 +198,7 @@ LRU ограничивает локальные metadata, а не серверн
 | `src/game/judgment.ts` + test | Audio source использует heard, ASR отдельно, строгие ids, legacy text unchanged |
 | `src/game/types.ts` | Source/request metadata для диагностики; не давать provider-specific item определять игровой счёт |
 | `src/options.ts` / `config.ts` | 1500/12000 пределы и режим/default по модели; прежние игровые таймеры неизменны |
-| `src/App.tsx` | Query/dev mode и проброс конфигурации; ясная диагностика actual source/fallback; не менять меню ключей |
+| `src/App.tsx`, `src/ui/GameScreen.tsx`, `src/ui/HostPresence.tsx`, `src/styles.css` | UI-switch рядом с «Меньше слышать», preference/ref getter без reconnect; default audio, disabled unsupported с title; query для debug и диагностика actual source/fallback |
 | `src/debug/trace.ts` | Ограниченные сравнения источников/latency/причин fallback, redact; без сырых аудиоevents |
 | `src/conference/messages.ts` / `messageRing.ts` / `traceConversation.ts` | При необходимости optional source для публичных heard/judge; backward-compatible поля, не отправлять audio refs игрокам |
 | `src/game/savedGame.ts` + test | Проверить отсутствие refs/pending provider objects в сохранении; restore повторяет незавершённую попытку, committed score не дублируется |
@@ -231,7 +229,7 @@ XState сначала **не добавляет фаз**: registry readiness в�
 
 Набор не меньше 100 размеченных попыток, минимум 30 noise/silence/near-word negatives, реальные телефоны + два устройства Jitsi. Включить редкие слова («пылесосел»), синонимы, альтернативные правильные ответы, буквы, «ноль», overlap, плохой mic, echoed host, buzz посреди фразы. Human label фиксируется **до** сравнения, не определяется совпадением двух моделей.
 
-Включать default audio только если: все lifecycle/score-инварианты прошли; **0 false correct на noise/silence** в этом наборе; audio имеет не больше false correct, чем text на остальных negatives, и меньше ошибок на размеченных настоящих ответах; не более 2 технических fallback на 100 попыток; p95 stopped→result не хуже text baseline более чем на 500 мс; 0 зависаний/двойных начислений. Эти пороги — критерии проекта, не обещание модели. При провале default остаётся text, результаты записать и исправлять, а не автоматически отключать guards.
+Первоначальный критерий смены default был заменён явным решением автора включить audio сразу. Критерии подтверждения качества остаются: все lifecycle/score-инварианты прошли; **0 false correct на noise/silence** в этом наборе; audio имеет не больше false correct, чем text на остальных negatives, и меньше ошибок на размеченных настоящих ответах; не более 2 технических fallback на 100 попыток; p95 stopped→result не хуже text baseline более чем на 500 мс; 0 зависаний/двойных начислений. Эти пороги — критерии проекта, не обещание модели. При провале записать результаты и исправлять; пользователь может выключить новый путь переключателем. Не автоматически ослаблять guards.
 
 ## 13. Риски, сложность и стоимость
 
@@ -248,4 +246,28 @@ XState сначала **не добавляет фаз**: registry readiness в�
 
 ## 14. Definition of done
 
-Код/fixtures/tests + payload/source isolation + документация обновлены; `npm test`, `npm run build`, соответствующие Playwright проходят; actual model/provider modes отражены в debug; text rollback проверен; live thresholds записаны по каждой модели. До завершения live-smoke код можно коммитить с default=text. План считается реализованным только при выполнении этих шагов, а «включено по умолчанию» — отдельная отметка по прошедшим моделям.
+Код/fixtures/tests + payload/source isolation + документация обновлены; `npm test`, `npm run build`, соответствующие Playwright проходят; actual model/provider modes отражены в debug; text rollback проверен; live thresholds записаны по каждой модели. Runtime поставлен с audio по умолчанию по решению автора; UI-откат и автоматический технический fallback реализованы. Полная live-приёмка и вывод о превосходстве качества остаются отдельной незавершённой задачей.
+
+
+## 15. Поставленная реализация и запуск проверки
+
+Работают `?judge=audio`, `?judge=shadow`, `?judge=text`; аудио по умолчанию. OpenAI — две точные модели из §3, mock имитирует lifecycle для регрессий; xAI/Google и финал — text независимо от query. Для проверки на сайте: [аудио](https://roginvs.github.io/aisigame/?judge=audio), [сравнение](https://roginvs.github.io/aisigame/?judge=shadow), [откат](https://roginvs.github.io/aisigame/?judge=text). Параметр действует и за столом, и у мастера конференции. Он не меняет модель/ключ. Defaults по точному model id хранятся в defaultJudgmentModes (`judgmentRequest.ts`); оба audio по решению автора.
+
+Фактически изменены `client.ts`, `speechMatch.ts`, `mockClient.ts`, `tools.ts`, `controller.ts`, `judgment.ts`, `App.tsx`, `options.ts`, `trace.ts`. Добавлены `audioItems.ts`, `judgmentRequest.ts`, `judgmentClock.ts` и тесты. Capability хранится в judgmentRequest.ts и дополнительно проверяет отсутствие стороннего wire; провода Grok/Gemini, фабрика, машина, saved game и протокол конференции изменений не требуют. Source/refs/budgets остаются runtime-данными, в историю идёт только одна принятая строка heard. В function schema playerId теперь integer без ограничения тремя игроками: допустимость id по-прежнему проверяет машина.
+
+Для текущей сессии в «Скопировать дебаг» искать `judgment mode`, `audio judgment result`, `audio judgment fallback`, `judgment shadow result`, `judgment shadow comparison`. Метки содержат requested/actual mode, модель, попытку, источник, задержку и причину. Сырой audio/base64 дополнительно вычищается из trace. Сравнение shadow не публикуется игрокам и не исправляет очки.
+
+Автоматические проверки: `npm test`, `npm run build`, `npm run look -- e2e/audio-judgment.play.ts e2e/match.play.ts e2e/resume.play.ts e2e/conference.play.ts`. Unit покрывают и реальные JSON-события OpenAI; они не являются записанным live fixture.
+
+Opt-in smoke: `npm run look -- e2e/audio-judgment.live.play.ts`. Требует отдельно заданных переменных окружения `AISIGAME_OPENAI_KEY`, `AISIGAME_AUDIO_FIXTURE` (локальный WAV размеченной реплики), `AISIGAME_AUDIO_QUESTION`, `AISIGAME_AUDIO_ANSWERS`; `AISIGAME_AUDIO_EXPECTED_STATUS` по умолчанию correct. Ключ/запись в репозиторий не помещать. Тест проигрывает WAV в MediaStream/WebRTC и проверяет native reference; это тестовый источник вместо микрофона, а не запись/загрузка ответа в production. Две модели проверяются отдельно; приложение использует обычный живой микрофон/Jitsi. Artifact содержит только имена/время событий и результат, без ключа/байтов аудио.
+
+Живой smoke и размеченный набор §12 пока **не выполнены**: ключ и образцы не предоставлены. Автор попросил default audio до live-приёмки; runtime поставлен с этой настройкой и видимым переключателем на прежний путь. Превосходство над ASR не подтверждено. Апелляции/новые правила unclear/переделка финала не реализованы этой поставкой.
+
+
+Проверки поставки 13 октября 2026: 477 unit-тестов прошли до добавления UI-переключателя, один прежний opt-in пропущен; production build прошёл. Полный Playwright: 22 прошли, 4 live-теста (2 OpenAI, 2 Jitsi) пропущены без входных данных; после усиления ownership-guard повторно прошли оба новых UI-сценария. В этой среде штатная загрузка Playwright Chromium возвращала повреждённый архив, поэтому использован временный Chromium 153 с теми же тестами; этот launcher/dependency в проект не добавлен. Lint без ошибок; прежнее предупреждение React ref в App.tsx и прежнее Vite size warning остаются. Исправлены две неточности mock: актуальное название поля эталонов и приоритет текущего silence cue над отрицательными ограничениями/публичной историей. Игровые таймеры/правила от этого не менялись.
+
+
+Уточнение поставки: режим фиксируется при открытии попытки ответа, а не меняется в середине оценки. Переключатель меняет preference для следующей попытки, не рвёт WebRTC и не обрывает ведущую. API refs/pending clocks по-прежнему не сохраняются в партии; preference — отдельная локальная настройка интерфейса.
+
+
+Итоговая проверка после уточнения UI/default: 480 unit-тестов прошли (1 прежний skipped), 24 Playwright-сценария прошли (4 live skipped), build прошёл. Проверены включение по умолчанию, выключение без reconnect, восстановление preference после reload, переключение следующей попытки и независимость двух switches у мастера. На неподдержанной модели switch disabled/off с title; unit проверяет отображение.

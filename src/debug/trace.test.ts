@@ -123,3 +123,10 @@ describe('formatDebugDump', () => {
     clearRemoteDebugForTests()
   })
 })
+
+it('never retains raw PCM/base64 in server audio items', () => {
+  pushTrace('in', 'conversation.item.added', { item: { content: [{ type: 'input_audio', audio: 'secret-audio-bytes' }] } })
+  const entry = getTrace().at(-1)
+  expect(JSON.stringify(entry)).not.toContain('secret-audio-bytes')
+  expect(JSON.stringify(entry)).toContain('[audio omitted]')
+})

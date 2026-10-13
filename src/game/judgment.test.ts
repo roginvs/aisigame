@@ -584,3 +584,20 @@ describe('judgmentChatText', () => {
     expect(text).not.toContain('Почему')
   })
 })
+
+describe('audio-authoritative settlement', () => {
+  const input = { ...seasons, reportedQuestionId: seasons.activeQuestionId, reportedPlayerId: 2, reportedAttemptId: 2,
+    source: 'audio' as const, status: 'correct' as const, heard: 'Вивальди', transcript: 'Бетховен', reason: 'Верно' }
+  it('uses heard even when ASR confidently heard something else', () => {
+    expect(settleJudgment(input)).toMatchObject({ status: 'correct', heard: 'Вивальди' })
+  })
+  it('never compares foreign audio ids with the local etalon', () => {
+    expect(settleJudgment({ ...input, reportedAttemptId: 8, transcript: 'Вивальди' })).toMatchObject({ status: 'unintelligible', heard: '' })
+  })
+  it.each(['ambiguous', 'unintelligible'] as const)('does not turn uncertain audio into correct from etalon text (%s)', (status) => {
+    expect(settleJudgment({ ...input, status, heard: 'Вивальди', transcript: 'Вивальди' }).status).toBe(status)
+  })
+  it('cannot use a lucky ASR as the missing audio heard', () => {
+    expect(settleJudgment({ ...input, heard: '', transcript: 'Вивальди' }).status).toBe('unintelligible')
+  })
+})

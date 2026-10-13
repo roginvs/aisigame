@@ -42,13 +42,15 @@ export function isolatedToolResponse(options: {
   turn: number
   mode: 'text' | 'audio'
   tools: readonly unknown[]
+  audioItemId?: string
+  metadata?: Record<string, string>
 }) {
   return {
     conversation: 'none' as const,
     output_modalities: [options.mode === 'text' ? 'text' : 'audio'] as ['text'] | ['audio'],
     tool_choice: { type: 'function' as const, name: options.name },
-    tools: options.tools,
-    metadata: { purpose: options.purpose, turn: String(options.turn) },
+    tools: options.audioItemId ? options.tools.filter((tool) => (tool as { name?: string }).name === options.name) : options.tools,
+    metadata: { purpose: options.purpose, turn: String(options.turn), ...options.metadata },
     instructions: options.instructions,
     input: [
       {
@@ -56,7 +58,8 @@ export function isolatedToolResponse(options: {
         role: 'user' as const,
         content: [{ type: 'input_text' as const, text: options.instructions }],
       },
-    ],
+      ...(options.audioItemId ? [{ type: 'item_reference' as const, id: options.audioItemId }] : []),
+    ] as const,
   }
 }
 

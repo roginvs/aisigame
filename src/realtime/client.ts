@@ -5,6 +5,8 @@ import { logTrace, pushHostLine, pushPlayerLine, pushTrace } from '../debug/trac
 import { outputCut, outputFlushWaitMs, timersAfterPlaybackStarted, timersAfterResponseDone } from './playback.ts'
 import type { HostAudioTimers, OutputCutState } from './playback.ts'
 import { isolatedCue, isolatedToolResponse, speechMatches, verbatimResponse } from './speechMatch.ts'
+import { AudioItems, type AudioReference, type AudioItemReady } from './audioItems.ts'
+import { audioJudgmentCapable, type JudgmentCapabilities, type JudgeRequestContext } from './judgmentRequest.ts'
 import { sessionTools } from './tools.ts'
 import { createSilentMicStream } from './pcm.ts'
 import type { VoiceWire } from './wire.ts'
@@ -98,6 +100,15 @@ export class RealtimeClient {
   private dc: RTCDataChannel | null = null
   private mic: MediaStream | null = null
   private audio = new Audio()
+  private audioItems = new AudioItems()
+  private judgeRequests = new Map<string, {
+    context: JudgeRequestContext
+    responseId?: string
+    ended: boolean
+    release: () => void
+    finish: (call: ToolCall | null, error?: string) => void
+  }>()
+  private judgeResponseIds = new Map<string, string>()
   private sessionToken = 0
   private speech: SpeechTurn | null = null
   private fallbackTimer: number | null = null
@@ -142,6 +153,79 @@ export class RealtimeClient {
   constructor(options: { model?: string; wire?: VoiceWire | null } = {}) {
     this.model = options.model ?? gameConfig.model
     this.wire = options.wire ?? null
+  }
+
+  judgmentCapabilities(): JudgmentCapabilities {
+    const supported = !this.wire && audioJudgmentCapable(this.model)
+    return { isolatedAudioReference: supported, parallelOutOfBand: supported, model: this.model }
+  }
+
+  audioReference(itemId: string): AudioReference { return this.audioItems.reference(itemId) }
+
+  waitForAudioItem(ref: AudioReference, deadlineAt: number, signal?: AbortSignal): Promise<AudioItemReady> {
+    return this.audioItems.wait(ref, deadlineAt, signal)
+  }
+
+  /** Independent out-of-band request: never changes host playback/pendingTool. */
+  requestAudioJudgment(context: JudgeRequestContext, instructions: string, signal?: AbortSignal): Promise<ToolCall> {
+    if (!this.judgmentCapabilities().isolatedAudioReference) return Promise.reject(new Error('audio-unsupported'))
+    if (!this.audioItems.status(context.audio).ready) return Promise.reject(new Error('audio-item-not-ready'))
+    if (signal?.aborted) return Promise.reject(new Error('cancelled'))
+    if ([...this.judgeRequests.values()].some((job) => !job.ended && job.context.role === context.role)) return Promise.reject(new Error('audio-request-busy'))
+    return new Promise((resolve, reject) => {
+      const request = {
+        context, responseId: undefined as string | undefined, ended: false,
+        release: this.audioItems.pin(context.audio),
+        finish: (call: ToolCall | null, error?: string) => {
+          if (request.ended) return
+          request.ended = true
+          request.release()
+          signal?.removeEventListener('abort', abort)
+          if (error || !call) reject(new Error(error || 'missing-judge-tool'))
+          else resolve(call)
+        },
+      }
+      const abort = () => {
+        request.finish(null, 'cancelled')
+        if (request.responseId) this.send({ type: 'response.cancel', response_id: request.responseId })
+      }
+      signal?.addEventListener('abort', abort, { once: true })
+      this.judgeRequests.set(context.requestId, request)
+      this.trimJudgeRequests()
+      const response = isolatedToolResponse({
+        name: 'submitAnswerJudgment', instructions, purpose: 'judge', turn: context.turn,
+        mode: 'text', tools: sessionTools, audioItemId: context.audio.itemId,
+        metadata: { requestId: context.requestId, source: 'audio', role: context.role,
+          sessionGeneration: String(context.audio.sessionGeneration), attemptId: String(context.attemptId),
+          questionId: context.questionId, playerId: String(context.playerId) },
+      })
+      if (!this.send({ type: 'response.create', event_id: context.requestId, response })) request.finish(null, 'channel-closed')
+    })
+  }
+
+  /** Caption is exactly the authoritative heard; late ASR cannot rewrite it. */
+  publishAudioPlayerChat(itemId: string | null, heard: string): void {
+    if (!itemId || this.playerChatPublished.has(itemId)) return
+    this.suppressPlayerChat(itemId)
+    this.playerChatPublished.add(itemId)
+    pushPlayerLine(heard.trim() || 'речь не распознана')
+  }
+
+  private trimJudgeRequests(): void {
+    for (const [id, job] of this.judgeRequests) {
+      if (this.judgeRequests.size <= 200) break
+      if (job.ended) {
+        this.judgeRequests.delete(id)
+        if (job.responseId) this.judgeResponseIds.delete(job.responseId)
+      }
+    }
+  }
+
+  private resetAudioJudgments(): void {
+    for (const job of this.judgeRequests.values()) job.finish(null, 'session-changed')
+    this.judgeRequests.clear()
+    this.judgeResponseIds.clear()
+    this.audioItems.reset()
   }
 
   async connect(apiKey: string, options?: { captureMic?: boolean }): Promise<void> {
@@ -552,6 +636,7 @@ export class RealtimeClient {
 
   stopSession(): void {
     this.sessionToken += 1
+    this.resetAudioJudgments()
     this.sessionUpdatedWaiter = null
     this.clearSpeechTimers()
     this.clearFlushTimer()
@@ -603,6 +688,7 @@ export class RealtimeClient {
   private dropLink(message: string): void {
     if (this.dropped) return
     this.dropped = true
+    this.resetAudioJudgments()
     this.clearSpeechTimers()
     this.clearFlushTimer()
     this.speech = null
@@ -739,15 +825,46 @@ export class RealtimeClient {
     const type = typeof event.type === 'string' ? event.type : 'unknown'
     if (type.endsWith('.delta')) logTrace('in', type, deltaNote(event))
     else pushTrace('in', type, event)
+    this.audioItems.observe(event)
     this.sessionUpdatedWaiter?.(event)
     if (type === 'session.updated') this.sessionUpdatedWaiter = null
 
     if (type === 'error' || type === 'invalid_request_error') {
       const message = readErrorMessage(event)
       pushTrace('note', `Ошибка API: ${message}`)
+      const error = asRecord(event.error)
+      const errorId = typeof error.event_id === 'string' ? error.event_id : ''
+      const responseId = typeof error.response_id === 'string' ? error.response_id : ''
+      const judge = this.judgeRequests.get(errorId || this.judgeResponseIds.get(responseId) || '')
+      if (judge) { judge.finish(null, message); return }
       if (this.pendingTool && this.toolMode === 'text' && /modalit|output/i.test(message)) {
         this.toolMode = 'audio'
         this.sendToolRequest('audio')
+      }
+      return
+    }
+
+    // Route known and cancelled judge responses before any host/generic handler.
+    const response = asRecord(event.response)
+    const metadata = asRecord(response.metadata)
+    const responseId = typeof response.id === 'string' ? response.id : typeof event.response_id === 'string' ? event.response_id : ''
+    const requestId = typeof metadata.requestId === 'string' ? metadata.requestId : this.judgeResponseIds.get(responseId)
+    const nativeJudge = requestId ? this.judgeRequests.get(requestId) : undefined
+    if (nativeJudge || metadata.source === 'audio' || this.judgeResponseIds.has(responseId)) {
+      if (nativeJudge && type === 'response.created' && responseId) {
+        nativeJudge.responseId = responseId
+        this.judgeResponseIds.set(responseId, nativeJudge.context.requestId)
+        if (nativeJudge.ended) this.send({ type: 'response.cancel', response_id: responseId })
+      }
+      if (nativeJudge && type.startsWith('response.output_audio')) {
+        nativeJudge.finish(null, 'unexpected-audio-output')
+        if (responseId) this.send({ type: 'response.cancel', response_id: responseId })
+      }
+      if (type === 'response.done') {
+        recordResponseUsage(response)
+        const call = readToolCall(response)
+        const valid = call?.name === 'submitAnswerJudgment' && response.status === 'completed'
+        nativeJudge?.finish(valid ? call : null, valid ? undefined : 'audio-response-failed')
       }
       return
     }
@@ -1243,6 +1360,11 @@ function readErrorMessage(event: LooseEvent): string {
 
 export type GameVoice = Pick<
   RealtimeClient,
+  | 'judgmentCapabilities'
+  | 'audioReference'
+  | 'waitForAudioItem'
+  | 'requestAudioJudgment'
+  | 'publishAudioPlayerChat'
   | 'onLink'
   | 'onFailure'
   | 'onAudioFinished'

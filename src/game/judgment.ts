@@ -14,8 +14,9 @@ export function settleJudgment(input: {
   transcript: string
   confidence?: number | null
   reason: string
+  source?: 'text' | 'audio'
 }): AnswerJudgment {
-  const heard = (input.transcript || input.heard).trim()
+  const heard = (input.source === 'audio' ? input.heard : input.transcript || input.heard).trim()
   const sameQuestion =
     input.reportedQuestionId === input.activeQuestionId &&
     input.reportedPlayerId === input.activePlayerId &&
@@ -23,6 +24,12 @@ export function settleJudgment(input: {
   let status = input.status
   let reason = input.reason
   if (!sameQuestion) {
+    if (input.source === 'audio') {
+      return {
+        questionId: input.activeQuestionId, playerId: input.activePlayerId, attemptId: input.attemptId,
+        status: 'unintelligible', heard: '', reason: 'Чужая аудиооценка отклонена.',
+      }
+    }
     status = heard ? (sharesAnswer(heard, input.answers) ? 'correct' : 'incorrect') : 'unintelligible'
     reason = 'Оценка ссылалась на другой вопрос. Игра сверила реплику с эталоном этой ячейки.'
   } else if (status === 'correct' && quotesForeignTitle(reason, input.questionText, [...input.answers, heard])) {
@@ -50,6 +57,7 @@ export function settleJudgment(input: {
     reason = 'Реплика созвучна эталону и могла быть тем же ответом, который распознавание исказило. Нужно повторить.'
   } else if (
     (status === 'incorrect' || status === 'needs_clarification') &&
+    input.source !== 'audio' &&
     typeof input.confidence === 'number' &&
     input.confidence < unsureTranscript &&
     shakyHomophone(heard, input.answers)
@@ -57,7 +65,8 @@ export function settleJudgment(input: {
     status = 'near_miss'
     reason = 'Распознавание неуверенное, а реплика похожа на эталон. Нужно повторить.'
   }
-  if (status !== 'correct' && (sameEtalon(heard, input.answers) || syllableEtalon(heard, input.answers))) {
+  const audioUncertain = input.source === 'audio' && (status === 'unintelligible' || status === 'ambiguous')
+  if (!audioUncertain && status !== 'correct' && (sameEtalon(heard, input.answers) || syllableEtalon(heard, input.answers))) {
     status = 'correct'
     reason = 'Реплика совпала с эталоном.'
   }

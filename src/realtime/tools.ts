@@ -39,7 +39,8 @@ export const submitAnswerJudgmentTool = {
     additionalProperties: false,
     properties: {
       questionId: { type: 'string' },
-      playerId: { type: 'integer', enum: [1, 2, 3] },
+      // The machine validates the active player; games can have more than three seats.
+      playerId: { type: 'integer' },
       attemptId: { type: 'integer' },
       status: {
         type: 'string',

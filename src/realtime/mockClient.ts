@@ -1,3 +1,5 @@
+import { AudioItems, type AudioReference, type AudioItemReady } from './audioItems.ts'
+import type { JudgeRequestContext, JudgmentCapabilities } from './judgmentRequest.ts'
 import { pushHostLine, pushPlayerLine } from '../debug/trace.ts'
 import { echoesAnswerPrompt } from '../game/answerPrompt.ts'
 import { echoesChoicePrompt } from '../game/choicePrompt.ts'
@@ -15,6 +17,7 @@ const longSpeechChars = 180
 const longSpeechMs = 10_000
 
 export type MockControls = {
+  hearAudio?: (audioText: string, asrText: string, durationMs?: number) => void
   hear: (text: string, durationMs?: number) => void
   setSpeechMs: (ms: number) => void
   /** Только конференция на заглушке: портит байт пакета у joiner. */
@@ -35,6 +38,8 @@ export class MockRealtimeClient implements GameVoice {
   onSpeechStarted: (info?: { itemId: string | null }) => void = () => {}
   onSpeechStopped: (info: { durationMs: number; itemId: string | null }) => void = () => {}
 
+  private audioItems = new AudioItems()
+  private audioTexts = new Map<string, string>()
   private transcriptionPrompt = ''
   private speechToken = 0
   private speechMs = speechPauseMs
@@ -48,6 +53,34 @@ export class MockRealtimeClient implements GameVoice {
   private playerChatPending = new Map<string, string>()
   private playerChatPublished = new Set<string>()
   private hostOutputContext: AudioContext | null = null
+
+  judgmentCapabilities(): JudgmentCapabilities { return { isolatedAudioReference: true, parallelOutOfBand: true, model: 'mock' } }
+  audioReference(itemId: string): AudioReference { return this.audioItems.reference(itemId) }
+  waitForAudioItem(ref: AudioReference, deadlineAt: number, signal?: AbortSignal): Promise<AudioItemReady> {
+    return this.audioItems.wait(ref, deadlineAt, signal)
+  }
+  requestAudioJudgment(context: JudgeRequestContext, instructions: string, signal?: AbortSignal): Promise<ToolCall> {
+    if (!this.audioItems.status(context.audio).ready || signal?.aborted) return Promise.reject(new Error('audio-item-not-ready'))
+    const text = this.audioTexts.get(context.audio.itemId) ?? ''
+    return new Promise((resolve, reject) => {
+      const generation = this.audioItems.generation
+      const abort = () => { clearTimeout(timer); reject(new Error('cancelled')) }
+      const timer = setTimeout(() => {
+        signal?.removeEventListener('abort', abort)
+        if (generation !== this.audioItems.generation) { reject(new Error('session-changed')); return }
+        const args = judgeArguments(`${instructions}\nРеплика игрока: «${text}»`)
+        if (!text.trim()) args.status = 'unintelligible'
+        resolve({ name: 'submitAnswerJudgment', callId: `mock-audio-${++this.callSeq}`, arguments: args })
+      }, speechPauseMs)
+      signal?.addEventListener('abort', abort, { once: true })
+    })
+  }
+  publishAudioPlayerChat(itemId: string | null, heard: string): void {
+    if (!itemId || this.playerChatPublished.has(itemId)) return
+    this.suppressPlayerChat(itemId)
+    this.playerChatPublished.add(itemId)
+    pushPlayerLine(heard.trim() || 'речь не распознана')
+  }
 
   async connect(_apiKey: string, _options?: { captureMic?: boolean }): Promise<void> {
     resetUsage()
@@ -206,6 +239,8 @@ export class MockRealtimeClient implements GameVoice {
 
   stopSession(): void {
     this.speechToken += 1
+    this.audioItems.reset()
+    this.audioTexts.clear()
     this.transcriptionPrompt = ''
     this.transcripts.clear()
     this.playerChatGated = false
@@ -219,13 +254,21 @@ export class MockRealtimeClient implements GameVoice {
   }
 
   hear(text: string, durationMs = 1000, confidence: number | null = null): void {
+    this.hearAudio(text, text, durationMs, confidence)
+  }
+
+  hearAudio(audioText: string, text: string, durationMs = 1000, confidence: number | null = null): void {
     const itemId = `mock-item-${++this.itemSeq}`
+    this.audioTexts.set(itemId, audioText)
+    this.audioItems.observe({ type: 'input_audio_buffer.speech_started', item_id: itemId })
     this.transcripts.set(itemId, { text, confidence })
     this.offerPlayerChat(itemId, text)
     this.onSpeechStarted({ itemId })
     // Запрошенная длительность, не wall-clock: иначе при fake timers (~40 мс)
     // фантом-гард принимал бы любой эталон за тишину.
     window.setTimeout(() => {
+      this.audioItems.observe({ type: 'input_audio_buffer.speech_stopped', item_id: itemId })
+      this.audioItems.observe({ type: 'input_audio_buffer.committed', item_id: itemId })
       this.onSpeechStopped({ durationMs, itemId })
     }, speechPauseMs)
   }
@@ -305,9 +348,12 @@ function hostLine(purpose: string, instructions = ''): string {
 }
 
 function announceLine(instructions: string): string {
+  // Current cue wins over older outcomes in commentary and negative constraints.
+  instructions = instructions.split('\n\nПубличный контекст')[0] ?? instructions
   const folded = instructions.toLowerCase().replaceAll('ё', 'е')
   const quoted = [...instructions.matchAll(/«([^»]+)»/g)].map((match) => match[1]?.trim() ?? '').filter(Boolean)
   if (folded.includes('произнеси') && quoted[0]) return quoted[0]
+  if (folded.includes('исход: молчание')) return 'Ничего не услышала, минус.'
   if (folded.includes('исход: повтор') || folded.includes('попроси повторить')) return 'Повторите, пожалуйста.'
   if (folded.includes('исход: верно') || folded.includes('ответ верный')) return 'Верно.'
   if (folded.includes('исход: неверно') || folded.includes('что неверно') || folded.includes('ответ неверный')) {
@@ -349,7 +395,7 @@ function judgeArguments(instructions: string): Record<string, unknown> {
   const heard = quoted(instructions, 'Реплика игрока')
   const answers = choiceForms(
     instructions,
-    field(instructions, 'Эталон, с которым нужно сравнить смысл')
+    (field(instructions, 'Эталонные ответы пакета (список может быть неполным)') || field(instructions, 'Эталон, с которым нужно сравнить смысл'))
       .split(';')
       .map((item) => item.trim())
       .filter(Boolean),

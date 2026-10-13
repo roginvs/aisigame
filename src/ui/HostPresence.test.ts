@@ -100,3 +100,22 @@ describe('HostPresence', () => {
     expect(master).toContain('checked')
   })
 })
+
+it('places the audio switch beside the hear-less switch and disables unsupported providers', () => {
+  const html = renderToStaticMarkup(createElement(HostPresence, {
+    path: 'choosing.listening', link: { host: 'idle', mic: 'live' }, status: '',
+    hearTurnOnly: false, onHearTurnOnlyChange: () => {},
+    audioJudgment: true, audioJudgmentSupported: true, onAudioJudgmentChange: () => {},
+  }))
+  expect(html).toContain('host-with-two-switches')
+  expect(html).toContain('Оценивать по аудио')
+  expect(html).toContain('Меньше слышать')
+  expect(html.match(/role="switch"/g)).toHaveLength(2)
+  const unsupported = renderToStaticMarkup(createElement(HostPresence, {
+    path: 'lobby', link: { host: 'idle', mic: 'live' }, status: '',
+    audioJudgment: true, audioJudgmentSupported: false, onAudioJudgmentChange: () => {},
+  }))
+  expect(unsupported).toContain('disabled')
+  expect(unsupported).toContain('aria-checked="false"')
+  expect(unsupported).not.toContain('Меньше слышать')
+})

@@ -265,6 +265,10 @@ function sanitizeValue(value: unknown, depth: number): unknown {
   if (value && typeof value === 'object') {
     const result: Record<string, unknown> = {}
     for (const [key, nested] of Object.entries(value)) {
+      if ((key === 'audio' || key === 'delta') && typeof nested === 'string') {
+        result[key] = '[audio omitted]'
+        continue
+      }
       if (/authorization|api[_-]?key|bearer/i.test(key)) {
         result[key] = '[скрыто]'
         continue

@@ -81,7 +81,7 @@ test('кнопка без ответа списывает номинал', async
   await pick(page, 'Текст, 100')
   await buzz(page, 'Игрок 1')
   await expect(page.getByRole('status').filter({ hasText: 'Отвечает игрок 1' })).toBeVisible()
-  await expect(page.getByRole('complementary', { name: 'Разговор' }).getByText('Время вышло')).toBeVisible({
+  await expect(page.getByRole('complementary', { name: 'Разговор' }).getByText('Ничего не услышала, минус.')).toBeVisible({
     timeout: 20_000,
   })
   await expect(page.getByRole('group', { name: 'Игрок 1: -100' })).toBeVisible()
