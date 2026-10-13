@@ -1,6 +1,13 @@
-# Аукцион: план реализации
+# Аукцион
 
-Статус: **план, не реализован.** Правила автора записаны и все вопросы закрыты 13 октября 2026 (см. «Решения»). Код, машина и [STATES](STATES.md) описывают текущее поведение: v4 `auction` и v5 `stake` пропускаются парсером (`specials` в `src/game/siq.ts`) с предупреждением. После реализации обновить STATES, GAME, AGENTS и [to-do-question-types.md](../to-do-question-types.md).
+Статус: **реализован** 13 октября 2026 (ветка `cat-auction`). Код: `src/game/auction.ts`, `prices.ts`, узлы `auction.*` и `specialAway` в `machine.ts`, панель `src/ui/SpecialPanel.tsx`, звук `playAuctionDing`. Тесты: `auction.test.ts`, `special.test.ts`, `specialCues.test.ts`, `SpecialPanel.test.ts`, `specialPick.test.ts`, `e2e/special.play.ts`. В демо — раунд «Особые», ячейка «Торги 200» (v5 `type="auction"`).
+
+Отклонения от плана:
+
+- Голос разбирается только локально (`matchAuctionSpeech`) с переспросом; инструмента модели `resolveAuctionBid` нет.
+- Клик в конференции — сообщение `specialPick` (`target: auction`, `choice: pass | allIn | число`); мастер сам ищет вариант в своём списке, чужой вариант игнорируется.
+- После автоматической ставки номиналом ведущая говорит две фразы (объявление аукциона и итог торгов), а не одну.
+- Апелляции на аукционе выключены (как в плане).
 
 Одна механика «аукцион» для двух обозначений:
 

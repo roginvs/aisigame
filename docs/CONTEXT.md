@@ -224,3 +224,5 @@ XState ведёт фазы, вопрос, игрока, кнопки, тайме
 13 октября 2026: из шапки убраны значки микрофона и «ведущая говорит»; остался значок связи. Тесты: `airStatusMarks.test.ts`, `e2e/match.play.ts`.
 
 13 октября 2026: пинг игроков — `ping`/`pong` раз в 3 с, `pingMs` в ростере и снимке, «42 ms» в углу кадра. Тесты: `stateSessions.test.ts` (ping), `messages.test.ts`, `pingLabel.test.ts`, `e2e/ping.play.ts`.
+
+13 октября 2026: кот в мешке (`cat`/`bagcat`) и аукцион (`auction`/`stake`) по планам [CAT](CAT.md) и [AUCTION](AUCTION.md), ветка `cat-auction`. Цены — `prices.ts` (мин/макс раунда, номинал при цене 0), торги — `auction.ts`, кот — `cat.ts`, имена — `nameMatch.ts`; узлы `cat.*`, `auction.*`, `specialAway`; панель `SpecialPanel.tsx`; мяу/гонг — `playPublicSound`; конференция — `specialPick` и ожидание отключившегося 15 с. Демо: раунд «Особые». Тесты: `special.test.ts`, `cat.test.ts`, `auction.test.ts`, `prices.test.ts`, `specialCues.test.ts`, `specialPick.test.ts`, `SpecialPanel.test.ts`, `publicSound.test.ts`, `e2e/special.play.ts`.

@@ -392,6 +392,27 @@ stateDiagram-v2
 Публичный контекст свободных реплик передаётся контроллером и не добавляет состояний/таймеров. Judge/selection/read не получают историю чата. Оценка может принять альтернативный фактически верный ответ вне списка эталонов, с проверкой исходного вопроса и прежними id/attempt/turn guards.
 
 
+### Кот в мешке и аукцион (13 октября 2026)
+
+Контекст: `special: SpecialState | null` — `kind` (`cat`/`auction`), `questionId`, `giverId`, `recipientId` (у кота получатель, на аукционе — кого спрашиваем), `stakeOptions`/`stake` (кот), `nominal`, `order`/`passed`/`leaderId`/`bid`/`allIn`/`options`/`log` (торги), `unclear` (причина переспроса), `awayPlayerId`/`awayFrom`/`awayNextChooser` (ожидание). Сохраняется в `SavedMatch.special`, проверяется `readSpecialState` и валидатором снимка конференции.
+
+```
+choosing ──QUESTION_SELECTED [selectedCat]──▶ cat.announcing ──(cat)──▶ cat.picking ⇄ cat.clarifying
+                                                   │ (получатель уже известен)          │ CAT_RECIPIENT
+                                                   ▼                                    ▼
+                                             cat.staking.asking → listening ⇄ clarifying ──CAT_STAKE──▶ cat.placed → flashing
+choosing ──QUESTION_SELECTED [selectedAuction]─▶ auction.announcing → asking → listening ⇄ clarifying
+                                                   ▲            AUCTION_BID ▼
+                                                   └────────── advancing ──(последний)──▶ won → flashing
+```
+
+- `flashing` → `reading.sealed` → по концу чтения сразу `answering` (`beginSpecialAnswer`): `activePlayerId` = получатель, `activeStake` = ставка. Кнопки не открываются (`othersCanBuzz`, `canFalseStart`, `earlyBuzzAllowed` ложны для спецвопроса), неверный ответ закрывает ячейку. Ранний выбор ячейки из `announcing` тоже идёт через `selectedCat`/`selectedAuction`.
+- `cat.picking`, `cat.staking.listening`, `auction.listening` — микрофон открыт, слушаем одного (`specialListenerId`); контроллер сам разбирает речь (`matchSpokenPlayer`, `matchCatStake`, `matchAuctionSpeech`) и шлёт событие либо `*_UNCLEAR` → узел `clarifying` (переспрос поверх слушания).
+- `SPECIAL_PLAYER_OFFLINE {playerId, nextChooserId}` (шлёт мастер по присутствию; из `cat.staking`, `auction.asking/listening/clarifying`, `answering`/`judging`) → `specialAway`, таймер `catAwayWaitMs`. `SPECIAL_PLAYER_BACK` возвращает в `cat.staking`, `auction.asking` или заново в `answering`. По таймеру: на торгах — `auction.advancing` с автопасом; иначе `announcing` с `announceKind: 'away'`, 0 очков, эталон публичный, выбирает `awayNextChooser`.
+- `CHOOSER_OFFLINE` в коте до выбора получателя → `handoffCatGiver` (право отдать следующему, снова `cat.announcing`); на аукционе до первой ставки → `auctionAutoOpen` (номинал за выбравшего).
+- Пауза и восстановление: пути `cat.*`, `auction.*`, `specialAway` в снимке канонизируются; `RESUME`/restore идут в узлы `cat.resume`/`auction.resume`, которые по `special` выбирают нужный узел (и перезапускают часы ожидания).
+- Конференция: клик гостя — сообщение `specialPick` (`player`/`stake`/`auction`). Мастер принимает `player` только от дарителя, ставку — с `playerId` отправителя, вариант аукциона ищет в своём `special.options`.
+
 ### Апелляции обычного вопроса (13 октября 2026)
 
 Финал не затронут: там `outcomes` и `appeal` не заполняются, счёт меняет `changeScore`.
