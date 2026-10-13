@@ -70,7 +70,7 @@ describe('focusedModelParticipantId', () => {
   it('с «Меньше слышать» глушит партию вне выбора и ответа, лобби оставляет общим', () => {
     expect(focusedModelParticipantId('buzzing.open', 'chooser', 'answerer', true)).toBe(false)
     expect(focusedModelParticipantId('reading.sealed', 'chooser', 'answerer', true)).toBe(false)
-    expect(focusedModelParticipantId('finalBets.hearing', 'a', 'b', true)).toBe(false)
+    expect(focusedModelParticipantId('finalBets.hearing', 'a', 'b', true, 'bettor')).toBe('bettor')
     expect(focusedModelParticipantId('welcoming', null, null, true)).toBe(false)
     expect(focusedModelParticipantId('startMenu', null, null, true)).toBeNull()
     expect(focusedModelParticipantId('choosing.listening', 'chooser', 'answerer', true)).toBe('chooser')
@@ -78,6 +78,15 @@ describe('focusedModelParticipantId', () => {
   })
 })
 
+
+it('keeps the current final bettor audible with or without turn-only mode', () => {
+  for (const turnOnly of [true, false]) {
+    for (const phase of ['finalBets.asking', 'finalBets.hearing', 'finalBets.resolving']) {
+      expect(focusedModelParticipantId(phase, 'chooser', 'answerer', turnOnly, 'bettor')).toBe('bettor')
+    }
+    expect(focusedModelParticipantId('finalBets.hearing', null, null, turnOnly, null)).toBeNull()
+  }
+})
 
 describe('streamsForModelHear', () => {
   const remotes = [

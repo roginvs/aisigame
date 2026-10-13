@@ -294,6 +294,20 @@ export function createPackPipeJoiner(input: {
   }
 
   async function handleOffer(message: PackPipeOfferMessage): Promise<void> {
+    // The hub recreates its peer after a failed/closed link. Match that lifecycle
+    // instead of answering its fresh offer on a dead SCTP association.
+    if (state === 'failed' || state === 'closed') {
+      if (dc) {
+        dc.onopen = dc.onclose = dc.onerror = dc.onmessage = null
+        dc.close()
+      }
+      if (pc) {
+        pc.onicecandidate = pc.ondatachannel = pc.onconnectionstatechange = null
+        pc.close()
+      }
+      dc = null
+      pc = null
+    }
     const peer = ensurePc()
     // Уже открытый DC: повторный offer не мигает «Устанавливаю соединение».
     if (state !== 'open') setState('connecting')

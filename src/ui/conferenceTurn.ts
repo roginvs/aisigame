@@ -72,7 +72,7 @@ export function conferenceSoloListenHint(
   if (!conferenceLayout) return null
   const root = path.split('.')[0] ?? path
   const name = options.focusName?.trim() || ''
-  if (root === 'choosing' || root === 'answering') {
+  if (root === 'choosing' || root === 'answering' || root === 'finalBets') {
     return name ? `Слушаю ${name}` : 'Слушаю одного игрока'
   }
   if (!options.hearTurnOnly) return null

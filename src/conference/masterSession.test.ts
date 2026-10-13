@@ -427,6 +427,26 @@ describe('MasterSession resume', () => {
     expect(nextPeer.dc.send.mock.calls).toHaveLength(count)
     expect(peers).toHaveLength(2)
 
+    // Full unacknowledged window is lost with the channel, without an endpoint reload.
+    nextPeer.dc.readyState = 'closed'
+    nextPeer.dc.onclose?.()
+    transport.receive(hello, 'reloaded-endpoint')
+    expect(peers).toHaveLength(3)
+    const recoveredPeer = peers[2]!
+    recoveredPeer.dc.readyState = 'open'
+    recoveredPeer.dc.onopen?.()
+    const recoveredChunks = recoveredPeer.dc.send.mock.calls
+      .filter(([payload]) => payload instanceof ArrayBuffer)
+      .map(([payload]) => decodePackChunkBinary(payload as ArrayBuffer)?.index)
+    expect(recoveredChunks).toEqual([0, 1, 2, 3, 4, 5, 6, 7])
+    transport.receive({ type: 'packAck', clientId: 'guest-client', authToken: 'guest-token', hash: 'hash', nextIndex: 8 }, 'reloaded-endpoint')
+    expect(recoveredPeer.dc.send.mock.calls
+      .filter(([payload]) => payload instanceof ArrayBuffer)
+      .map(([payload]) => decodePackChunkBinary(payload as ArrayBuffer)?.index)).toContain(9)
+    transport.receive({ type: 'packVerified', clientId: 'guest-client', authToken: 'guest-token', hash: 'hash' }, 'reloaded-endpoint')
+    transport.receive({ type: 'ready', clientId: 'guest-client', authToken: 'guest-token' }, 'reloaded-endpoint')
+    expect(session.rosterList().find((entry) => entry.clientId === 'guest-client')).toMatchObject({ hashOk: true, ready: true })
+
     session.dispose()
     actor.stop()
     vi.unstubAllGlobals()

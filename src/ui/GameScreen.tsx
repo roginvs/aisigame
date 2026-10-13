@@ -216,6 +216,9 @@ export function GameScreen(props: {
     if (root === 'answering') {
       return context.players.find((player) => player.id === context.activePlayerId)?.name ?? null
     }
+    if (root === 'finalBets') {
+      return context.players.find((player) => player.id === context.finalists[context.finalCursor])?.name ?? null
+    }
     return null
   })()
   const soloListenHint = conference?.awaitingPack

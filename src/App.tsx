@@ -290,6 +290,13 @@ export default function App() {
     conferenceRole === 'master' && answerer?.clientId
       ? masterParticipantIds[answerer.clientId] ?? null
       : null
+  const bettor = snapshot.context.players.find(
+    (player) => player.id === snapshot.context.finalists[snapshot.context.finalCursor],
+  )
+  const bettorParticipantId =
+    conferenceRole === 'master' && bettor?.clientId
+      ? masterParticipantIds[bettor.clientId] ?? null
+      : null
   const answererTile = answererParticipantId
     ? conferenceTiles.find((tile) => tile.id === answererParticipantId)
     : undefined
@@ -321,9 +328,9 @@ export default function App() {
     const handle = conferenceHandleRef.current
     if (!handle) return
     handle.setModelHearOnly(
-      focusedModelParticipantId(path, chooserParticipantId, answererParticipantId, hearTurnOnly),
+      focusedModelParticipantId(path, chooserParticipantId, answererParticipantId, hearTurnOnly, bettorParticipantId),
     )
-  }, [answererParticipantId, chooserParticipantId, conferenceRole, hearTurnOnly, path])
+  }, [answererParticipantId, bettorParticipantId, chooserParticipantId, conferenceRole, hearTurnOnly, path])
 
   useEffect(() => {
     if (

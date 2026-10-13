@@ -8,8 +8,8 @@ export type MicMixer = {
 /**
  * Кого модель слышит в миксе конференции.
  * - `null` — все (лобби; без «Меньше слышать» — окно кнопки, ставки и т.п.)
- * - `string` — один участник (`choosing.*` / `answering.*`)
- * - `false` — никого («Меньше слышать» вне выбора и ответа: глухо, не «чуть тише»)
+ * - `string` — один участник (`choosing.*` / `answering.*` / `finalBets.*`)
+ * - `false` — никого («Меньше слышать» вне выбора, ответа и ставки: глухо, не «чуть тише»)
  * Если Jitsi id ещё не известен на выборе/ответе, оставляем всех (fail open).
  */
 export type ModelHearFocus = string | null | false
@@ -19,12 +19,14 @@ export function focusedModelParticipantId(
   chooserParticipantId: string | null,
   answererParticipantId: string | null,
   hearTurnOnly = false,
+  bettorParticipantId: string | null = null,
 ): ModelHearFocus {
   const root = phase.split('.')[0] ?? phase
   if (root === 'choosing') return chooserParticipantId
   if (root === 'answering') return answererParticipantId
+  if (root === 'finalBets') return bettorParticipantId
   if (!hearTurnOnly) return null
-  // Лобби / меню: все; уже в партии вне выбора и ответа — тишина для модели.
+  // Лобби / меню: все; уже в партии вне выбора, ответа и ставки — тишина для модели.
   if (root === 'startMenu' || root === 'connecting' || root === 'failed') return null
   return false
 }

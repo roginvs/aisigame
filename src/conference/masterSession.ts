@@ -132,6 +132,9 @@ export class MasterSession {
           if (inbound.kind === 'ack') this.applyPackAck(clientId, inbound.message.hash, inbound.message.nextIndex)
         },
         onState: (clientId, state) => {
+          // A new channel must retransmit chunks whose ACK was lost with the old one.
+          // Keep the request and receiver cache; its next ACK skips the received prefix.
+          if (state === 'closed' || state === 'failed') this.packTransfer.resetClient(clientId)
           // connecting mid-transfer не затирает «Загрузка N%» (sticky в roster);
           // failed/closed → «Нет соединения · повтор…».
           this.roster.updateProgress(clientId, { packPhase: pipeStateToPhase(state) })

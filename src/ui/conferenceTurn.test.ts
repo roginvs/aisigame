@@ -92,7 +92,7 @@ describe('conferenceSoloListenHint', () => {
 
   it('без галки вне выбора и ответа подписи нет', () => {
     expect(conferenceSoloListenHint('buzzing.open', true)).toBeNull()
-    expect(conferenceSoloListenHint('finalBets.hearing', true)).toBeNull()
+    expect(conferenceSoloListenHint('finalBets.hearing', true, { hearTurnOnly: true, focusName: 'Борис' })).toBe('Слушаю Борис')
     expect(conferenceSoloListenHint('choosing.listening', false, { focusName: 'Аня' })).toBeNull()
   })
 
