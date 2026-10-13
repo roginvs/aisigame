@@ -1,6 +1,7 @@
 import { createActor } from 'xstate'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { gameConfig } from '../config.ts'
+import { announceInstructions, roundSummaryInstructions } from './controller.ts'
 import { appealButton, appealRequestError, settleOutcome } from './appeals.ts'
 import { gameMachine, statePath } from './machine.ts'
 import { persistMatch, readSavedGame } from './savedGame.ts'
@@ -227,5 +228,45 @@ describe('ручные апелляции', () => {
     const actor = start(); normal(actor, 1, 'incorrect')
     const c = { ...actor.getSnapshot().context, activePlayerId: 1, activeQuestionId: 'q100' }
     expect(settleOutcome(c, 100).players).toEqual(c.players)
+  })
+
+  it('апелляция без изменения итога: ведущая говорит, что результат не изменился', () => {
+    const actor = start(); normal(actor, 1, 'incorrect'); request(actor, 1); cue(actor); result(actor, 'incorrect')
+    const c = actor.getSnapshot().context
+    expect(scores(actor)[0]).toBe(-100)
+    expect(c.outcomes?.q100?.[1]).toMatchObject({ amount: -100, previous: -100 })
+    const text = announceInstructions(c)
+    expect(text).toContain('Апелляция результат не изменила')
+    expect(text).not.toContain('Прежний итог уже заменён')
+    say(actor); request(actor, 1); cue(actor); result(actor, 'correct')
+    const changed = announceInstructions(actor.getSnapshot().context)
+    expect(changed).toContain('изменился на +200'); expect(changed).not.toContain('не изменила')
+  })
+
+  it('итог раунда в окне последнего вопроса: речь не обрывается окном, мост не повторяется', () => {
+    const input: QuestionPack = { ...pack, rounds: [...pack.rounds, { index: 1, name: 'Второй', kind: 'normal' }],
+      questions: [pack.questions[0]!, { ...pack.questions[1]!, roundIndex: 1 }] }
+    const actor = start(input, [1, 2]); normal(actor, 1, 'incorrect'); normal(actor, 2, 'incorrect')
+    expect(path(actor)).toBe('appealWindow'); expect(actor.getSnapshot().context.appeal?.summary).toBe('pending')
+    const text = roundSummaryInstructions(actor.getSnapshot().context)
+    expect(text).toContain('Впереди второй раунд'); expect(text).toContain('Игрок 1')
+    vi.advanceTimersByTime(5_000)
+    expect(path(actor)).toBe('appealWindow'); expect(actor.getSnapshot().context.appeal?.timeUp).toBe(true)
+    const a = actor.getSnapshot().context.appeal!
+    expect(appealRequestError(actor.getSnapshot().context, path(actor), { questionId: a.questionId, windowId: a.windowId, playerId: 1, requestId: 'late' })).not.toBeNull()
+    actor.send({ type: 'HOST_AUDIO_FINISHED', purpose: 'roundSummary' })
+    expect(path(actor)).toBe('choosing.listening'); expect(actor.getSnapshot().context.roundIndex).toBe(1)
+  })
+
+  it('апелляция во время итога раунда обслуживается, потом итог звучит заново', () => {
+    const input: QuestionPack = { ...pack, rounds: [...pack.rounds, { index: 1, name: 'Финал', kind: 'final' }],
+      questions: [pack.questions[0]!, { ...pack.questions[1]!, id: 'final', roundIndex: 1 }] }
+    const actor = start(input, [1, 2]); normal(actor, 1, 'incorrect'); normal(actor, 2, 'incorrect')
+    expect(roundSummaryInstructions(actor.getSnapshot().context)).toContain('финальный раунд')
+    request(actor, 1); expect(path(actor)).toBe('appealCue'); cue(actor); result(actor, 'correct'); say(actor)
+    expect(path(actor)).toBe('appealWindow'); expect(actor.getSnapshot().context.appeal?.summary).toBe('pending')
+    actor.send({ type: 'HOST_AUDIO_FINISHED', purpose: 'roundSummary' }); expect(path(actor)).toBe('appealWindow')
+    vi.advanceTimersByTime(5_000); expect(path(actor)).toBe('choosing.listening')
+    expect(scores(actor)).toEqual([100, -100]); expect(actor.getSnapshot().context.roundIndex).toBe(1)
   })
 })

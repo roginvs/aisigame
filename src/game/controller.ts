@@ -18,7 +18,7 @@ import { answerListeningPrompt, echoesAnswerPrompt, phantomListedAnswer } from '
 import { choicePrompt, echoesChoicePrompt } from './choicePrompt.ts'
 import { blurtGate, choiceGate, repeatsQuestion } from './heard.ts'
 import { judgmentChatText, settleJudgment } from './judgment.ts'
-import { currentRound, findQuestion, questionById, roundThemes } from './pack.ts'
+import { currentRound, findQuestion, nextPlayableRound, questionById, roundThemes } from './pack.ts'
 import { answerIsPublic, chatAnswerNote } from './reveal.ts'
 import {
   gameMachine,
@@ -28,7 +28,7 @@ import {
   phoneticRetryReason,
   statePath,
 } from './machine.ts'
-import { falseStartLine, playerName } from './players.ts'
+import { falseStartLine, openingChooser, playerName } from './players.ts'
 import { spokenAnswerCue } from './spokenAnswer.ts'
 import type { AnnounceKind, GameContext, JudgmentStatus, SpeechPurpose } from './types.ts'
 
@@ -410,7 +410,11 @@ export function attachController(options: {
         constraints: ['Не перечитывай вопрос. Эталон не называй. Одна короткая фраза.'],
       }), undefined, true)
     }
-    if (path === 'appealWindow') { client.setMicEnabled(false); client.interruptSpeech() }
+    if (path === 'appealWindow') {
+      client.setMicEnabled(false)
+      if (context.appeal?.summary === 'pending') speak('roundSummary', roundSummaryInstructions(context), undefined, true)
+      else client.interruptSpeech()
+    }
     if (path === 'welcoming') speak('welcome', welcomeInstructions(context), undefined, true)
     if (path === 'bridging') speak('bridge', bridgeInstructions(context), undefined, true)
     if (path === 'chooserHandoff') {
@@ -1031,6 +1035,7 @@ function isSpeechPurpose(purpose: string): purpose is SpeechPurpose {
     purpose === 'welcome' ||
     purpose === 'read' ||
     purpose === 'appeal' ||
+    purpose === 'roundSummary' ||
     purpose === 'announce' ||
     purpose === 'clarify' ||
     purpose === 'finished' ||
@@ -1149,6 +1154,23 @@ export function welcomeInstructions(context: GameContext): string {
     constraints: [boardSecrets, 'Вопрос викторины не задавай. Ничего лишнего после приглашения выбрать.'],
   })
   return withPlayNote(spoken, giggleNote)
+}
+
+const roundOrdinals = ['первый', 'второй', 'третий', 'четвёртый', 'пятый', 'шестой', 'седьмой', 'восьмой', 'девятый', 'десятый']
+
+/** Host phrase in the appeal window after the last question of a round: round over, scores, what is next. */
+export function roundSummaryInstructions(context: GameContext): string {
+  const nextIndex = nextPlayableRound(context.rounds, context.questions, context.roundIndex)
+  const next = context.rounds.find((round) => round.index === nextIndex)
+  const scores = scoreRoster(context)
+  const chooser = playerName(context.players, openingChooser(context.players)) || 'игрок'
+  const ordinal = roundOrdinals[context.rounds.filter((round) => round.kind === 'normal' && round.index <= nextIndex).length - 1]
+  const ahead = next?.kind === 'final' ? 'финальный раунд' : ordinal ? `${ordinal} раунд` : `раунд «${next?.name ?? ''}»`
+  return hostCue({
+    situation: `Раунд закончился. Счёт: ${scores}. Впереди ${ahead}${next?.name && next.kind !== 'final' ? ` («${next.name}»)` : ''}; ${next?.kind === 'final' ? 'тему' : 'вопрос'} выбирает ${chooser}. Несколько секунд ещё можно подать апелляцию.`,
+    goal: `Свободно и коротко скажи, что раунд окончен, назови счёт каждого, скажи, что впереди ${ahead}, и попроси ${chooser} выбрать ${next?.kind === 'final' ? 'тему' : 'вопрос'}.`,
+    constraints: [boardSecrets, 'Темы и цены не перечисляй.'],
+  })
 }
 
 export function bridgeInstructions(context: GameContext): string {
@@ -1339,12 +1361,18 @@ export function verbatimAnnouncement(context: GameContext): string | null {
 export function announceInstructions(context: GameContext): string {
   if (context.appeal?.activePlayerId !== null && context.appeal && context.announceKind !== 'repeat') {
     const player = context.players.find((p) => p.id === context.activePlayerId)
-    const amount = context.outcomes?.[context.appeal.questionId]?.[context.activePlayerId ?? 0]?.amount ?? 0
+    const row = context.outcomes?.[context.appeal.questionId]?.[context.activePlayerId ?? 0]
+    const amount = row?.amount ?? 0
+    const delta = amount - (row?.previous ?? amount)
     const question = questionById(context.questions, context.appeal.questionId)
     const closed = context.playedIds.includes(context.appeal.questionId)
     return hostCue({
-      situation: `Апелляция ${player?.name ?? 'игрока'}: ${context.announceKind === 'correct' ? 'верно' : context.announceKind === 'unclear' ? 'ответ не разобран' : context.announceKind === 'silence' ? 'ничего не услышала' : 'неверно'}. Новый итог этого вопроса: ${amount}; общий счёт ${player?.score ?? 0}. Прежний итог уже заменён машиной.`,
-      goal: `Коротко объяви решение и новый итог за вопрос (${amount}), при желании общий счёт. Это замена прежнего результата, не повторное списание. ${closed && context.announceKind !== 'correct' ? spokenAnswerCue(question?.answers ?? [], question?.choices ?? []) : ''}`,
+      situation: `Апелляция ${player?.name ?? 'игрока'}: ${context.announceKind === 'correct' ? 'верно' : context.announceKind === 'unclear' ? 'ответ не разобран' : context.announceKind === 'silence' ? 'ничего не услышала' : 'неверно'}. ${delta === 0
+        ? `Апелляция результат не изменила: итог за вопрос остаётся ${amount}, общий счёт не изменился (${player?.score ?? 0}).`
+        : `Итог за вопрос изменился на ${delta > 0 ? '+' : ''}${delta}: теперь ${amount}; общий счёт ${player?.score ?? 0}. Прежний итог уже заменён машиной.`}`,
+      goal: delta === 0
+        ? `Коротко объяви решение и скажи, что апелляция результат не изменила. Не говори, что счёт обновлён или изменился. ${closed && context.announceKind !== 'correct' ? spokenAnswerCue(question?.answers ?? [], question?.choices ?? []) : ''}`
+        : `Коротко объяви решение и новый итог за вопрос (${amount}), при желании общий счёт. Это замена прежнего результата, не повторное списание. ${closed && context.announceKind !== 'correct' ? spokenAnswerCue(question?.answers ?? [], question?.choices ?? []) : ''}`,
       constraints: [closed ? 'Не приглашай выбирать следующий вопрос: ещё обрабатываются апелляции.' : 'Эталон не называй и не намекай. Не приглашай выбирать следующий вопрос. При неясном ответе скажи, что итог за вопрос нулевой.', 'Одна-две короткие фразы.'],
     })
   }

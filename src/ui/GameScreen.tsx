@@ -264,7 +264,9 @@ export function GameScreen(props: {
         focusName: listenFocusName,
       })
   const flashing = path === 'flashing' || (paused && context.resumePath === 'flashing')
-  const showQuestion = Boolean(question) && !flashing && !conference?.awaitingPack
+  // During a closed-question appeal the board stays visible but not pickable.
+  const appealBoard = context.appeal?.stage === 'closed'
+  const showQuestion = Boolean(question) && !flashing && !conference?.awaitingPack && !appealBoard
   const showTimer = context.phaseStartedAt !== null && context.phaseDurationMs !== null
   const answerRevealed =
     path.startsWith('announcing') ||

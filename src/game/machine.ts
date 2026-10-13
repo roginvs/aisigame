@@ -285,6 +285,9 @@ export const gameMachine = setup({
   },
   actions: {
     clearAppeals: assign({ appeal: () => null }),
+    markRoundSummary: assign(({ context }) => context.appeal ? { appeal: { ...context.appeal, summary: 'pending' as const } } : {}),
+    markSummaryDone: assign(({ context }) => context.appeal ? { appeal: { ...context.appeal, summary: 'done' as const } } : {}),
+    markAppealTimeUp: assign(({ context }) => context.appeal ? { appeal: { ...context.appeal, timeUp: true, remainingMs: 0, startedAt: null }, phaseStartedAt: null, phaseDurationMs: null } : {}),
     restartAppealClock: assign(({ context }) => context.appeal ? { appeal: { ...context.appeal, startedAt: Date.now() } } : {}),
     openClosedAppeals: assign(({ context }) => {
       const questionId = context.appeal?.questionId ?? context.activeQuestionId
@@ -816,6 +819,10 @@ export const gameMachine = setup({
     closedAppeal: ({ context }) => context.appeal?.stage === 'closed' && context.appeal.activePlayerId !== null,
     // Only a closed-question window with nobody answering expires; without it the choosing clock stays untouched.
     idleClosedAppeal: ({ context }) => context.appeal?.stage === 'closed' && context.appeal.activePlayerId === null,
+    summaryPending: ({ context }) => context.appeal?.summary === 'pending',
+    summarySaid: ({ context }) => context.appeal?.summary === 'done',
+    appealTimeUp: ({ context }) => Boolean(context.appeal?.timeUp),
+    purposeRoundSummary: ({ event }) => event.type === 'HOST_AUDIO_FINISHED' && event.purpose === 'roundSummary',
     queuedAppeal: ({ context }) => Boolean(context.appeal?.queue.length),
     hasAppeals: ({ context }) => !isFinal(context) && Boolean(context.activeQuestionId && eligibleAppealPlayers(context, context.appeal?.questionId ?? context.activeQuestionId).length),
     normalRound: ({ context }) => !isFinal(context),
@@ -1155,7 +1162,7 @@ export const gameMachine = setup({
     },
     afterQuestion: {
       always: [
-        { guard: and(['hasAppeals', 'roundDoneHasNext']), target: 'appealWindow', actions: 'openClosedAppeals' },
+        { guard: and(['hasAppeals', 'roundDoneHasNext']), target: 'appealWindow', actions: ['openClosedAppeals', 'markRoundSummary'] },
         { guard: and(['hasAppeals', 'roundDoneNoNext']), target: 'appealWindow', actions: 'openClosedAppeals' },
         { guard: 'hasAppeals', target: 'choosing', actions: 'openClosedAppeals' },
         { guard: 'roundDoneHasNext', target: 'bridging', actions: 'advanceRound' },
@@ -1165,13 +1172,25 @@ export const gameMachine = setup({
     },
     appealWindow: {
       entry: assign(({ context }) => ({ statusLine: 'Апелляции · 5 секунд', phaseStartedAt: Date.now(), phaseDurationMs: appealMsLeft(context.appeal) })),
-      after: { appealLeft: { target: 'appealEnd', actions: 'clearAppeals' } },
+      after: { appealLeft: [
+        // The window never cuts the round summary: appeals close, the phrase finishes, then the round advances.
+        { guard: 'summaryPending', actions: 'markAppealTimeUp' },
+        { target: 'appealEnd' },
+      ] },
+      on: {
+        HOST_AUDIO_FINISHED: [
+          { guard: and(['purposeRoundSummary', 'appealTimeUp']), target: 'appealEnd', actions: 'markSummaryDone' },
+          { guard: 'purposeRoundSummary', actions: 'markSummaryDone' },
+        ],
+      },
     },
     appealEnd: {
       always: [
+        // The summary already named scores and the next round, so skip the bridge phrase.
+        { guard: and(['roundDoneHasNext', 'summarySaid']), target: 'choosing', actions: 'advanceRound' },
         { guard: 'roundDoneHasNext', target: 'bridging', actions: 'advanceRound' },
-        { guard: 'roundDoneNoNext', target: 'finished' },
-        { target: 'choosing' },
+        { guard: 'roundDoneNoNext', target: 'finished', actions: 'clearAppeals' },
+        { target: 'choosing', actions: 'clearAppeals' },
       ],
     },
     appealCue: {

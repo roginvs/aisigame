@@ -59,11 +59,13 @@ test('стол: FIFO после закрытия и три плюса за од�
   await page.getByRole('group', { name: 'Игрок 1: -100' }).getByRole('button', { name: 'Апелляция' }).click()
   await page.getByRole('group', { name: 'Игрок 2: -100' }).getByRole('button', { name: 'Апелляция' }).click()
   await expect(page.getByRole('button', { name: 'В очереди' })).toBeDisabled()
-  // The closed question stays on screen until the appeal series ends; the board is not pickable.
-  await expect(page.getByRole('button', { name: 'Текст, 200', exact: true })).toHaveCount(0)
-  await expect(page.locator('.answerer', { hasText: 'Отвечает игрок 1' })).toBeVisible()
+  // During the appeal series the board stays visible but no cell can be picked.
+  await expect(page.getByRole('grid', { name: 'Игровое поле' })).toBeVisible()
+  await expect(page.getByRole('button', { name: 'Текст, 200', exact: true })).toBeDisabled()
+  await expect(page.getByRole('status').filter({ hasText: 'Апелляции: Игрок 1 → Игрок 2' })).toBeVisible()
   await hear(page, 'Август')
-  await expect(page.locator('.answerer', { hasText: 'Отвечает игрок 2' })).toBeVisible()
+  await expect(page.getByRole('status').filter({ hasText: 'Апелляции: Игрок 2' })).toBeVisible()
+  await expect(page.getByRole('button', { name: 'Текст, 200', exact: true })).toBeDisabled()
   await hear(page, 'Август')
   await board(page)
   for (const id of [1, 2, 3]) await expect(page.getByRole('group', { name: `Игрок ${id}: 100` })).toBeVisible()

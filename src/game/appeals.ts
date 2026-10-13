@@ -17,7 +17,7 @@ export function appealMsLeft(appeal: AppealContext | null | undefined): number {
 export function appealRequestError(context: GameContext, path: string, request: AppealRequest): string | null {
   const appeal = context.appeal
   if (path === 'paused' || path === 'stopped') return 'Игра приостановлена'
-  if (!appeal || appeal.questionId !== request.questionId || appeal.windowId !== request.windowId) return 'Окно апелляции закрыто'
+  if (!appeal || appeal.timeUp || appeal.questionId !== request.questionId || appeal.windowId !== request.windowId) return 'Окно апелляции закрыто'
   const series = appeal.activePlayerId !== null && appeal.stage === 'closed'
   const window = appeal.stage === 'open' ? path === 'buzzing.open' : path.startsWith('choosing.') || path === 'appealWindow'
   if (!series && !window) return 'Окно апелляции закрыто'
@@ -47,7 +47,7 @@ export function settleOutcome(context: GameContext, amount: number, correct = am
   const correction = amount - (previous?.amount ?? 0)
   return {
     players: context.players.map((player) => player.id === playerId ? { ...player, score: player.score + correction } : player),
-    outcomes: { ...context.outcomes, [questionId]: { ...context.outcomes?.[questionId], [playerId]: { amount, attemptId: context.attemptId, correct } } },
+    outcomes: { ...context.outcomes, [questionId]: { ...context.outcomes?.[questionId], [playerId]: { amount, attemptId: context.attemptId, correct, previous: previous?.amount ?? 0 } } },
   }
 }
 
@@ -59,7 +59,7 @@ export function readOutcomes(value: unknown): OutcomeLedger | null {
     for (const [id, outcome] of Object.entries(players)) {
       if (!/^[1-9]\d*$/.test(id) || !outcome || typeof outcome !== 'object') return null
       const row = outcome as Record<string, unknown>
-      if (!Number.isFinite(row.amount) || !Number.isSafeInteger(row.attemptId) || Number(row.attemptId) < 0 || (row.correct !== undefined && typeof row.correct !== 'boolean')) return null
+      if (!Number.isFinite(row.amount) || !Number.isSafeInteger(row.attemptId) || Number(row.attemptId) < 0 || (row.correct !== undefined && typeof row.correct !== 'boolean') || (row.previous !== undefined && !Number.isFinite(row.previous))) return null
     }
   }
   return value as OutcomeLedger
@@ -75,6 +75,7 @@ export function readAppeal(value: unknown): AppealContext | null | undefined {
     (a.activePlayerId !== null && !player(a.activePlayerId)) || (a.lastPlayerId !== null && !player(a.lastPlayerId)) || !player(a.chooserId) ||
     !Number.isFinite(a.remainingMs) || a.remainingMs < 0 || a.remainingMs > appealWindowMs ||
     (a.startedAt !== null && !Number.isFinite(a.startedAt))) return undefined
+  if ((a.summary !== undefined && a.summary !== 'pending' && a.summary !== 'done') || (a.timeUp !== undefined && typeof a.timeUp !== 'boolean')) return undefined
   if (a.acceptedRequestIds !== undefined && (!Array.isArray(a.acceptedRequestIds) || a.acceptedRequestIds.some((id) => typeof id !== 'string' || id.length > 200))) return undefined
   return a
 }

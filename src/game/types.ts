@@ -22,6 +22,7 @@ export type SpeechPurpose =
   | 'micWarning'
   | 'falseStart'
   | 'appeal'
+  | 'roundSummary'
 
 export type RoundKind = 'normal' | 'final'
 
@@ -90,7 +91,7 @@ export type AnswerJudgment = {
   reason: string
 }
 
-export type OutcomeLedger = Record<string, Record<string, { amount: number; attemptId: number; correct?: boolean }>>
+export type OutcomeLedger = Record<string, Record<string, { amount: number; attemptId: number; correct?: boolean; /** Result this attempt replaced. */ previous?: number }>>
 
 export type AppealContext = {
   questionId: string
@@ -104,6 +105,10 @@ export type AppealContext = {
   /** Только окно заявок, не таймер ответа; пауза хранит остаток. */
   remainingMs: number
   startedAt: number | null
+  /** Last question of a round: host summary during the window. */
+  summary?: 'pending' | 'done'
+  /** Window expired while the summary is still being spoken; no new appeals. */
+  timeUp?: boolean
 }
 
 export type AppealRequest = {
