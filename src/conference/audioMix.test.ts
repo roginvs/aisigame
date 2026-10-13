@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { createMicMixer, focusedModelParticipantId, streamsForModelHear } from './audioMix.ts'
+import { createMicMixer, focusedModelParticipantId, LOCAL_KEY, modelHearGains, type MixerRemote } from './audioMix.ts'
 
 class FakeTrack {
   id: string
@@ -39,11 +39,17 @@ class FakeAudioContext {
   destination = {}
   state = 'running'
   createMediaStreamSource = vi.fn(() => ({ connect: vi.fn(), disconnect: vi.fn() }))
+  currentTime = 0
   createGain = vi.fn(() => ({
     connect: vi.fn(),
     disconnect: vi.fn(),
-    gain: { value: 1 },
+    gain: {
+      value: 1,
+      cancelScheduledValues: vi.fn(),
+      setTargetAtTime: vi.fn(function (this: { value: number }, v: number) { this.value = v }),
+    },
   }))
+  createAnalyser = vi.fn(() => ({ fftSize: 0, connect: vi.fn(), disconnect: vi.fn() }))
   createMediaStreamDestination = vi.fn(() => ({
     stream: new FakeMediaStream(),
   }))
@@ -88,68 +94,54 @@ it('keeps the current final bettor audible with or without turn-only mode', () =
   }
 })
 
-describe('streamsForModelHear', () => {
+describe('modelHearGains', () => {
   const remotes = [
-    { id: 'a', stream: { id: 'sa' } as unknown as MediaStream },
-    { id: 'b', stream: { id: 'sb' } as unknown as MediaStream },
+    { key: 'r1', participantId: 'a', audible: true },
+    { key: 'r2', participantId: 'b', audible: true },
+    { key: 'r3', participantId: 'c', audible: false },
   ]
-  const local = { id: 'local' } as unknown as MediaStream
+  const local = { participantId: 'me', audible: true }
+  const levels = (focus: Parameters<typeof modelHearGains>[0]['focus'], l = local, r = remotes) =>
+    Object.fromEntries(modelHearGains({ remotes: r, local: l, focus }).gains)
 
-  it('без фокуса отдаёт всех', () => {
-    expect(
-      streamsForModelHear({ remotes, localId: 'local', localStream: local, focusParticipantId: null }),
-    ).toEqual({ remotes, local })
+  it('null — все живые на 1, заглушённые 0', () => {
+    expect(levels(null)).toEqual({ r1: 1, r2: 1, r3: 0, [LOCAL_KEY]: 1 })
   })
 
-  it('с фокусом оставляет только выбранного удалённого и глушит локальный чужой микрофон', () => {
-    expect(
-      streamsForModelHear({ remotes, localId: 'local', localStream: local, focusParticipantId: 'b' }),
-    ).toEqual({ remotes: [remotes[1]], local: null })
+  it('фокус на участнике — только его гейн 1', () => {
+    expect(levels('b')).toEqual({ r1: 0, r2: 1, r3: 0, [LOCAL_KEY]: 0 })
+    expect(levels('me')).toEqual({ r1: 0, r2: 0, r3: 0, [LOCAL_KEY]: 1 })
   })
 
-  it('если фокус — локальный участник, оставляет только его микрофон', () => {
-    expect(
-      streamsForModelHear({ remotes, localId: 'local', localStream: local, focusParticipantId: 'local' }),
-    ).toEqual({ remotes: [], local })
+  it('false («Меньше слышать» вне хода) — все 0', () => {
+    expect(levels(false)).toEqual({ r1: 0, r2: 0, r3: 0, [LOCAL_KEY]: 0 })
   })
 
-  it('false — никого не отдаёт в микс модели', () => {
-    expect(
-      streamsForModelHear({ remotes, localId: 'local', localStream: local, focusParticipantId: false }),
-    ).toEqual({ remotes: [], local: null })
+  it('фокус без живой незаглушённой дорожки — fallback на всех', () => {
+    const muted = modelHearGains({ remotes, local, focus: 'c' })
+    expect(muted.fallback).toBe(true)
+    expect(Object.fromEntries(muted.gains)).toEqual({ r1: 1, r2: 1, r3: 0, [LOCAL_KEY]: 1 })
+    expect(modelHearGains({ remotes, local, focus: 'gone' }).fallback).toBe(true)
+    expect(modelHearGains({ remotes, local, focus: 'a' }).fallback).toBe(false)
   })
 
-  it('устаревший фокус (участника нет в комнате после reload) — слушаем всех', () => {
-    expect(
-      streamsForModelHear({
-        remotes, localId: 'local', localStream: local, focusParticipantId: 'gone', presentIds: new Set(['a', 'b']),
-      }),
-    ).toEqual({ remotes, local })
-  })
-
-  it('фокус на присутствующего, но заглушённого — по-прежнему никого лишнего', () => {
-    expect(
-      streamsForModelHear({
-        remotes: [remotes[0]!], localId: 'local', localStream: local, focusParticipantId: 'b', presentIds: new Set(['a', 'b']),
-      }),
-    ).toEqual({ remotes: [], local: null })
-  })
-
-  it('локальный фокус не считается устаревшим, даже если его нет в presentIds', () => {
-    expect(
-      streamsForModelHear({
-        remotes, localId: 'local', localStream: local, focusParticipantId: 'local', presentIds: new Set(['a']),
-      }),
-    ).toEqual({ remotes: [], local })
+  it('фазы: ответ слышит только отвечающего, «Меньше слышать» глушит вне хода', () => {
+    expect(levels(focusedModelParticipantId('answering.waiting', 'a', 'b'))).toEqual({ r1: 0, r2: 1, r3: 0, [LOCAL_KEY]: 0 })
+    expect(levels(focusedModelParticipantId('choosing.listening', 'a', 'b'))).toEqual({ r1: 1, r2: 0, r3: 0, [LOCAL_KEY]: 0 })
+    expect(levels(focusedModelParticipantId('reading.armed', 'a', 'b', true))).toEqual({ r1: 0, r2: 0, r3: 0, [LOCAL_KEY]: 0 })
+    expect(levels(focusedModelParticipantId('reading.armed', 'a', 'b', false))).toEqual({ r1: 1, r2: 1, r3: 0, [LOCAL_KEY]: 1 })
   })
 })
 
 describe('createMicMixer', () => {
+  type Ctx = FakeAudioContext
+  let ctx: Ctx
   beforeEach(() => {
     vi.stubGlobal(
       'AudioContext',
       vi.fn(function AudioContext(this: FakeAudioContext) {
         Object.assign(this, new FakeAudioContext())
+        ctx = this
       }),
     )
     vi.stubGlobal('MediaStream', FakeMediaStream)
@@ -159,120 +151,98 @@ describe('createMicMixer', () => {
     vi.unstubAllGlobals()
   })
 
-  it('clones remote audio for the model mix', () => {
-    const mixer = createMicMixer()
-    const remoteAudio = new FakeTrack('audio', true, 'live', 'remote-a')
-    const remoteVideo = new FakeTrack('video', true, 'live', 'remote-v')
-    mixer.setRemoteStreams([
-      {
-        id: 'guest',
-        stream: {
-          getAudioTracks: () => [remoteAudio],
-          getTracks: () => [remoteAudio, remoteVideo],
-        } as unknown as MediaStream,
-      },
-    ])
+  const stream = (...tracks: FakeTrack[]) => new FakeMediaStream(tracks) as unknown as MediaStream
+  const remote = (key: string, participantId: string, track: FakeTrack, muted = false): MixerRemote =>
+    ({ key, participantId, stream: stream(track), muted })
+  const noLocal = { participantId: 'me', stream: null, live: false }
+  /** Гейн-ноды источников по порядку создания (первая — шина). */
+  const sourceGains = () => ctx.createGain.mock.results.slice(1).map((r) => r.value as { gain: { value: number } })
 
-    expect(remoteAudio.clone).toHaveBeenCalledTimes(1)
-    expect(remoteVideo.clone).not.toHaveBeenCalled()
+  it('клонирует удалённые дорожки, видео игнорирует', () => {
+    const mixer = createMicMixer()
+    const audio = new FakeTrack('audio', true, 'live', 'a')
+    const video = new FakeTrack('video', true, 'live', 'v')
+    mixer.update({ remotes: [{ key: 't1', participantId: 'g', stream: stream(audio, video), muted: false }], local: noLocal, focus: null })
+    expect(audio.clone).toHaveBeenCalledTimes(1)
+    expect(video.clone).not.toHaveBeenCalled()
     mixer.dispose()
   })
 
-  it('does not clone the local mic so Jitsi mute still reaches the model', () => {
+  it('смена фокуса меняет только гейн, источники не пересоздаются', () => {
     const mixer = createMicMixer()
-    const localAudio = new FakeTrack('audio', true, 'live', 'local-a')
-    mixer.setLocalMic({
-      getAudioTracks: () => [localAudio],
-      getTracks: () => [localAudio],
-    } as unknown as MediaStream)
-
-    expect(localAudio.clone).not.toHaveBeenCalled()
+    const a = new FakeTrack('audio', true, 'live', 'a')
+    const b = new FakeTrack('audio', true, 'live', 'b')
+    const remotes = [remote('t1', 'pa', a), remote('t2', 'pb', b)]
+    mixer.update({ remotes, local: noLocal, focus: null })
+    expect(sourceGains().map((g) => g.gain.value)).toEqual([1, 1])
+    mixer.update({ remotes, local: noLocal, focus: 'pb' })
+    expect(sourceGains().map((g) => g.gain.value)).toEqual([0, 1])
+    mixer.update({ remotes, local: noLocal, focus: false })
+    expect(sourceGains().map((g) => g.gain.value)).toEqual([0, 0])
+    expect(ctx.createMediaStreamSource).toHaveBeenCalledTimes(2)
+    expect(a.clone).toHaveBeenCalledTimes(1)
     mixer.dispose()
   })
 
-  it('stops remote clones when streams are cleared and leaves the original alone', () => {
+  it('muted — гейн 0 без пересборки; фокус на заглушённом — fallback', () => {
     const mixer = createMicMixer()
-    const remoteAudio = new FakeTrack('audio', true, 'live', 'remote-a')
-    mixer.setRemoteStreams([
-      {
-        id: 'guest',
-        stream: {
-          getAudioTracks: () => [remoteAudio],
-          getTracks: () => [remoteAudio],
-        } as unknown as MediaStream,
-      },
-    ])
-    const clone = remoteAudio.clone.mock.results[0]?.value as FakeTrack
-    mixer.setRemoteStreams([])
-
-    expect(clone.stop).toHaveBeenCalledTimes(1)
-    expect(remoteAudio.stop).not.toHaveBeenCalled()
+    const a = new FakeTrack('audio', true, 'live', 'a')
+    const b = new FakeTrack('audio', true, 'live', 'b')
+    const result = mixer.update({ remotes: [remote('t1', 'pa', a), remote('t2', 'pb', b, true)], local: noLocal, focus: 'pb' })
+    expect(result.fallback).toBe(true)
+    expect(sourceGains().map((g) => g.gain.value)).toEqual([1, 0])
+    mixer.update({ remotes: [remote('t1', 'pa', a), remote('t2', 'pb', b)], local: noLocal, focus: 'pb' })
+    expect(sourceGains().map((g) => g.gain.value)).toEqual([0, 1])
+    expect(ctx.createMediaStreamSource).toHaveBeenCalledTimes(2)
     mixer.dispose()
   })
 
-  it('keeps stable remote ids and skips re-clone when the same live tracks return', () => {
+  it('смена владельца дорожки: фокус следует за текущим getParticipantId', () => {
     const mixer = createMicMixer()
-    const remoteAudio = new FakeTrack('audio', true, 'live', 'remote-a')
-    const stream = {
-      getAudioTracks: () => [remoteAudio],
-      getTracks: () => [remoteAudio],
-    } as unknown as MediaStream
-    mixer.setRemoteStreams([{ id: 'guest', stream }])
-    mixer.setRemoteStreams([{ id: 'guest', stream }])
-
-    expect(remoteAudio.clone).toHaveBeenCalledTimes(1)
+    const a = new FakeTrack('audio', true, 'live', 'a')
+    mixer.update({ remotes: [remote('t1', 'old', a)], local: noLocal, focus: 'answerer' })
+    // Раньше дорожка числилась за 'old' → fallback; после owner_set — за 'answerer'.
+    const after = mixer.update({ remotes: [remote('t1', 'answerer', a)], local: noLocal, focus: 'answerer' })
+    expect(after.fallback).toBe(false)
+    expect(sourceGains().map((g) => g.gain.value)).toEqual([1])
+    expect(ctx.createMediaStreamSource).toHaveBeenCalledTimes(1)
     mixer.dispose()
   })
 
-  it('drops muted remotes and re-clones after unmute', () => {
+  it('замена или конец дорожки пересоздаёт/убирает источник и останавливает клон', () => {
     const mixer = createMicMixer()
-    const remoteAudio = new FakeTrack('audio', false, 'live', 'remote-a')
-    const stream = {
-      getAudioTracks: () => [remoteAudio],
-      getTracks: () => [remoteAudio],
-    } as unknown as MediaStream
-    mixer.setRemoteStreams([{ id: 'guest', stream }])
-    expect(remoteAudio.clone).not.toHaveBeenCalled()
-
-    remoteAudio.enabled = true
-    mixer.setRemoteStreams([{ id: 'guest', stream }])
-    expect(remoteAudio.clone).toHaveBeenCalledTimes(1)
-
-    const firstClone = remoteAudio.clone.mock.results[0]?.value as FakeTrack
-    remoteAudio.enabled = false
-    mixer.setRemoteStreams([{ id: 'guest', stream }])
-    expect(firstClone.stop).toHaveBeenCalledTimes(1)
-
-    remoteAudio.enabled = true
-    mixer.setRemoteStreams([{ id: 'guest', stream }])
-    expect(remoteAudio.clone).toHaveBeenCalledTimes(2)
-    mixer.dispose()
-  })
-
-  it('does not stop the local mic track when the local source is cleared', () => {
-    const mixer = createMicMixer()
-    const localAudio = new FakeTrack('audio', true, 'live', 'local-a')
-    mixer.setLocalMic({
-      getAudioTracks: () => [localAudio],
-      getTracks: () => [localAudio],
-    } as unknown as MediaStream)
-    mixer.setLocalMic(null)
-
-    expect(localAudio.stop).not.toHaveBeenCalled()
-    mixer.dispose()
-  })
-
-  it('re-clones when a participant\'s track is replaced (late mic / recover)', () => {
-    const mixer = createMicMixer()
-    const stream = (track: FakeTrack) =>
-      ({ getAudioTracks: () => [track], getTracks: () => [track] }) as unknown as MediaStream
     const first = new FakeTrack('audio', true, 'live', 'first')
     const second = new FakeTrack('audio', true, 'live', 'second')
-    mixer.setRemoteStreams([{ id: 'guest', stream: stream(first) }])
+    mixer.update({ remotes: [remote('t1', 'g', first)], local: noLocal, focus: null })
     const firstClone = first.clone.mock.results[0]!.value as FakeTrack
-    mixer.setRemoteStreams([{ id: 'guest', stream: stream(second) }])
+    mixer.update({ remotes: [remote('t1', 'g', second)], local: noLocal, focus: null })
     expect(firstClone.stop).toHaveBeenCalled()
-    expect(second.clone).toHaveBeenCalledTimes(1)
+    expect(first.stop).not.toHaveBeenCalled()
+    const secondClone = second.clone.mock.results[0]!.value as FakeTrack
+    second.readyState = 'ended'
+    mixer.update({ remotes: [remote('t1', 'g', second)], local: noLocal, focus: null })
+    expect(secondClone.stop).toHaveBeenCalled()
+    mixer.update({ remotes: [], local: noLocal, focus: null })
+    mixer.dispose()
+  })
+
+  it('локальный микрофон не клонируется; выключенный — гейн 0', () => {
+    const mixer = createMicMixer()
+    const mic = new FakeTrack('audio', true, 'live', 'mic')
+    mixer.update({ remotes: [], local: { participantId: 'me', stream: stream(mic), live: true }, focus: null })
+    expect(mic.clone).not.toHaveBeenCalled()
+    expect(sourceGains().map((g) => g.gain.value)).toEqual([1])
+    mixer.update({ remotes: [], local: { participantId: 'me', stream: stream(mic), live: false }, focus: null })
+    expect(sourceGains().map((g) => g.gain.value)).toEqual([0])
+    mixer.dispose()
+    expect(mic.stop).not.toHaveBeenCalled()
+  })
+
+  it('meter() отводит шину на AnalyserNode один раз', () => {
+    const mixer = createMicMixer()
+    const first = mixer.meter()
+    expect(mixer.meter()).toBe(first)
+    expect(ctx.createAnalyser).toHaveBeenCalledTimes(1)
     mixer.dispose()
   })
 })

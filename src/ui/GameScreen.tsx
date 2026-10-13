@@ -30,6 +30,7 @@ import { InviteDialog } from './InviteDialog.tsx'
 import { QuestionClip, QuestionMedia } from './QuestionMedia.tsx'
 import { questionClipPlaying } from './questionClip.ts'
 import { remainingFraction, remainingSeconds } from './timerFraction.ts'
+import { ModelInputMeter } from './ModelInputMeter.tsx'
 
 const ignoreConferenceVideoBinding = () => {}
 
@@ -109,6 +110,8 @@ function usageHint(totals: UsageTotals): string {
 export function GameScreen(props: {
   snapshot: SnapshotFrom<typeof gameMachine>
   link: LinkStatus
+  /** Мастер конференции: отвод того, что реально слышит модель. */
+  modelMeter?: () => AnalyserNode | null
   onAppeal?: (request: AppealRequest) => Promise<{ accepted: boolean; reason: string }>
   onBuzz: (playerId: PlayerId) => void
   onPick: (themeId: string, value: number) => void
@@ -171,6 +174,7 @@ export function GameScreen(props: {
   const sendingRef = useRef(new Set<number>())
   const [appealError, setAppealError] = useState('')
   const onAppeal = props.onAppeal
+  const modelMeter = props.modelMeter
   const inLobby = Boolean(conference?.lobby)
   // The start form / lobby leave the page scrolled to their bottom buttons; on a scrolling (narrow)
   // page that hid the board above the fold, especially in phone landscape. Start the match at the top.
@@ -371,6 +375,12 @@ export function GameScreen(props: {
               <>
                 {' · '}
                 <ModelName modelId={modelId} onModel={onModel} />
+                {modelMeter ? (
+                  <>
+                    {' '}
+                    <ModelInputMeter getAnalyser={modelMeter} />
+                  </>
+                ) : null}
               </>
             )}
           </p>

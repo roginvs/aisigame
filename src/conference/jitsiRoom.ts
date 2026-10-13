@@ -8,7 +8,7 @@ import { fetchJitsiConfig, websocketUrlForBase } from './jitsiConfig.ts'
 import type { ConferenceMessage } from './messages.ts'
 import { isConferenceMessage } from './messages.ts'
 import type { ConferenceTransport } from './transport.ts'
-import { createMicMixer, streamsForModelHear, type MicMixer } from './audioMix.ts'
+import { createMicMixer, type MicMixer, type MixerRemote } from './audioMix.ts'
 import { nextCameraDeviceId } from './camera.ts'
 import { createSpeakerActivity } from './speakerActivity.ts'
 import { conferenceAudioStream, createConferenceAudioOutput } from './conferenceAudio.ts'
@@ -38,6 +38,9 @@ type JitsiMeetJS = {
       DISPLAY_NAME_CHANGED?: string
       TRACK_AUDIO_LEVEL_CHANGED?: string
       TRACK_MUTE_CHANGED?: string
+    }
+    track?: {
+      TRACK_OWNER_SET?: string
     }
   }
   JitsiConnection: new (appId: string | null, token: string | null, options: unknown) => JitsiConnection
@@ -84,6 +87,8 @@ type JitsiTrack = {
   getParticipantId?: () => string
   getOriginalStream?: () => MediaStream
   getTrack?: () => MediaStreamTrack
+  addEventListener?: (event: string, handler: (...args: unknown[]) => void) => void
+  removeEventListener?: (event: string, handler: (...args: unknown[]) => void) => void
 }
 
 declare global {
@@ -132,6 +137,8 @@ function conferenceEvents(api: JitsiMeetJS) {
     audioLevel:
       api.events?.conference?.TRACK_AUDIO_LEVEL_CHANGED ?? 'conference.audioLevelsChanged',
     trackMute: api.events?.conference?.TRACK_MUTE_CHANGED ?? 'conference.trackMuteChanged',
+    // SSRC rewriting: lib переназначает удалённую дорожку другому участнику без add/remove.
+    trackOwnerSet: api.events?.track?.TRACK_OWNER_SET ?? 'track.owner_set',
   }
 }
 
@@ -433,12 +440,18 @@ export async function connectJitsiConference(input: {
   const hostTracks: JitsiTrack[] = []
   const remoteNames = new Map<string, string>()
   const remoteVideo = new Map<string, JitsiTrack>()
-  const remoteAudio = new Map<string, JitsiTrack>()
+  /**
+   * Все удалённые аудиодорожки. Владельца не храним: при SSRC rewriting Jitsi
+   * переназначает дорожку другому участнику, поэтому id берём у дорожки в момент синка.
+   */
+  const remoteAudioTracks = new Map<JitsiTrack, { key: string; unsubOwner: () => void }>()
+  let remoteTrackSeq = 0
   const videoBindings = new Map<string, HTMLVideoElement>()
   const conferenceAudio = createConferenceAudioOutput()
   let modelMixer: MicMixer | null = null
   /** `null` — модель слышит всех; иначе только этот Jitsi participant id. */
   let modelHearOnlyId: string | null | false = null
+  let lastFallbackFocus = ''
   const tileListeners = new Set<(tiles: ConferenceTile[]) => void>()
   const hostSpeakingListeners = new Set<(speaking: boolean) => void>()
   let lastHostSpeaking = false
@@ -490,7 +503,7 @@ export async function connectJitsiConference(input: {
         id,
         name,
         isLocal: false,
-        micLive: Boolean(remoteAudio.get(id) && !remoteAudio.get(id)?.isMuted?.()),
+        micLive: remoteAudioOf(id).some((track) => !track.isMuted?.()),
         cameraOn: jitsiVideoLive(remoteVideo.get(id)),
         speaking: speakerActivity.has(id),
       })
@@ -511,11 +524,31 @@ export async function connectJitsiConference(input: {
     void element.play().catch(() => undefined)
   }
 
-  function ensureRemoteAudio(id: string, track: JitsiTrack): void {
-    if (botHandle && id === botHandle.localParticipantId()) return
+  function trackOwner(track: JitsiTrack): string {
+    return track.getParticipantId?.() ?? ''
+  }
+
+  function remoteAudioOf(id: string): JitsiTrack[] {
+    return [...remoteAudioTracks.keys()].filter((track) => trackOwner(track) === id)
+  }
+
+  function ensureRemoteAudio(track: JitsiTrack): void {
+    const entry = remoteAudioTracks.get(track)
+    if (!entry) return
+    const owner = trackOwner(track)
+    if (botHandle && owner === botHandle.localParticipantId()) {
+      conferenceAudio.remove(entry.key)
+      syncModelMixer()
+      return
+    }
     const stream = conferenceAudioStream(track)
-    if (!stream) return
-    conferenceAudio.attach(id, stream)
+    // Скрытых/ещё не пришедших участников не проигрываем (как раньше); userJoined дозовёт.
+    if (!stream || !remoteNames.has(owner)) {
+      syncModelMixer()
+      return
+    }
+    // <audio> по ключу дорожки: смена владельца не рвёт воспроизведение.
+    conferenceAudio.attach(entry.key, stream)
     syncModelMixer()
   }
 
@@ -527,14 +560,35 @@ export async function connectJitsiConference(input: {
       remoteVideo.set(userId, jitsiTrack)
       if (remoteNames.has(userId)) attachVideo(userId)
     } else if (jitsiTrack.getType() === 'audio') {
-      remoteAudio.set(userId, jitsiTrack)
-      if (remoteNames.has(userId)) ensureRemoteAudio(userId, jitsiTrack)
+      if (!remoteAudioTracks.has(jitsiTrack)) {
+        const key = `t${++remoteTrackSeq}`
+        const onOwner = () => {
+          pushTrace('note', 'Удалённая аудиодорожка сменила владельца', {
+            track: key, participantId: trackOwner(jitsiTrack),
+          })
+          ensureRemoteAudio(jitsiTrack)
+          emitTiles()
+        }
+        jitsiTrack.addEventListener?.(confEvents.trackOwnerSet, onOwner)
+        remoteAudioTracks.set(jitsiTrack, {
+          key,
+          unsubOwner: () => jitsiTrack.removeEventListener?.(confEvents.trackOwnerSet, onOwner),
+        })
+      }
+      ensureRemoteAudio(jitsiTrack)
     }
   }
 
+  function dropRemoteAudioTrack(track: JitsiTrack): void {
+    const entry = remoteAudioTracks.get(track)
+    if (!entry) return
+    entry.unsubOwner()
+    conferenceAudio.remove(entry.key)
+    remoteAudioTracks.delete(track)
+  }
+
   function dropRemoteAudio(id: string): void {
-    conferenceAudio.remove(id)
-    remoteAudio.delete(id)
+    for (const track of remoteAudioOf(id)) dropRemoteAudioTrack(track)
     speakerActivity.clear(id)
     syncModelMixer()
   }
@@ -545,21 +599,31 @@ export async function connectJitsiConference(input: {
     // В микс — только включённый микрофон: muted remotes не кладём, иначе clone()
     // с enabled=false после unmute остаётся мёртвым, а <audio> уже играет.
     // Выбор/ответ сужают микс до одного участника; HTML playback людей не трогаем.
-    const remotes = [...remoteAudio.entries()]
-      .filter(([id, track]) => (!botId || id !== botId) && !track.isMuted?.())
-      .flatMap(([id, track]) => {
-        const stream = conferenceAudioStream(track)
-        return stream ? [{ id, stream }] : []
-      })
-    const selected = streamsForModelHear({
+    // Все живые удалённые дорожки подключены постоянно; фокус/mute — только гейн.
+    // Владелец — по track.getParticipantId() сейчас, не сохранённый при trackAdded.
+    const remotes: MixerRemote[] = []
+    for (const [track, entry] of remoteAudioTracks) {
+      const owner = trackOwner(track)
+      if (!owner || (botId && owner === botId)) continue
+      const stream = conferenceAudioStream(track)
+      if (!stream) continue
+      const muted = Boolean(track.isMuted?.())
+      remotes.push({ key: entry.key, participantId: owner, stream, muted })
+    }
+    const result = modelMixer.update({
       remotes,
-      localId: localId(),
-      localStream: micLive ? localMicMedia : null,
-      focusParticipantId: modelHearOnlyId,
-      presentIds: new Set(remoteNames.keys()),
+      local: { participantId: localId(), stream: localMicMedia, live: micLive },
+      focus: modelHearOnlyId,
     })
-    modelMixer.setLocalMic(selected.local)
-    modelMixer.setRemoteStreams(selected.remotes)
+    const focus = modelHearOnlyId
+    const fallbackKey = typeof focus === 'string' ? focus : ''
+    if (result.fallback && fallbackKey !== lastFallbackFocus) {
+      pushTrace('note', 'Модель: у фокуса нет живой дорожки, слушаем всех', {
+        participantId: fallbackKey,
+        owners: remotes.map((item) => `${item.participantId}${item.muted ? '(muted)' : ''}`).join(','),
+      })
+    }
+    lastFallbackFocus = result.fallback ? fallbackKey : ''
   }
 
   function stopWatchingLocalMic(): void {
@@ -640,8 +704,7 @@ export async function connectJitsiConference(input: {
     const person = participant as JitsiParticipant | undefined
     if (person?.isHidden?.()) return
     remoteNames.set(userId, person?.getDisplayName?.() || userId)
-    const audio = remoteAudio.get(userId)
-    if (audio) ensureRemoteAudio(userId, audio)
+    for (const audio of remoteAudioOf(userId)) ensureRemoteAudio(audio)
     attachVideo(userId)
     emitTiles()
   })
@@ -684,7 +747,9 @@ export async function connectJitsiConference(input: {
     } else if (jitsiTrack.getType() === 'audio') {
       // Запоздалое «удалено» старой дорожки после replace/recover не должно
       // выкинуть уже пришедшую новую дорожку того же участника.
-      if (remoteAudio.get(userId) === jitsiTrack) dropRemoteAudio(userId)
+      dropRemoteAudioTrack(jitsiTrack)
+      speakerActivity.clear(userId)
+      syncModelMixer()
     }
     emitTiles()
   })
@@ -795,6 +860,7 @@ export async function connectJitsiConference(input: {
       }
       return modelMixer.outputStream()
     },
+    modelMeter: () => modelMixer?.meter() ?? null,
     setModelHearOnly(participantId) {
       modelHearOnlyId = participantId
       syncModelMixer()
@@ -908,7 +974,7 @@ export async function connectJitsiConference(input: {
         const el = videoBindings.get(id)
         if (el) track.detach(el)
       }
-      for (const id of [...remoteAudio.keys()]) dropRemoteAudio(id)
+      for (const track of [...remoteAudioTracks.keys()]) dropRemoteAudioTrack(track)
       if (localVideo) {
         const el = videoBindings.get(localId())
         if (el) localVideo.detach(el)
