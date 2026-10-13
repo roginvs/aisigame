@@ -8,7 +8,7 @@ export const LOBBY_SPEECH_MIN_INTERVAL_MS = 15_000
 /** Без смены статусов ведущая реже напоминает, кто в комнате и кого ждём. */
 export const LOBBY_IDLE_INTERVAL_MS = 25_000
 /** В лобби реплика стартует только после короткой тишины комнаты, чтобы не врезаться в разговор. */
-export const LOBBY_SILENCE_BEFORE_SPEECH_MS = 2_500
+export const LOBBY_SILENCE_BEFORE_SPEECH_MS = 5_000
 /** Как часто проверяем тишину, пока ждём окно перед репликой лобби. */
 export const LOBBY_SILENCE_POLL_MS = 400
 

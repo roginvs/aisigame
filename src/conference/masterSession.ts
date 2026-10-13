@@ -559,7 +559,7 @@ export class MasterSession {
     }, Math.max(0, delayMs))
   }
 
-  /** Ждёт ~2.5 с тишины людей, прежде чем ведущая заговорит в лобби. */
+  /** Ждёт ~5 с тишины людей, прежде чем ведущая заговорит в лобби. */
   private waitLobbySilence(): boolean {
     if (this.isRoomSpeaking()) {
       this.lobbyQuietSince = 0
