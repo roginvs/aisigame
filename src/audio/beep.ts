@@ -55,3 +55,58 @@ function pip(ctx: AudioContext, at: number, until: number): void {
   oscillator.start(at)
   oscillator.stop(until)
 }
+
+const publicBuffers = new Map<string, Promise<AudioBuffer | null>>()
+
+function publicUrl(path: string): string {
+  const base = typeof import.meta !== 'undefined' && import.meta.env?.BASE_URL ? import.meta.env.BASE_URL : '/'
+  return `${base}${path.replace(/^\//, '')}`
+}
+
+/** Скачивает и декодирует звук из public/ один раз; ошибки глушатся — без звука игра идёт дальше. */
+export function preloadPublicSound(path: string): Promise<AudioBuffer | null> {
+  const cached = publicBuffers.get(path)
+  if (cached) return cached
+  const loading = (async () => {
+    try {
+      const response = await fetch(publicUrl(path))
+      if (!response.ok) return null
+      return await ensureContext().decodeAudioData(await response.arrayBuffer())
+    } catch {
+      return null
+    }
+  })()
+  publicBuffers.set(path, loading)
+  return loading
+}
+
+/** Короткий звук из public/ через Web Audio (тот же контекст, что и пи-пи-пи). */
+export async function playPublicSound(path: string): Promise<boolean> {
+  const buffer = await preloadPublicSound(path)
+  if (!buffer) return false
+  const ctx = ensureContext()
+  void ctx.resume()
+  const source = ctx.createBufferSource()
+  source.buffer = buffer
+  source.connect(ctx.destination)
+  source.start()
+  if (typeof window !== 'undefined' && typeof window.dispatchEvent === 'function') {
+    window.dispatchEvent(new CustomEvent('aisigame-special-sound', { detail: path }))
+  }
+  return true
+}
+
+export const catMeowSound = 'sounds/meow.wav'
+export const auctionDingSound = 'sounds/auction.wav'
+
+export function playCatMeow(): Promise<boolean> {
+  return playPublicSound(catMeowSound)
+}
+
+export function playAuctionDing(): Promise<boolean> {
+  return playPublicSound(auctionDingSound)
+}
+
+export function resetPublicSoundsForTest(): void {
+  publicBuffers.clear()
+}

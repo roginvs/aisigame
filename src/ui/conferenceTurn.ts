@@ -37,7 +37,7 @@ export function conferenceTurnTitle(
   context: Pick<
     GameContext,
     'players' | 'chooserId' | 'activePlayerId' | 'finalists' | 'finalCursor' | 'rounds' | 'roundIndex'
-  >,
+  > & Partial<Pick<GameContext, 'special'>>,
 ): string | null {
   if (!conferenceLayout) return null
 
@@ -53,6 +53,15 @@ export function conferenceTurnTitle(
   } else if (path === 'finalBets.hearing') {
     playerId = context.finalists[context.finalCursor] ?? null
     action = 'делает ставку'
+  } else if (context.special && /^cat\.(picking|clarifying)$/.test(path)) {
+    playerId = context.special.giverId
+    action = 'отдаёт вопрос'
+  } else if (context.special && path.startsWith('cat.staking')) {
+    playerId = context.special.recipientId
+    action = 'делает ставку'
+  } else if (context.special && /^auction\.(asking|listening|clarifying)$/.test(path)) {
+    playerId = context.special.recipientId
+    action = context.special.leaderId === null ? 'делает ставку' : 'решает, перекупать ли'
   }
 
   if (playerId === null) return null
@@ -74,7 +83,7 @@ export function conferenceSoloListenHint(
   if (!conferenceLayout) return null
   const root = path.split('.')[0] ?? path
   const name = options.focusName?.trim() || ''
-  if (root === 'choosing' || root === 'answering' || root === 'appealCue' || root === 'finalBets') {
+  if (root === 'choosing' || root === 'answering' || root === 'appealCue' || root === 'finalBets' || root === 'cat' || root === 'auction') {
     return name ? `Слушаю ${name}` : 'Слушаю одного игрока'
   }
   if (!options.hearTurnOnly) return null
