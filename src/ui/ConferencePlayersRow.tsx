@@ -1,4 +1,5 @@
 import { packProgressLabel } from '../conference/packProgress.ts'
+import { tapPressProps } from './tapPress.ts'
 import type { ConferenceTile } from '../conference/media.ts'
 import type { RosterEntry } from '../conference/roster.ts'
 import type { Player, PlayerId } from '../game/types.ts'
@@ -177,7 +178,7 @@ export function ConferencePlayersRow(props: {
                     : undefined
                 }
                 disabled={displayOnly || (appealState ? !appealState.enabled : cooling || ((missed || !buttonsOpen) && !canFalseStart))}
-                onClick={() => onBuzz(playerId)}
+                {...tapPressProps(() => onBuzz(playerId))}
               >
                 {appealState ? appealState.label : chooses
                   ? 'выбирайте вопрос'

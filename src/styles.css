@@ -1100,6 +1100,7 @@ button.continue-with-file .continue-file {
 
 .cell {
   min-height: 0;
+  touch-action: manipulation;
   color: #1b2430;
   background: #e2c27a;
   border: 0;
@@ -1504,6 +1505,8 @@ button.continue-with-file .continue-file {
 .buzzer {
   min-width: 0;
   min-height: 84px;
+  /* No double-tap zoom / delay on phones. */
+  touch-action: manipulation;
   color: #f4efe4;
   border: 0;
   font-size: clamp(0.85rem, 2vw, 1.3rem);

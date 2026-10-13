@@ -25,6 +25,7 @@ import { packProgressLabel } from '../conference/packProgress.ts'
 import { canBuzzPlayer, canPickCell, conferenceSoloListenHint, conferenceTurnTitle } from './conferenceTurn.ts'
 import { PackAwaitPanel, type PackAwaitProgress } from './PackAwaitPanel.tsx'
 import { HostPresence } from './HostPresence.tsx'
+import { tapPressProps } from './tapPress.ts'
 import { InviteDialog } from './InviteDialog.tsx'
 import { QuestionClip, QuestionMedia } from './QuestionMedia.tsx'
 import { questionClipPlaying } from './questionClip.ts'
@@ -170,6 +171,12 @@ export function GameScreen(props: {
   const sendingRef = useRef(new Set<number>())
   const [appealError, setAppealError] = useState('')
   const onAppeal = props.onAppeal
+  const inLobby = Boolean(conference?.lobby)
+  // The start form / lobby leave the page scrolled to their bottom buttons; on a scrolling (narrow)
+  // page that hid the board above the fold, especially in phone landscape. Start the match at the top.
+  useEffect(() => {
+    if (!inLobby) window.scrollTo({ top: 0 })
+  }, [inLobby])
   useEffect(() => {
     if (!appealError) return
     const timer = window.setTimeout(() => setAppealError(''), 4_000)
@@ -636,7 +643,7 @@ export function GameScreen(props: {
                       : undefined
                   }
                   disabled={appealState ? !appealState.enabled : cooling || ((missed || !buttonsOpen) && !canFalseStart)}
-                  onClick={() => onPlayerAction(playerId)}
+                  {...tapPressProps(() => onPlayerAction(playerId))}
                 >
                   {appealState?.label ?? (chooses ? 'выбирайте вопрос' : missed ? 'Уже отвечал' : player.name)}
                   {earlyLive ? <span className="visually-hidden">, вопрос ещё читается</span> : null}
