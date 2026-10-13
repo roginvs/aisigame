@@ -193,13 +193,19 @@ describe('parseContentXml', () => {
     const names = readdirSync(dir).filter((name) => name.endsWith('.xml'))
     expect(names).toEqual(['demo.xml'])
     const demo = parseContentXml(readFileSync(path.join(dir, 'demo.xml'), 'utf8'))
-    expect(demo.rounds.map((round) => round.name)).toEqual(['Разминка', 'Наглядно'])
-    expect(demo.questions).toHaveLength(11)
+    expect(demo.rounds.map((round) => round.name)).toEqual(['Разминка', 'Наглядно', 'Особые'])
+    expect(demo.questions).toHaveLength(17)
     expect(demo.questions.flatMap((question) => question.media ?? []).map((media) => media.kind))
       .toEqual(['image', 'audio', 'video', 'image'])
     expect(demo.questions.find((question) => question.themeName === 'Выбор')?.choices).toHaveLength(4)
     expect(demo.questions.find((question) => question.themeName === 'Показ')?.answerMedia?.[0]?.kind).toBe('image')
     expect(demo.questions.filter((question) => question.themeName === 'Стопка')).toHaveLength(2)
+    const cats = demo.questions.filter((question) => question.cat)
+    expect(cats.map((question) => [question.value, question.cat?.theme, question.cat?.knows, question.cat?.options])).toEqual([
+      [200, 'Животные', 'after', [100, 300]],
+      [300, 'Города', 'before', [100, 300]],
+    ])
+    expect(demo.questions.filter((question) => question.auction).map((question) => [question.themeName, question.value])).toEqual([['Торги', 200]])
     expect(demo.warnings).toEqual([])
   })
 

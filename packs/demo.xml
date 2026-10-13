@@ -123,5 +123,43 @@
         </theme>
       </themes>
     </round>
+    <round name="Особые">
+      <themes>
+        <theme name="Сюрприз">
+          <questions>
+            <question price="100">
+              <params><param name="question" type="content"><item>Сколько ног у паука?</item></param></params>
+              <right><answer>восемь</answer><answer>8</answer></right>
+            </question>
+            <question price="200">
+              <type name="cat"><param name="theme">Животные</param><param name="cost">0</param></type>
+              <params><param name="question" type="content"><item>Какое животное самое быстрое на суше?</item></param></params>
+              <right><answer>гепард</answer></right>
+            </question>
+            <question price="300">
+              <type name="bagcat"><param name="theme">Города</param><param name="cost">[100;300]/200</param><param name="knows">before</param><param name="self">false</param></type>
+              <params><param name="question" type="content"><item>Какой город называют Северной столицей России?</item></param></params>
+              <right><answer>Санкт-Петербург</answer><answer>Петербург</answer><answer>Питер</answer></right>
+            </question>
+          </questions>
+        </theme>
+        <theme name="Торги">
+          <questions>
+            <question price="100">
+              <params><param name="question" type="content"><item>Сколько дней в високосном году?</item></param></params>
+              <right><answer>366</answer></right>
+            </question>
+            <question price="200" type="auction">
+              <params><param name="question" type="content"><item>Какой город — столица Австралии?</item></param></params>
+              <right><answer>Канберра</answer></right>
+            </question>
+            <question price="300">
+              <params><param name="question" type="content"><item>Сколько планет в Солнечной системе?</item></param></params>
+              <right><answer>восемь</answer><answer>8</answer></right>
+            </question>
+          </questions>
+        </theme>
+      </themes>
+    </round>
   </rounds>
 </package>
