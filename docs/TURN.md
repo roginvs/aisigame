@@ -33,7 +33,7 @@ docker run -d --name coturn --restart unless-stopped --network host coturn/cotur
   --external-ip=$(curl -4 -s ifconfig.me) \
   --min-port=49160 --max-port=49200 \
   --use-auth-secret --static-auth-secret=08cf3274436761687fb3be3dd4456ab4216ed1826f865b21 \
-  --realm=fallout-nevada.ru --fingerprint --no-cli --no-tls --no-dtls \
+  --realm=fallout-nevada.ru --fingerprint --no-cli --no-tls \
   --no-multicast-peers --denied-peer-ip=10.0.0.0-10.255.255.255 \
   --denied-peer-ip=172.16.0.0-172.31.255.255 --denied-peer-ip=192.168.0.0-192.168.255.255
 ```
