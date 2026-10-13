@@ -70,7 +70,10 @@ test('никто не нажал: сигнал и ответ пакета, сч�
       { timeout: 12_000 },
     )
     .toBe(true)
-  await expect(page.getByText('Герман Титов')).toBeVisible({ timeout: 8_000 })
+  // The answer shows on the card («Правильный ответ: …») and in the host bubble of «Разговор». Which of
+  // them is on screen depends on timing: on a slow run the card has already gone back to the board.
+  // Either one proves the pack answer was published; strict getByText would see two matches.
+  await expect(page.getByText('Герман Титов').first()).toBeVisible({ timeout: 8_000 })
   await expect(page.getByRole('button', { name: 'Космос, 100, сыграно' })).toBeDisabled()
   await expect(page.getByRole('group', { name: 'Игрок 1: 0' })).toBeVisible()
   await expect(page.getByRole('group', { name: 'Игрок 2: 0' })).toBeVisible()
