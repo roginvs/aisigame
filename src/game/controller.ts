@@ -15,6 +15,7 @@ import { conversationLineFromTrace } from '../conference/traceConversation.ts'
 import { getTrace } from '../debug/trace.ts'
 import { withCommentary } from './commentary.ts'
 import { parseBet } from './bet.ts'
+import { appealResultLine, amountWords } from './appealSpeech.ts'
 import { questionSpeech, spokenChoiceForms } from './choices.ts'
 import { matchSpokenCell, selectionChatText } from './choiceMatch.ts'
 import { answerListeningPrompt, echoesAnswerPrompt, phantomListedAnswer } from './answerPrompt.ts'
@@ -422,7 +423,7 @@ export function attachController(options: {
       dropAnswerAttempt()
       client.interruptSpeech()
       speak('appeal', hostCue({
-        situation: `Ручная апелляция. Сейчас повторяет ответ ${context.players.find((p) => p.id === context.activePlayerId)?.name ?? 'игрок'}.`,
+        situation: `Ручная апелляция. Сейчас повторяет ответ ${context.players.find((p) => p.id === context.activePlayerId)?.name ?? 'игрок'}; за этот вопрос у него сейчас ${amountWords(context.outcomes?.[context.activeQuestionId ?? '']?.[context.activePlayerId ?? 0]?.amount ?? 0)}. Новый ответ заменит этот итог, а не добавится к нему.`,
         goal: 'Обратись по имени и коротко попроси повторить ответ.',
         constraints: ['Не перечитывай вопрос. Эталон не называй. Одна короткая фраза.'],
       }), undefined, true)
@@ -1827,14 +1828,18 @@ export function announceInstructions(context: GameContext): string {
     const delta = amount - (row?.previous ?? amount)
     const question = questionById(context.questions, context.appeal.questionId)
     const closed = context.playedIds.includes(context.appeal.questionId)
+    const previous = row?.previous ?? amount
+    const verdict = context.announceKind === 'correct' ? 'верно' : context.announceKind === 'unclear' ? 'ответ не разобран' : context.announceKind === 'silence' ? 'ничего не услышала' : 'неверно'
+    const line = appealResultLine({ name: player?.name ?? 'игрока', amount, previous, accepted: context.announceKind === 'correct', total: player?.score ?? 0 })
+    const answer = closed && context.announceKind !== 'correct' ? ` ${spokenAnswerCue(question?.answers ?? [], question?.choices ?? [])}` : ''
     return hostCue({
-      situation: `Апелляция ${player?.name ?? 'игрока'}: ${context.announceKind === 'correct' ? 'верно' : context.announceKind === 'unclear' ? 'ответ не разобран' : context.announceKind === 'silence' ? 'ничего не услышала' : 'неверно'}. ${delta === 0
-        ? `Апелляция результат не изменила: итог за вопрос остаётся ${amount}, общий счёт не изменился (${player?.score ?? 0}).`
-        : `Итог за вопрос изменился на ${delta > 0 ? '+' : ''}${delta}: теперь ${amount}; общий счёт ${player?.score ?? 0}. Прежний итог уже заменён машиной.`}`,
-      goal: delta === 0
-        ? `Коротко объяви решение и скажи, что апелляция результат не изменила. Не говори, что счёт обновлён или изменился. ${closed && context.announceKind !== 'correct' ? spokenAnswerCue(question?.answers ?? [], question?.choices ?? []) : ''}`
-        : `Коротко объяви решение и новый итог за вопрос (${amount}), при желании общий счёт. Это замена прежнего результата, не повторное списание. ${closed && context.announceKind !== 'correct' ? spokenAnswerCue(question?.answers ?? [], question?.choices ?? []) : ''}`,
-      constraints: [closed ? 'Не приглашай выбирать следующий вопрос: ещё обрабатываются апелляции.' : 'Эталон не называй и не намекай. Не приглашай выбирать следующий вопрос. При неясном ответе скажи, что итог за вопрос нулевой.', 'Одна короткая фраза.'],
+      situation: `Апелляция ${player?.name ?? 'игрока'}: ${verdict}. Итог за этот вопрос у игрока ${player?.name ?? ''}: было ${previous}, стало ${amount} (${delta === 0 ? 'без изменений' : `${delta > 0 ? '+' : ''}${delta}`}); общий счёт ${player?.score ?? 0}. У игрока один итог за ячейку: новый заменяет прежний, это не дополнительное списание и не второе начисление.`,
+      goal: `Скажи итог апелляции по смыслу так: «${line}» Имя можно склонять («у Васи»), числа назови словами как в примере.${answer}`,
+      constraints: [
+        closed ? 'Не приглашай выбирать следующий вопрос: ещё обрабатываются апелляции.' : 'Эталон не называй и не намекай. Не приглашай выбирать следующий вопрос.',
+        'Не говори расплывчато «счёт не изменился» или «счёт обновлён»: назови итог за этот вопрос числом.',
+        'Не говори о повторном списании или доплате. Без ремарок, коротко.',
+      ],
     })
   }
 

@@ -2,6 +2,7 @@ import { createActor } from 'xstate'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { gameConfig } from '../config.ts'
 import { catAwayWaitMs } from '../options.ts'
+import { announceInstructions } from './controller.ts'
 import { gameMachine, statePath } from './machine.ts'
 import type { Player, Question, QuestionPack } from './types.ts'
 
@@ -77,6 +78,7 @@ describe('апелляции кота и аукциона', () => {
     expect(path(actor)).toBe('appealConfirm')
     vi.advanceTimersByTime(1)
     expect(score(actor, 3)).toBe(500)
+    expect(announceInstructions(ctx(actor))).toContain('теперь плюс пятьсот вместо минус пятисот')
     heard(actor, 'announce')
     expect(path(actor)).toBe('choosing.listening')
   })

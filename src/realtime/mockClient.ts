@@ -369,12 +369,9 @@ function announceLine(instructions: string): string {
   instructions = instructions.split('\n\nПубличный контекст')[0] ?? instructions
   const folded = instructions.toLowerCase().replaceAll('ё', 'е')
   const quoted = [...instructions.matchAll(/«([^»]+)»/g)].map((match) => match[1]?.trim() ?? '').filter(Boolean)
-  if (folded.includes('апелляция результат не изменила')) return 'Апелляция результат не изменила.'
-  if (folded.includes('прежний итог уже заменён машиной')) {
-    const amount = instructions.match(/Новый итог этого вопроса: (-?\d+)/)?.[1] ?? '0'
-    const decision = /апелляция [^\n]+: верно\./i.test(instructions) ? 'Верно.' : folded.includes('ответ не разобран') ? 'Ответ не разобран.' : folded.includes('ничего не услышала') ? 'Ничего не услышала.' : 'Неверно.'
-    return `${decision} Итог за вопрос: ${amount}.`
-  }
+  // Итог апелляции: заглушка говорит ровно пример из подсказки (итог за этот вопрос числом).
+  const appealLine = /итог апелляции по смыслу так: «([^»]+)»/.exec(instructions)?.[1]
+  if (appealLine) return appealLine
   if (folded.includes('произнеси') && quoted[0]) return quoted[0]
   if (folded.includes('исход: молчание')) return 'Ничего не услышала, минус.'
   if (folded.includes('исход: повтор') || folded.includes('попроси повторить')) return 'Повторите, пожалуйста.'

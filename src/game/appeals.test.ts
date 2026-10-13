@@ -240,17 +240,19 @@ describe('ручные апелляции', () => {
     expect(settleOutcome(c, 100).players).toEqual(c.players)
   })
 
-  it('апелляция без изменения итога: ведущая говорит, что результат не изменился', () => {
+  it('апелляция без изменения итога: ведущая называет итог за вопрос числом', () => {
     const actor = start(); normal(actor, 1, 'incorrect'); request(actor, 1); cue(actor); result(actor, 'incorrect')
     const c = actor.getSnapshot().context
     expect(scores(actor)[0]).toBe(-100)
     expect(c.outcomes?.q100?.[1]).toMatchObject({ amount: -100, previous: -100 })
     const text = announceInstructions(c)
-    expect(text).toContain('Апелляция результат не изменила')
-    expect(text).not.toContain('Прежний итог уже заменён')
+    expect(text).toContain('«Апелляция не помогла: за этот вопрос у игрока Игрок 1 по-прежнему минус сто. Общий счёт -100.»')
+    expect(text).toContain('было -100, стало -100')
+    expect(text).toContain('не дополнительное списание')
     say(actor); request(actor, 1); cue(actor); result(actor, 'correct')
     const changed = announceInstructions(actor.getSnapshot().context)
-    expect(changed).toContain('изменился на +200'); expect(changed).not.toContain('не изменила')
+    expect(changed).toContain('(+200)')
+    expect(changed).toContain('«Апелляция принята: за этот вопрос у игрока Игрок 1 теперь плюс сто вместо минус ста. Общий счёт 100.»')
   })
 
   it('итог раунда в окне последнего вопроса: речь не обрывается окном, мост не повторяется', () => {

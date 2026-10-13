@@ -463,6 +463,8 @@ stateDiagram-v2
 
 Пауза: `rememberPause` сохраняет остаток окна, `RESUME` в `appealCue`/`appealWindow` возвращает туда же. Снимок хранит `outcomes`, `appeal`, `appealSerial`; восстановление `answering.*` с активным апеллянтом идёт через `appealCue`; окно чужого раунда отбрасывается; старые снимки без полей — без апелляций.
 
+Реплика итога апелляции (`announceInstructions`, ветка апелляции): подсказке передаются «было/стало» за этот вопрос, общий счёт и образец фразы `appealResultLine` — итог числом словами, «вместо» прежнего; «счёт не изменился» без числа не говорится. Подсказка повтора ответа (`appealCue`) называет текущий итог за вопрос и что новый ответ его заменит.
+
 ### Уточнение judging: нативное аудио (13 октября 2026)
 
 Новых узлов нет. На обычном вопросе `?judge=audio` для поддержанной OpenAI-модели внутри judging ждёт подтверждение server audio item до 1500 мс и оценивает его reference, не ASR. Readiness входит в 12-секундный audio budget; техническая ошибка/таймаут даёт ровно один text fallback в оставшемся judgeMs. Unintelligible/ambiguous/incorrect — содержательные результаты, fallback по ним нет. Audio result валиден только с текущими session/reference/request/turn/question/player/attempt; поздний результат после отмены не меняет счёт. ASR-confidence не влияет на audio, heard берётся из аудиооценки.
