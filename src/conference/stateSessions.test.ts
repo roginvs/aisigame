@@ -224,7 +224,8 @@ it('апелляции: подтверждение, чужой playerId, дуб�
     await vi.advanceTimersByTimeAsync(0)
     expect(await accepted).toEqual({ accepted: true, reason: '' })
     expect(joiner.snapshot()?.appeal?.activePlayerId).toBe(2)
-    expect(joiner.snapshot()?.phase).toBe('appealCue')
+    // Закрытый вопрос: подтверждение без повтора ответа.
+    expect(['appealConfirm', 'announcing.speaking']).toContain(joiner.snapshot()?.phase)
     const attempt = actor.getSnapshot().context.attemptId
     guest.send({ ...request, type: 'appeal', clientId: 'guest', authToken: 'guest-token' })
     expect(actor.getSnapshot().context.attemptId).toBe(attempt)
@@ -235,10 +236,7 @@ it('апелляции: подтверждение, чужой playerId, дуб�
       packCache: { get: async () => bytes, put: async () => {}, delete: async () => {} } })
     await vi.advanceTimersByTimeAsync(0)
     expect(joiner.snapshot()?.appeal?.activePlayerId).toBe(2)
-    actor.send({ type: 'HOST_AUDIO_FINISHED', purpose: 'appeal' })
-    actor.send({ type: 'PLAYER_SPEECH_FINISHED' })
-    actor.send({ type: 'ANSWER_JUDGED', judgment: { questionId: 'history-100', playerId: 2, attemptId: attempt, status: 'correct', heard: 'Август', reason: '' } })
-    await vi.advanceTimersByTimeAsync(0)
+    await vi.advanceTimersByTimeAsync(5)
     expect(actor.getSnapshot().context.players.map((p) => p.score)).toEqual([100, 100])
     // Partial updates may arrive a tick later than the machine change; wait for the joiner view.
     for (let i = 0; i < 50 && joiner.snapshot()?.players[1]?.score !== 100; i += 1) await vi.advanceTimersByTimeAsync(20)

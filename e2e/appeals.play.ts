@@ -47,26 +47,28 @@ test('стол: повтор минуса, замена на плюс и про�
   await expect(page.getByRole('button', { name: 'Текст, 100, сыграно' })).toBeDisabled()
 })
 
-test('стол: FIFO после закрытия и три плюса за один вопрос', async ({ page }) => {
+test('стол: после объявления ответа — подтверждение без переответа, отмена ничего не меняет', async ({ page }) => {
   await startTable(page)
   await answer(page, 'Игрок 1', 'Наполеон')
-  await expect(page.getByRole('button', { name: 'Апелляция' })).toBeEnabled()
+  // Минус — кнопка апелляции доступна сразу.
+  await expect(page.getByRole('group', { name: 'Игрок 1: -100' }).getByRole('button', { name: 'Апелляция' })).toBeEnabled()
   await answer(page, 'Игрок 2', 'Наполеон')
   await expect(page.getByRole('group', { name: 'Игрок 2: -100' })).toBeVisible()
-  await expect(page.getByRole('group', { name: 'Игрок 3: 0' }).locator('button.buzzer')).toBeEnabled()
   await answer(page, 'Игрок 3', 'Август')
   await board(page)
-  await page.getByRole('group', { name: 'Игрок 1: -100' }).getByRole('button', { name: 'Апелляция' }).click()
+  await expect(page.getByText(/Правильный ответ:/).first()).toBeVisible()
+  // Отмена: ничего не отправляется, счёт прежний.
   await page.getByRole('group', { name: 'Игрок 2: -100' }).getByRole('button', { name: 'Апелляция' }).click()
-  await expect(page.getByRole('button', { name: 'В очереди' })).toBeDisabled()
-  // During the appeal series the board stays visible but no cell can be picked.
-  await expect(page.getByRole('grid', { name: 'Игровое поле' })).toBeVisible()
-  await expect(page.getByRole('button', { name: 'Текст, 200', exact: true })).toBeDisabled()
-  await expect(page.getByRole('status').filter({ hasText: 'Апелляции: Игрок 1 → Игрок 2' })).toBeVisible()
-  await hear(page, 'Август')
-  await expect(page.getByRole('status').filter({ hasText: 'Апелляции: Игрок 2' })).toBeVisible()
-  await expect(page.getByRole('button', { name: 'Текст, 200', exact: true })).toBeDisabled()
-  await hear(page, 'Август')
+  await page.getByRole('button', { name: 'Нет, не надо апелляцию' }).click()
+  await expect(page.getByRole('button', { name: 'Да, я ответил правильно' })).toHaveCount(0)
+  await expect(page.getByRole('group', { name: 'Игрок 2: -100' })).toBeVisible()
+  // Подтверждение: поправка счёта без повторного ответа.
+  await page.getByRole('group', { name: 'Игрок 1: -100' }).getByRole('button', { name: 'Апелляция' }).click()
+  await page.getByRole('button', { name: 'Да, я ответил правильно' }).click()
+  await expect(page.getByRole('group', { name: 'Игрок 1: 100' })).toBeVisible()
+  await expect(page.locator('.answerer', { hasText: 'Отвечает игрок 1' })).toHaveCount(0)
+  await page.getByRole('group', { name: 'Игрок 2: -100' }).getByRole('button', { name: 'Апелляция' }).click()
+  await page.getByRole('button', { name: 'Да, я ответил правильно' }).click()
   await board(page)
   for (const id of [1, 2, 3]) await expect(page.getByRole('group', { name: `Игрок ${id}: 100` })).toBeVisible()
 })

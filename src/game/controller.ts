@@ -395,6 +395,11 @@ export function attachController(options: {
       return
     }
     // Без conversation:none приветствие продолжает лобби и отвечает на «ты меня слышишь».
+    // Подтверждённая апелляция по закрытому вопросу: прежняя реплика обрывается, решение объявит announcing.
+    if (path === 'appealConfirm') {
+      client.interruptSpeech()
+      return
+    }
     if (path === 'appealCue') {
       choiceEpoch += 1
       buzzEpoch += 1

@@ -2002,3 +2002,11 @@ button.buzzer.chooser:disabled {
     min-height: max(200px, min(560px, calc(100dvh - 150px)));
   }
 }
+
+.appeal-confirm {
+  display: flex;
+  gap: 8px;
+  justify-content: center;
+  flex-wrap: wrap;
+  margin: 8px 0;
+}

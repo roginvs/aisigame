@@ -190,12 +190,13 @@ export function GameScreen(props: {
     const state = appealButton(context, path, p.id)
     return [p.id, state?.enabled && sendingAppeals[p.id] ? { label: 'Отправляется…', enabled: false } : state]
   }))
-  const onPlayerAction = useCallback((playerId: PlayerId) => {
-    const player = context.players.find((p) => p.id === playerId)
-    if (!player || !canBuzzPlayer(Boolean(conference?.layout), conference?.selfClientId, player)) return
+  const [confirmRequest, setConfirmRequest] = useState<{ playerId: PlayerId; windowId: number } | null>(null)
+  const setConfirmAppeal = useCallback((playerId: PlayerId | null) => {
+    setConfirmRequest(playerId === null || !context.appeal ? null : { playerId, windowId: context.appeal.windowId })
+  }, [context.appeal])
+  const sendAppeal = useCallback((playerId: PlayerId) => {
     const state = appealButton(context, path, playerId)
-    if (!state) { onBuzz(playerId); return }
-    if (!state.enabled || sendingRef.current.has(playerId) || !onAppeal || !context.appeal) return
+    if (!state?.enabled || sendingRef.current.has(playerId) || !onAppeal || !context.appeal) return
     const request: AppealRequest = { questionId: context.appeal.questionId, windowId: context.appeal.windowId, playerId, requestId: crypto.randomUUID() }
     sendingRef.current.add(playerId)
     setSendingAppeals((previous) => ({ ...previous, [playerId]: request.requestId }))
@@ -206,7 +207,20 @@ export function GameScreen(props: {
       sendingRef.current.delete(playerId)
       setSendingAppeals((previous) => { const next = { ...previous }; delete next[playerId]; return next })
     })
-  }, [context, path, conference?.layout, conference?.selfClientId, onAppeal, onBuzz])
+  }, [context, path, onAppeal])
+  const onPlayerAction = useCallback((playerId: PlayerId) => {
+    const player = context.players.find((p) => p.id === playerId)
+    if (!player || !canBuzzPlayer(Boolean(conference?.layout), conference?.selfClientId, player)) return
+    const state = appealButton(context, path, playerId)
+    if (!state) { onBuzz(playerId); return }
+    if (!state.enabled || sendingRef.current.has(playerId) || !onAppeal || !context.appeal) return
+    // После объявления ответа переответа нет: игрок только подтверждает, что ответил верно.
+    if (context.appeal.stage === 'closed') { setConfirmAppeal(playerId); return }
+    sendAppeal(playerId)
+  }, [context, path, conference?.layout, conference?.selfClientId, onAppeal, onBuzz, sendAppeal, setConfirmAppeal])
+  // Подтверждение живёт только в своём окне апелляции.
+  const confirmAppeal = confirmRequest && confirmRequest.windowId === context.appeal?.windowId ? confirmRequest.playerId : null
+  const confirmState = confirmAppeal === null ? null : appealButton(context, path, confirmAppeal)
 
   async function copyDebug() {
     const result = await copyDebugDump({ path, context })
@@ -277,7 +291,7 @@ export function GameScreen(props: {
       })
   const flashing = path === 'flashing' || (paused && context.resumePath === 'flashing')
   // During a closed-question appeal the board stays visible but not pickable.
-  const appealBoard = context.appeal?.stage === 'closed'
+  const appealBoard = context.appeal?.stage === 'closed' && (context.appeal.activePlayerId != null || !path.startsWith('announcing'))
   // После закрытой ячейки табло сразу на экране: выбирающий может перебить комментарий.
   const earlyBoard = earlyPickOpen(path, context)
   const showQuestion = Boolean(question) && !flashing && !conference?.awaitingPack && !appealBoard && !earlyBoard
@@ -596,6 +610,12 @@ export function GameScreen(props: {
         <p className="status-line" role="status">Апелляции: {[context.appeal.activePlayerId, ...context.appeal.queue].map((id) => context.players.find((p) => p.id === id)?.name).join(' → ')}</p>
       ) : null}
       {appealError ? <p role="status" className="status-line">{appealError}</p> : null}
+      {confirmAppeal !== null && confirmState?.enabled ? (
+        <div className="appeal-confirm" role="group" aria-label="Апелляция">
+          <button type="button" onClick={() => { const id = confirmAppeal; setConfirmAppeal(null); sendAppeal(id) }}>Да, я ответил правильно</button>
+          <button type="button" onClick={() => setConfirmAppeal(null)}>Нет, не надо апелляцию</button>
+        </div>
+      ) : null}
       {conference?.layout ? (
         <ConferencePlayersRow
           mode={conference.lobby || conference.awaitingPack ? 'lobby' : 'match'}

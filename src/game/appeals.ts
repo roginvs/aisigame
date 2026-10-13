@@ -19,7 +19,8 @@ export function appealRequestError(context: GameContext, path: string, request: 
   if (path === 'paused' || path === 'stopped') return 'Игра приостановлена'
   if (!appeal || appeal.timeUp || appeal.questionId !== request.questionId || appeal.windowId !== request.windowId) return 'Окно апелляции закрыто'
   const series = appeal.activePlayerId !== null && appeal.stage === 'closed'
-  const window = appeal.stage === 'open' ? path === 'buzzing.open' : path.startsWith('choosing.') || path === 'appealWindow'
+  const announcing = path === 'announcing' || path === 'announcing.speaking'
+  const window = appeal.stage === 'open' ? path === 'buzzing.open' || announcing : path.startsWith('choosing.') || path === 'appealWindow' || announcing
   if (!series && !window) return 'Окно апелляции закрыто'
   if (!eligibleAppealPlayers(context, appeal.questionId).includes(request.playerId)) return 'Нет права на апелляцию'
   if (appeal.acceptedRequestIds?.includes(request.requestId)) return 'Заявка уже принята'

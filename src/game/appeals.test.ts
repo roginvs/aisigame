@@ -42,6 +42,8 @@ function request(actor: Actor, playerId: number, requestId = `request-${++serial
   return event
 }
 function cue(actor: Actor) { actor.send({ type: 'HOST_AUDIO_FINISHED', purpose: 'appeal' }) }
+/** Закрытый вопрос: подтверждение без повтора → объявление. */
+function confirm(_actor: Actor) { vi.advanceTimersByTime(1) }
 function scores(actor: Actor) { return actor.getSnapshot().context.players.map((p) => p.score) }
 function path(actor: Actor) { return statePath(actor.getSnapshot().value) }
 const actors: Actor[] = []
@@ -118,30 +120,43 @@ describe('ручные апелляции', () => {
     expect(actor.getSnapshot().context.appeal?.windowId).not.toBe(a.windowId)
   })
 
-  it('после закрытия первый сразу отвечает, второй встаёт в FIFO, их плюсы сохраняют чужой плюс', () => {
+  it('после закрытия: подтверждение без повтора, второй встаёт в FIFO, их плюсы сохраняют чужой плюс', () => {
     const actor = start(); normal(actor, 1, 'incorrect'); normal(actor, 2, 'ambiguous'); normal(actor, 3, 'correct')
     expect(scores(actor)).toEqual([-100, 0, 100]); expect(actor.getSnapshot().context.activeQuestionId).toBeNull()
-    request(actor, 1); expect(path(actor)).toBe('appealCue'); expect(actor.getSnapshot().context.activeQuestionId).toBe('q100')
+    request(actor, 1); expect(path(actor)).toBe('appealConfirm'); expect(actor.getSnapshot().context.activeQuestionId).toBe('q100')
+    expect(scores(actor)).toEqual([100, 0, 100])
     const queued = request(actor, 2); actor.send(queued)
     expect(actor.getSnapshot().context.appeal?.queue).toEqual([2])
     vi.advanceTimersByTime(6_000); expect(actor.getSnapshot().context.appeal?.queue).toEqual([2])
-    actor.send({ type: 'QUESTION_SELECTED', themeId: 't', value: 200 }); expect(path(actor)).toBe('appealCue')
-    cue(actor); result(actor, 'correct'); say(actor)
-    expect(path(actor)).toBe('appealCue'); expect(actor.getSnapshot().context.activePlayerId).toBe(2)
-    cue(actor); result(actor, 'correct'); say(actor)
+    expect(path(actor)).toBe('announcing.speaking')
+    expect(announceInstructions(actor.getSnapshot().context)).toContain('Апелляция Игрок 1')
+    actor.send({ type: 'QUESTION_SELECTED', themeId: 't', value: 200 }); expect(path(actor)).toBe('announcing.speaking')
+    say(actor)
+    expect(path(actor)).toBe('appealConfirm'); expect(actor.getSnapshot().context.activePlayerId).toBe(2)
+    confirm(actor); say(actor)
     expect(scores(actor)).toEqual([100, 100, 100]); expect(path(actor)).toBe('choosing.listening')
     expect(actor.getSnapshot().context.chooserId).toBe(3)
     expect(actor.getSnapshot().context.playedIds).toEqual(['q100'])
   })
 
-  it('при неуспехе очередь не голодает, повтор первого становится в конец', () => {
+  it('подтверждённый игрок больше не может подать апелляцию на этот вопрос', () => {
     const actor = start(); normal(actor, 1, 'incorrect'); normal(actor, 2, 'incorrect'); normal(actor, 3, 'correct')
-    request(actor, 1); request(actor, 2); cue(actor); result(actor, 'incorrect'); say(actor)
-    request(actor, 1); expect(actor.getSnapshot().context.appeal?.queue).toEqual([1])
-    cue(actor); result(actor, 'correct'); say(actor)
-    expect(actor.getSnapshot().context.activePlayerId).toBe(1)
-    cue(actor); result(actor, 'incorrect'); say(actor)
-    expect(path(actor)).toBe('choosing.listening'); expect(appealButton(actor.getSnapshot().context, path(actor), 1)?.enabled).toBe(true)
+    request(actor, 1); request(actor, 2); confirm(actor); say(actor); confirm(actor); say(actor)
+    expect(scores(actor)).toEqual([100, 100, 100])
+    expect(path(actor)).toBe('choosing.listening'); expect(appealButton(actor.getSnapshot().context, path(actor), 1)).toBeNull()
+  })
+
+  it('минус — апелляция доступна сразу, ещё пока ведущая говорит', () => {
+    const actor = start(); actor.send({ type: 'BUZZER_PRESSED', playerId: 1 }); result(actor, 'incorrect')
+    expect(path(actor)).toBe('announcing.speaking')
+    expect(appealButton(actor.getSnapshot().context, path(actor), 1)).toEqual({ label: 'Апелляция', enabled: true })
+    request(actor, 1); expect(path(actor)).toBe('appealCue')
+    const closed = start(pack, [1]); closed.send({ type: 'BUZZER_PRESSED', playerId: 1 }); result(closed, 'incorrect')
+    expect(path(closed)).toBe('announcing.speaking')
+    expect(closed.getSnapshot().context.appeal?.stage).toBe('closed')
+    expect(appealButton(closed.getSnapshot().context, path(closed), 1)?.enabled).toBe(true)
+    request(closed, 1); expect(path(closed)).toBe('appealConfirm'); confirm(closed)
+    expect(path(closed)).toBe('announcing.speaking'); expect(scores(closed)).toEqual([100])
   })
 
   it('выбор первым закрывает окно, апелляция первым отсекает уже запущенный голосовой выбор', () => {
@@ -153,7 +168,7 @@ describe('ручные апелляции', () => {
     const second = start(); normal(second, 1, 'incorrect'); normal(second, 2, 'correct')
     second.send({ type: 'PLAYER_SPEECH_FINISHED' }); expect(path(second)).toBe('choosing.resolving')
     request(second, 1); second.send({ type: 'QUESTION_SELECTED', themeId: 't', value: 200 })
-    expect(path(second)).toBe('appealCue')
+    expect(path(second)).toBe('appealConfirm')
   })
 
   it('последний вопрос ждёт апелляции, успех меняет право входа в финал', () => {
@@ -161,7 +176,7 @@ describe('ручные апелляции', () => {
       questions: [pack.questions[0]!, { ...pack.questions[1]!, id: 'final', roundIndex: 1 }] }
     const actor = start(input, [1]); normal(actor, 1, 'incorrect')
     expect(path(actor)).toBe('appealWindow'); expect(actor.getSnapshot().context.roundIndex).toBe(0)
-    request(actor, 1); cue(actor); result(actor, 'correct'); say(actor)
+    request(actor, 1); confirm(actor); say(actor)
     expect(path(actor)).toBe('bridging'); actor.send({ type: 'HOST_AUDIO_FINISHED', purpose: 'bridge' })
     actor.send({ type: 'QUESTION_SELECTED', themeId: 't', value: 200 })
     expect(actor.getSnapshot().context.finalists).toEqual([1]); expect(actor.getSnapshot().context.appeal).toBeNull()
@@ -193,33 +208,28 @@ describe('ручные апелляции', () => {
     expect(actor.getSnapshot().context.appeal).toBeNull()
   })
 
-  it.each(['appealCue', 'answering.waiting', 'judging', 'announcing.speaking'] as const)('restore %s сохраняет очередь и не удваивает коррекцию', (phase) => {
+  it('restore объявления подтверждённой апелляции сохраняет очередь и не удваивает коррекцию', () => {
     const actor = start(); normal(actor, 1, 'incorrect'); normal(actor, 2, 'incorrect'); normal(actor, 3, 'correct')
-    request(actor, 1); request(actor, 2)
-    if (phase !== 'appealCue') cue(actor)
-    if (phase === 'judging') actor.send({ type: 'PLAYER_SPEECH_FINISHED' })
-    if (phase === 'announcing.speaking') result(actor, 'correct')
+    request(actor, 1); request(actor, 2); confirm(actor)
+    expect(path(actor)).toBe('announcing.speaking')
     const fresh = restore(actor)
     expect(fresh.getSnapshot().context.appeal?.queue).toEqual([2])
-    if (phase !== 'announcing.speaking') { expect(path(fresh)).toBe('appealCue'); cue(fresh); result(fresh, 'correct') }
     expect(scores(fresh)).toEqual([100, -100, 100]); say(fresh)
     expect(fresh.getSnapshot().context.activePlayerId).toBe(2)
-    cue(fresh); result(fresh, 'correct'); say(fresh); expect(scores(fresh)).toEqual([100, 100, 100])
+    confirm(fresh); say(fresh); expect(scores(fresh)).toEqual([100, 100, 100])
   })
 
   it('restore окна после очищенного activeQuestionId сохраняет старый вопрос', () => {
     const actor = start(); normal(actor, 1, 'incorrect'); normal(actor, 2, 'correct')
-    const fresh = restore(actor); request(fresh, 1); cue(fresh); result(fresh, 'correct'); say(fresh)
+    const fresh = restore(actor); request(fresh, 1); confirm(fresh); say(fresh)
     expect(scores(fresh)).toEqual([100, 100, 0])
   })
 
   it('skip и STOP очищают очередь; поздняя оценка не меняет счёт', () => {
     const actor = start(); normal(actor, 1, 'incorrect'); normal(actor, 2, 'incorrect'); normal(actor, 3, 'correct')
-    request(actor, 1); request(actor, 2); cue(actor); actor.send({ type: 'PLAYER_SPEECH_FINISHED' })
-    const c = actor.getSnapshot().context
+    request(actor, 1); request(actor, 2); confirm(actor)
     actor.send({ type: 'NEXT_ROUND' })
-    actor.send({ type: 'ANSWER_JUDGED', judgment: { questionId: 'q100', playerId: 1, attemptId: c.attemptId, status: 'correct', heard: '', reason: '' } })
-    expect(scores(actor)).toEqual([-100, -100, 100]); expect(actor.getSnapshot().context.appeal).toBeNull()
+    expect(scores(actor)).toEqual([100, -100, 100]); expect(actor.getSnapshot().context.appeal).toBeNull()
     const other = start(); normal(other, 1, 'incorrect'); request(other, 1); other.send({ type: 'STOP' })
     expect(other.getSnapshot().context.appeal).toBeNull()
   })
@@ -263,7 +273,7 @@ describe('ручные апелляции', () => {
       questions: [pack.questions[0]!, { ...pack.questions[1]!, id: 'final', roundIndex: 1 }] }
     const actor = start(input, [1, 2]); normal(actor, 1, 'incorrect'); normal(actor, 2, 'incorrect')
     expect(roundSummaryInstructions(actor.getSnapshot().context)).toContain('финальный раунд')
-    request(actor, 1); expect(path(actor)).toBe('appealCue'); cue(actor); result(actor, 'correct'); say(actor)
+    request(actor, 1); expect(path(actor)).toBe('appealConfirm'); confirm(actor); say(actor)
     expect(path(actor)).toBe('appealWindow'); expect(actor.getSnapshot().context.appeal?.summary).toBe('pending')
     actor.send({ type: 'HOST_AUDIO_FINISHED', purpose: 'roundSummary' }); expect(path(actor)).toBe('appealWindow')
     vi.advanceTimersByTime(5_000); expect(path(actor)).toBe('choosing.listening')

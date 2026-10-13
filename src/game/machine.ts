@@ -1,4 +1,4 @@
-import { and, assign, not, setup, stateIn } from 'xstate'
+import { and, assign, not, or, setup, stateIn } from 'xstate'
 import { appealMsLeft, appealRequestError, appealWindowMs, eligibleAppealPlayers, settleOutcome } from './appeals.ts'
 import { gameConfig } from '../config.ts'
 import { questionSpeech } from './choices.ts'
@@ -323,6 +323,29 @@ export const gameMachine = setup({
         activeQuestionId: context.appeal.questionId, activePlayerId: event.playerId, activeStake: null,
         attemptId: context.attemptId + 1, clarifications: 0, heard: '', judgmentStatus: null, announceKind: null,
         judgmentReason: '', phaseStartedAt: null, phaseDurationMs: null, statusLine: 'Повтор ответа' }
+    }),
+    confirmClosedAppeal: assign(({ context }) => {
+      const question = questionById(context.questions, context.activeQuestionId)
+      return { ...settleOutcome(context, question?.value ?? 0, true), announceKind: 'correct' as AnnounceKind, judgmentStatus: 'correct' as const,
+        judgmentReason: 'Апелляция: игрок подтвердил верный ответ', statusLine: 'Апелляция принята' }
+    }),
+    /** Минус только что получен — апелляция доступна сразу, ещё во время реплики ведущей. */
+    openAppealNow: assign(({ context }) => {
+      if (isFinal(context) || context.appeal?.activePlayerId != null || context.announceKind === 'repeat') return {}
+      const questionId = context.activeQuestionId
+      if (!questionId) return {}
+      const windowId = (context.appealSerial ?? 0) + 1
+      const base = { questionId, windowId, queue: [], activePlayerId: null, chooserId: context.chooserId, remainingMs: appealWindowMs, startedAt: Date.now() }
+      if (context.playedIds.includes(questionId)) {
+        if (context.appeal?.questionId === questionId && context.appeal.stage === 'closed') return {}
+        if (eligibleAppealPlayers(context, questionId).length === 0) return { appeal: null }
+        return { appealSerial: windowId, appeal: { ...base, stage: 'closed' as const, lastPlayerId: context.activePlayerId } }
+      }
+      const playerId = context.activePlayerId
+      const outcome = playerId ? context.outcomes?.[questionId]?.[playerId] : undefined
+      if (!playerId || !outcome || outcome.amount > 0 || outcome.correct === true) return {}
+      if (context.appeal?.questionId === questionId && context.appeal.stage === 'open' && context.appeal.lastPlayerId === playerId) return {}
+      return { appealSerial: windowId, appeal: { ...base, stage: 'open' as const, lastPlayerId: playerId } }
     }),
     queueAppeal: assign(({ context, event }) => event.type === 'APPEAL_REQUESTED' && context.appeal
       ? { appeal: { ...context.appeal, queue: [...context.appeal.queue, event.playerId], acceptedRequestIds: [...context.appeal.acceptedRequestIds ?? [], event.requestId] } } : {}),
@@ -844,6 +867,8 @@ export const gameMachine = setup({
     appealTimeUp: ({ context }) => Boolean(context.appeal?.timeUp),
     purposeRoundSummary: ({ event }) => event.type === 'HOST_AUDIO_FINISHED' && event.purpose === 'roundSummary',
     queuedAppeal: ({ context }) => Boolean(context.appeal?.queue.length),
+    openStageAppeal: ({ context }) => context.appeal?.stage === 'open',
+    closedStageAppeal: ({ context }) => context.appeal?.stage === 'closed',
     hasAppeals: ({ context }) => !isFinal(context) && Boolean(context.activeQuestionId && eligibleAppealPlayers(context, context.appeal?.questionId ?? context.activeQuestionId).length),
     normalRound: ({ context }) => !isFinal(context),
 
@@ -981,9 +1006,10 @@ export const gameMachine = setup({
   on: {
     APPEAL_REQUESTED: [
       { guard: and([not(stateIn('paused')), not(stateIn('stopped')), not(stateIn('failed')), 'closedAppeal', 'validAppeal']), actions: 'queueAppeal' },
-      { guard: and([not(stateIn('paused')), 'validAppeal', stateIn('buzzing')]), target: '.appealCue', actions: 'acceptAppeal' },
-      { guard: and([not(stateIn('paused')), 'validAppeal', stateIn('choosing')]), target: '.appealCue', actions: 'acceptAppeal' },
-      { guard: and([not(stateIn('paused')), 'validAppeal', stateIn('appealWindow')]), target: '.appealCue', actions: 'acceptAppeal' },
+      // До раскрытия ответа (ячейка открыта): игрок повторяет ответ.
+      { guard: and([not(stateIn('paused')), 'validAppeal', 'openStageAppeal', or([stateIn('buzzing'), stateIn('announcing')])]), target: '.appealCue', actions: 'acceptAppeal' },
+      // После раскрытия (ячейка закрыта): без повтора — игрок подтвердил «я ответил правильно».
+      { guard: and([not(stateIn('paused')), 'validAppeal', 'closedStageAppeal', or([stateIn('choosing'), stateIn('appealWindow'), stateIn('announcing')])]), target: '.appealConfirm', actions: ['acceptAppeal', 'confirmClosedAppeal'] },
     ],
     RESET_GAME: { target: '.startMenu', actions: 'resetMatch' },
     CONNECTION_LOST: { target: '.failed', actions: 'setError' },
@@ -1213,11 +1239,16 @@ export const gameMachine = setup({
         { target: 'choosing', actions: 'clearAppeals' },
       ],
     },
+    /** Отдельный шаг, чтобы новое объявление звучало даже при входе из announcing. */
+    appealConfirm: {
+      after: { 1: { target: 'announcing' } },
+    },
     appealCue: {
       on: { HOST_AUDIO_FINISHED: { guard: ({ event }) => event.type === 'HOST_AUDIO_FINISHED' && event.purpose === 'appeal', target: 'answering' } },
     },
     appealNext: {
       always: [
+        { guard: and(['queuedAppeal', 'closedStageAppeal']), target: 'appealConfirm', actions: ['nextAppeal', 'confirmClosedAppeal'] },
         { guard: 'queuedAppeal', target: 'appealCue', actions: 'nextAppeal' },
         { target: 'afterQuestion' },
       ],
@@ -1319,7 +1350,7 @@ export const gameMachine = setup({
     },
     announcing: {
       initial: 'speaking',
-      entry: 'clearTimer',
+      entry: ['clearTimer', 'openAppealNow'],
       states: {
         speaking: {
           on: {
