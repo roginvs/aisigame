@@ -16,7 +16,7 @@ test('joiner на телефоне скроллит страницу и дотя
   const invite = await master.getByLabel('Ссылка для игроков').inputValue()
   await master.getByRole('button', { name: 'Закрыть' }).click()
 
-  await joiner.goto(localInviteUrl(invite))
+  await joiner.goto(localInviteUrl(invite, master.url()))
   await joiner.getByLabel('Ваше имя').fill('Гость')
   await joiner.getByRole('button', { name: 'Подключиться' }).click()
   await expect(joiner.getByRole('button', { name: 'Я готов' })).toBeEnabled({ timeout: 60_000 })
@@ -112,10 +112,11 @@ async function expectPageCanScrollVertically(page: Page): Promise<void> {
   expect(sizes.overflowY === 'visible' || sizes.overflowY === 'auto' || sizes.scroll > sizes.client).toBe(true)
 }
 
-function localInviteUrl(invite: string): string {
+function localInviteUrl(invite: string, masterUrl: string): string {
   const url = new URL(invite)
-  url.protocol = 'http:'
-  url.host = '127.0.0.1:5173'
+  const master = new URL(masterUrl)
+  url.protocol = master.protocol
+  url.host = master.host
   url.searchParams.set('mock', '1')
   url.searchParams.set('transport', 'broadcast')
   return url.href

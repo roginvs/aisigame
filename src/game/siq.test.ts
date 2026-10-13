@@ -186,39 +186,27 @@ describe('parseContentXml', () => {
     expect(pack.questions[1]?.media).toEqual([])
   })
 
-  it('reads the bundled packs', () => {
+  it('keeps one bundled demo with the supported question variants', () => {
     const dir = path.resolve(import.meta.dirname, '../../packs')
     const names = readdirSync(dir).filter((name) => name.endsWith('.xml'))
-    expect(names.sort()).toEqual(['demo.xml', 'evening.xml', 'studio.xml', 'tournament.xml'])
-    for (const name of names) {
-      const pack = parseContentXml(readFileSync(path.join(dir, name), 'utf8'))
-      expect(pack.questions.length).toBeGreaterThan(0)
-      expect(pack.rounds.length).toBeGreaterThan(0)
-    }
-    const tournament = parseContentXml(readFileSync(path.join(dir, 'tournament.xml'), 'utf8'))
-    expect(tournament.rounds.map((round) => round.name)).toEqual([
-      'Первый раунд',
-      'Второй раунд',
-      'Третий раунд',
-      'Финал',
-    ])
-    expect(tournament.rounds.at(-1)?.kind).toBe('final')
-    expect(tournament.warnings.length).toBeGreaterThan(0)
-    const studio = parseContentXml(readFileSync(path.join(dir, 'studio.xml'), 'utf8'))
-    expect(studio.questions.map((question) => question.media?.[0]?.kind)).toEqual(['image', 'audio', 'video'])
-    expect(studio.warnings).toEqual([])
+    expect(names).toEqual(['demo.xml'])
+    const demo = parseContentXml(readFileSync(path.join(dir, 'demo.xml'), 'utf8'))
+    expect(demo.rounds.map((round) => round.name)).toEqual(['Разминка', 'Наглядно'])
+    expect(demo.questions).toHaveLength(11)
+    expect(demo.questions.flatMap((question) => question.media ?? []).map((media) => media.kind))
+      .toEqual(['image', 'audio', 'video', 'image'])
+    expect(demo.questions.find((question) => question.themeName === 'Выбор')?.choices).toHaveLength(4)
+    expect(demo.questions.find((question) => question.themeName === 'Показ')?.answerMedia?.[0]?.kind).toBe('image')
+    expect(demo.questions.filter((question) => question.themeName === 'Стопка')).toHaveLength(2)
+    expect(demo.warnings).toEqual([])
   })
 
-  it('embeds the studio picture, sound and clip', async () => {
-    const dir = path.resolve(import.meta.dirname, '../../packs')
-    const zip = new JSZip()
-    zip.file('content.xml', readFileSync(path.join(dir, 'studio.xml')))
-    zip.file('studio/circle.svg', readFileSync(path.join(dir, 'studio/circle.svg')))
-    zip.file('studio/beeps.wav', readFileSync(path.join(dir, 'studio/beeps.wav')))
-    zip.file('studio/square.mp4', readFileSync(path.join(dir, 'studio/square.mp4')))
-    const pack = await loadSiq(await zip.generateAsync({ type: 'arraybuffer' }))
+  it('loads the shipped demo archive with embedded media', async () => {
+    const buffer = readFileSync(path.resolve(import.meta.dirname, '../../public/packs/builtin/demo.siq'))
+    const pack = await loadSiq(buffer.buffer.slice(buffer.byteOffset, buffer.byteOffset + buffer.byteLength))
     expect(pack.warnings).toEqual([])
-    expect(pack.questions.map((question) => question.media?.[0]?.kind)).toEqual(['image', 'audio', 'video'])
-    expect(pack.questions.every((question) => question.media?.[0]?.url.startsWith('blob:'))).toBe(true)
+    const media = pack.questions.flatMap((question) => [...(question.media ?? []), ...(question.answerMedia ?? [])])
+    expect(media.map((item) => item.kind)).toEqual(['image', 'audio', 'video', 'image', 'image'])
+    expect(media.every((item) => item.url.startsWith('blob:'))).toBe(true)
   })
 })

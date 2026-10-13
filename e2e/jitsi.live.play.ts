@@ -68,7 +68,7 @@ test('приложение открывает Jitsi-лобби, передаёт
 
   const localInvite = new URL(invite)
   localInvite.protocol = 'http:'
-  localInvite.host = '127.0.0.1:5173'
+  localInvite.host = new URL(master.url()).host
   await joiner.goto(localInvite.href)
   await joiner.getByLabel('Ваше имя').fill('Live игрок')
   await joiner.getByRole('button', { name: 'Подключиться' }).click()

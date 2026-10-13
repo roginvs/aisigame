@@ -54,7 +54,7 @@ test.describe('конференция на BroadcastChannel', () => {
     await master.getByLabel('Пакет вопросов').selectOption('demo')
     await master.getByLabel('Ваше имя').fill('Мастер')
     await master.getByRole('button', { name: 'Начать игру' }).click()
-    const invite = localInviteUrl(await copyInvite(master))
+    const invite = localInviteUrl(await copyInvite(master), master.url())
     await joiner.goto(`${invite}&mock=1`)
     await joiner.getByLabel('Ваше имя').fill('Гость')
     await joiner.getByRole('button', { name: 'Подключиться' }).click()
@@ -102,7 +102,10 @@ test.describe('конференция на BroadcastChannel', () => {
     await expect(dialog).toBeVisible()
     await expect(dialog.getByRole('img', { name: 'QR-код ссылки для игры' })).toBeVisible()
     const publicLink = dialog.getByLabel('Ссылка для игроков')
-    await expect(publicLink).toHaveValue(/^https:\/\/dev\.fallout-nevada\.ru\//)
+    const masterOrigin = new URL(master.url()).origin
+    expect(new URL(await publicLink.inputValue()).origin).toBe(
+      masterOrigin === 'http://127.0.0.1:5173' ? 'https://dev.fallout-nevada.ru' : masterOrigin,
+    )
     const copyButton = dialog.locator('.invite-copy')
     const copyWidth = (await copyButton.boundingBox())?.width
     await dialog.getByRole('button', { name: 'Скопировать ссылку' }).click()
@@ -119,7 +122,7 @@ test.describe('конференция на BroadcastChannel', () => {
     await expect(copyButton).toHaveAccessibleName('Скопировать ссылку', { timeout: 3_000 })
     expect((await copyButton.boundingBox())?.width).toBe(copyWidth)
     await dialog.getByRole('button', { name: 'Закрыть' }).click()
-    const localInvite = localInviteUrl(invite)
+    const localInvite = localInviteUrl(invite, master.url())
     const joinerUrl = localInvite.includes('mock=1')
       ? localInvite
       : `${localInvite}${localInvite.includes('?') ? '&' : '?'}mock=1`
@@ -190,7 +193,7 @@ test.describe('конференция на BroadcastChannel', () => {
     const roomId = new URL(invite).searchParams.get('join')
     expect(roomId).toBeTruthy()
 
-    const localInvite = localInviteUrl(invite)
+    const localInvite = localInviteUrl(invite, master.url())
     const joinerUrl = `${localInvite}${localInvite.includes('?') ? '&' : '?'}mock=1`
     await joiner.goto(joinerUrl)
     await joiner.getByLabel('Ваше имя').fill('Гость')
@@ -269,7 +272,7 @@ test.describe('конференция на BroadcastChannel', () => {
     await master.getByLabel('Ваше имя').fill('Мастер')
     await master.getByRole('button', { name: 'Начать игру' }).click()
     const invite = await copyInvite(master)
-    const localInvite = localInviteUrl(invite)
+    const localInvite = localInviteUrl(invite, master.url())
     const joinerUrl = `${localInvite}${localInvite.includes('?') ? '&' : '?'}mock=1`
     await joiner.goto(joinerUrl)
     await joiner.getByLabel('Ваше имя').fill('Гость')
@@ -292,7 +295,7 @@ test.describe('конференция на BroadcastChannel', () => {
     await expect(master.getByRole('button', { name: 'Начать игру' })).toBeVisible()
 
     const invite = await copyInvite(master)
-    const localInvite = localInviteUrl(invite)
+    const localInvite = localInviteUrl(invite, master.url())
     const joinerUrl = localInvite.includes('mock=1')
       ? localInvite
       : `${localInvite}${localInvite.includes('?') ? '&' : '?'}mock=1`
@@ -330,10 +333,11 @@ async function copyInvite(page: Page): Promise<string> {
   return invite
 }
 
-function localInviteUrl(invite: string): string {
+function localInviteUrl(invite: string, masterUrl: string): string {
   const url = new URL(invite)
-  url.protocol = 'http:'
-  url.host = '127.0.0.1:5173'
+  const master = new URL(masterUrl)
+  url.protocol = master.protocol
+  url.host = master.host
   return url.href
 }
 

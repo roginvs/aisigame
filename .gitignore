@@ -29,12 +29,5 @@ coverage
 *.sln
 *.sw?
 
-# Local third-party SIGame packs for testing. Project demos in this folder stay tracked.
-public/packs/Nochnye_posidelki_80.siq
-public/packs/Pak_chillovo-knopochny_3.siq
-public/packs/SolyankOchka.siq
-public/packs/Winter_is_Coming.siq
-public/packs/Zhyostkaya_solyanochka.siq
-public/packs/muzykalny_pak.siq
-public/packs/paki_dlya_debilov_v1_7.siq
-public/packs/solyanka_qxesh.siq
+# Local third-party SIGame packs. The built-in demo stays tracked.
+/public/packs/external/

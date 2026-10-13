@@ -1,5 +1,8 @@
 import { defineConfig, devices } from '@playwright/test'
 
+const port = Number(process.env.AISIGAME_TEST_PORT ?? 5173)
+const baseURL = `http://127.0.0.1:${port}`
+
 export default defineConfig({
   testDir: 'e2e',
   testMatch: '**/*.play.ts',
@@ -7,13 +10,13 @@ export default defineConfig({
   fullyParallel: true,
   use: {
     ...devices['Desktop Chrome'],
-    baseURL: 'http://127.0.0.1:5173',
+    baseURL,
     viewport: { width: 1366, height: 768 },
     screenshot: 'only-on-failure',
   },
   webServer: {
-    command: 'npm run dev -- --host 127.0.0.1 --port 5173',
-    url: 'http://127.0.0.1:5173',
+    command: `npm run dev -- --host 127.0.0.1 --port ${port}`,
+    url: baseURL,
     reuseExistingServer: true,
   },
 })

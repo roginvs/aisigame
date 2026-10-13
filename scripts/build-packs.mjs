@@ -4,7 +4,7 @@ import JSZip from 'jszip'
 
 const root = path.resolve(import.meta.dirname, '..')
 const source = path.join(root, 'packs')
-const target = path.join(root, 'public', 'packs')
+const target = path.join(root, 'public', 'packs', 'builtin')
 await mkdir(target, { recursive: true })
 
 const names = (await readdir(source)).filter((name) => name.endsWith('.xml'))

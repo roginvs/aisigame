@@ -12,13 +12,17 @@ const resolvedLocalPacksId = `\0${localPacksId}`
 function readLocalPackFiles(): string[] {
   const dir = path.join(rootDir, 'public/packs')
   if (!fs.existsSync(dir)) return []
-  return fs
-    .readdirSync(dir)
-    .filter((name) => name.toLowerCase().endsWith('.siq'))
-    .sort((left, right) => left.localeCompare(right, 'en'))
+  return ['builtin', 'external'].flatMap((folder) => {
+    const full = path.join(dir, folder)
+    if (!fs.existsSync(full)) return []
+    return fs.readdirSync(full, { withFileTypes: true })
+      .filter((entry) => entry.isFile() && entry.name.toLowerCase().endsWith('.siq'))
+      .map((entry) => `${folder}/${entry.name}`)
+      .sort((left, right) => left.localeCompare(right, 'en'))
+  })
 }
 
-/** Стартовый список — каждый .siq, который реально лежит в public/packs, включая локальные. */
+/** Встроенный демо-пакет и локальные внешние .siq из двух каталогов. */
 function localPackCatalog(): Plugin {
   return {
     name: 'local-pack-catalog',

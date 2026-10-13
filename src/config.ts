@@ -20,7 +20,7 @@ export const gameConfig = {
   },
   welcomeSpeechSpeed: 1.25,
   speechSpeed: 1,
-  questionsPath: 'public/questions/demo.siq',
+  questionsPath: 'public/packs/builtin/demo.siq',
 } as const
 
 export const storageKey = 'aisigame.openaiApiKey'

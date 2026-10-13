@@ -1,4 +1,4 @@
 declare module 'virtual:local-packs' {
-  /** Basenames of `.siq` files currently in `public/packs`. */
+  /** Relative paths such as `builtin/demo.siq` and `external/example.siq`. */
   export const localPackFiles: readonly string[]
 }

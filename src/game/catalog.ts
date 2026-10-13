@@ -1,14 +1,9 @@
 import { localPackFiles } from 'virtual:local-packs'
 
-/** Подписи своих пакетов. Чужой файл из public/packs показывается по имени. */
+/** Подписи встроенных пакетов. Внешний файл показывается по имени. */
 const knownTitles: Record<string, string> = {
-  studio: 'Наглядно: картинка, звук и ролик',
   demo: 'Демо: два раунда',
-  tournament: 'Турнир: три раунда и финал',
-  evening: 'Вечерний: два раунда и финал',
 }
-
-const knownOrder = ['studio', 'demo', 'tournament', 'evening']
 
 export type PackCatalogItem = {
   id: string
@@ -17,26 +12,23 @@ export type PackCatalogItem = {
 }
 
 function stem(file: string): string {
-  return file.replace(/\.siq$/i, '')
+  return file.split('/').at(-1)!.replace(/\.siq$/i, '')
 }
+
+const builtinIds = new Set(localPackFiles.filter((file) => file.startsWith('builtin/')).map(stem))
 
 export const packCatalog: PackCatalogItem[] = localPackFiles
   .filter((file) => file.toLowerCase().endsWith('.siq'))
   .map((file) => {
-    const id = stem(file)
+    const name = stem(file)
+    const builtin = file.startsWith('builtin/')
+    // Сохраняем прежние id для продолжения; одноимённый внешний файл не затеняет встроенный.
+    const id = !builtin && builtinIds.has(name) ? `external/${name}` : name
     return {
       id,
-      title: knownTitles[id] ?? id,
+      title: builtin ? (knownTitles[name] ?? name) : name,
       href: `${import.meta.env.BASE_URL}packs/${file}`,
     }
-  })
-  .sort((left, right) => {
-    const leftRank = knownOrder.indexOf(left.id)
-    const rightRank = knownOrder.indexOf(right.id)
-    const leftOrder = leftRank === -1 ? knownOrder.length : leftRank
-    const rightOrder = rightRank === -1 ? knownOrder.length : rightRank
-    if (leftOrder !== rightOrder) return leftOrder - rightOrder
-    return left.id.localeCompare(right.id, 'en')
   })
 
 export const ownPackId = 'file'
