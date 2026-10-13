@@ -47,3 +47,23 @@ describe('реплики кота и аукциона', () => {
     expect(specialListening('cat.placed')).toBe(false)
   })
 })
+
+import { sessionTools, toolPurposes } from '../realtime/tools.ts'
+import { catRecipientInstructions, specialBidInstructions } from './controller.ts'
+
+describe('инструменты запасного разбора', () => {
+  it('у каждого инструмента сессии есть назначение', () => {
+    for (const tool of sessionTools) expect(toolPurposes[tool.name], tool.name).toBeTruthy()
+    expect(toolPurposes.selectCatRecipient).toBe('catPick')
+    expect(toolPurposes.resolveSpecialBid).toBe('specialBid')
+  })
+  it('инструкции: только кандидаты и варианты экрана', () => {
+    const cat = catRecipientInstructions('Анюте', [{ id: 1, name: 'Анна' }, { id: 3, name: 'Вера' }])
+    expect(cat).toContain('1: Анна\n3: Вера')
+    expect(cat).toContain('playerId — только id из списка')
+    const bid = specialBidInstructions('пас', [{ kind: 'pass' }, { kind: 'stake', amount: 300 }, { kind: 'allIn', amount: 900 }])
+    expect(bid).toContain('- пас: choice=pass')
+    expect(bid).toContain('- 300: choice=amount, amount=300')
+    expect(bid).toContain('- ва-банк 900: choice=allIn')
+  })
+})

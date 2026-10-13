@@ -83,3 +83,6 @@ export const auctionRaiseSteps = [1, 2, 3] as const
 export const defaultRoundPrices = { min: 100, max: 500 } as const
 /** Запасной номинал вопроса, когда в пакете нет ни одной цены. */
 export const defaultQuestionPrice = 100
+
+/** Сколько ждать запасной ответ модели в коте/аукционе, потом переспрос. */
+export const specialToolTimeoutMs = 6000

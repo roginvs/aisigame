@@ -1,9 +1,9 @@
 import type { Actor, SnapshotFrom } from 'xstate'
 import { playTimeoutBeep } from '../audio/beep.ts'
-import { auctionDingMs, audioJudgmentTimings, catMeowMs } from '../options.ts'
+import { auctionDingMs, audioJudgmentTimings, catMeowMs, specialToolTimeoutMs } from '../options.ts'
 import { matchAuctionSpeech, optionLabel } from './auction.ts'
 import { matchCatStake } from './cat.ts'
-import { matchSpokenPlayer, nameHints } from './nameMatch.ts'
+import { matchSpokenPlayer, nameHints, spokenPlayers } from './nameMatch.ts'
 import type { JudgmentInputMode, JudgmentSource, JudgeRequestContext } from '../realtime/judgmentRequest.ts'
 import { JudgmentClock } from './judgmentClock.ts'
 import { gameConfig } from '../config.ts'
@@ -33,7 +33,7 @@ import {
 } from './machine.ts'
 import { falseStartLine, openingChooser, playerName } from './players.ts'
 import { spokenAnswerCue } from './spokenAnswer.ts'
-import type { AnnounceKind, GameContext, JudgmentStatus, SpeechPurpose } from './types.ts'
+import type { AnnounceKind, AuctionOption, GameContext, JudgmentStatus, PlayerId, SpeechPurpose } from './types.ts'
 
 let audioRequestSequence = 0
 
@@ -89,6 +89,7 @@ export function attachController(options: {
   /** Инвалидирует in-flight разбор ставки при смене финалиста. */
   let betEpoch = 0
   let specialEpoch = 0
+  let pendingSpecialTool: { turn: number; path: string; text: string; timer: number; finish: () => boolean; unclear: () => void } | null = null
   let specialIntroTimer: ReturnType<typeof setTimeout> | null = null
   /** Инвалидирует фразу без кнопки после смены окна buzzing. */
   let buzzEpoch = 0
@@ -309,11 +310,13 @@ export function attachController(options: {
         if (expectingToolTurn === null || turn !== expectingToolTurn) return
         if (purpose === 'select') handleSelection(call, turn)
         if (purpose === 'judge') handleJudgment(call, turn)
+        if (purpose === 'catPick' || purpose === 'specialBid') handleSpecialTool(call)
       })
       return
     }
     if (purpose === 'select') handleSelection(call, turn)
     if (purpose === 'judge') handleJudgment(call, turn)
+    if (purpose === 'catPick' || purpose === 'specialBid') handleSpecialTool(call)
   }
 
   let previousRound = actor.getSnapshot().context.roundIndex
@@ -786,9 +789,16 @@ export function attachController(options: {
         return
       }
       const self = matchSpokenPlayer(text, context.players.filter((player) => player.id === special.giverId)) !== null
-      const reason = self ? 'себе оставить нельзя' : 'нужно имя другого игрока'
-      pushJudgeLine(`Услышала: «${text}», ${reason}`)
-      actor.send({ type: 'CAT_PICK_UNCLEAR', reason })
+      if (self && spokenPlayers(text, candidates).length === 0) {
+        pushJudgeLine(`Услышала: «${text}», себе оставить нельзя`)
+        actor.send({ type: 'CAT_PICK_UNCLEAR', reason: 'себе оставить нельзя' })
+        return
+      }
+      // Ни одного или несколько имён — спрашиваем модель, она выбирает только из кандидатов.
+      askSpecialModel(path, 'catPick', 'selectCatRecipient', catRecipientInstructions(text, candidates), text, () => {
+        pushJudgeLine(`Услышала: «${text}», нужно имя другого игрока`)
+        actor.send({ type: 'CAT_PICK_UNCLEAR', reason: 'нужно имя другого игрока' })
+      })
       return
     }
     if (path === 'cat.staking.listening') {
@@ -798,8 +808,10 @@ export function attachController(options: {
         actor.send({ type: 'CAT_STAKE', playerId: special.recipientId, amount })
         return
       }
-      pushJudgeLine(`Услышала: «${text}», нужна ставка ${special.stakeOptions.join(' или ')}`)
-      actor.send({ type: 'CAT_STAKE_UNCLEAR', reason: `услышала «${text}»` })
+      askSpecialModel(path, 'specialBid', 'resolveSpecialBid', specialBidInstructions(text, special.stakeOptions.map((amount) => ({ kind: 'stake' as const, amount }))), text, () => {
+        pushJudgeLine(`Услышала: «${text}», нужна ставка ${special.stakeOptions.join(' или ')}`)
+        actor.send({ type: 'CAT_STAKE_UNCLEAR', reason: `услышала «${text}»` })
+      })
       return
     }
     if (path === 'auction.listening' && special.recipientId !== null) {
@@ -810,9 +822,68 @@ export function attachController(options: {
         actor.send({ type: 'AUCTION_BID', playerId: special.recipientId, option })
         return
       }
-      pushJudgeLine(`Услышала: «${text}», нужен один из вариантов: ${special.options.map(optionLabel).join(', ')}`)
-      actor.send({ type: 'AUCTION_UNCLEAR', reason: `услышала «${text}»` })
+      askSpecialModel(path, 'specialBid', 'resolveSpecialBid', specialBidInstructions(text, special.options), text, () => {
+        pushJudgeLine(`Услышала: «${text}», нужен один из вариантов: ${special.options.map(optionLabel).join(', ')}`)
+        actor.send({ type: 'AUCTION_UNCLEAR', reason: `услышала «${text}»` })
+      })
     }
+  }
+
+  /** Запасной путь: изолированный вызов модели. Принимаем только вариант из списка, иначе — переспрос. */
+  function askSpecialModel(path: string, purpose: string, name: string, instructions: string, text: string, unclear: () => void): void {
+    toolTurn += 1
+    expectingToolTurn = toolTurn
+    const turn = toolTurn
+    const epoch = specialEpoch
+    const finish = () => {
+      if (pendingSpecialTool?.turn !== turn) return false
+      window.clearTimeout(pendingSpecialTool.timer)
+      pendingSpecialTool = null
+      if (expectingToolTurn === turn) expectingToolTurn = null
+      return epoch === specialEpoch && statePath(actor.getSnapshot().value) === path
+    }
+    const timer = window.setTimeout(() => {
+      if (finish()) { pushTrace('note', `${name}: модель не ответила`); unclear() }
+    }, specialToolTimeoutMs)
+    pendingSpecialTool = { turn, path, text, timer, finish, unclear }
+    pushTrace('note', `${name}: локально не разобрала «${text}», спрашиваю модель`)
+    client.requestTool(purpose, turn, name, instructions, true)
+  }
+
+  function handleSpecialTool(call: ToolCall | null): void {
+    const pending = pendingSpecialTool
+    if (!pending || !pending.finish()) return
+    const args = asRecord(call?.arguments)
+    const context = actor.getSnapshot().context
+    const special = context.special
+    if (call) client.sendToolOutput(call.callId, { accepted: true })
+    if (!special || args.confident !== true) { pending.unclear(); return }
+    if (call?.name === 'selectCatRecipient' && pending.path === 'cat.picking') {
+      const playerId = Number(args.playerId)
+      const ok = context.players.some((player) => player.id === playerId && player.id !== special.giverId)
+      if (!ok) { pending.unclear(); return }
+      pushJudgeLine(`Услышала: «${pending.text}» — кот уходит игроку ${nameOf(context, playerId)}`)
+      actor.send({ type: 'CAT_RECIPIENT', playerId })
+      return
+    }
+    if (call?.name !== 'resolveSpecialBid' || special.recipientId === null) { pending.unclear(); return }
+    const amount = Number(args.amount)
+    if (pending.path === 'cat.staking.listening') {
+      if (args.choice !== 'amount' || !special.stakeOptions.includes(amount)) { pending.unclear(); return }
+      pushJudgeLine(`Ставка: ${amount}`)
+      actor.send({ type: 'CAT_STAKE', playerId: special.recipientId, amount })
+      return
+    }
+    if (pending.path === 'auction.listening') {
+      const option = special.options.find((item) => args.choice === 'pass' ? item.kind === 'pass'
+        : args.choice === 'allIn' ? item.kind === 'allIn'
+          : args.choice === 'amount' && item.kind !== 'pass' && item.amount === amount)
+      if (!option) { pending.unclear(); return }
+      pushJudgeLine(`Аукцион: ${optionLabel(option)}`)
+      actor.send({ type: 'AUCTION_BID', playerId: special.recipientId, option })
+      return
+    }
+    pending.unclear()
   }
 
   async function considerBet(itemId: string | null): Promise<void> {
@@ -1624,6 +1695,27 @@ export function awayAnnounceCue(context: GameContext): string {
 }
 
 /** Чьё слово сейчас решает в коте/аукционе (для микса модели и подписи «… делает ставку»). */
+/** Изолированный запрос: кому отдают кота. Кандидаты — только «id: имя», сам выбравший не входит. */
+export function catRecipientInstructions(transcript: string, candidates: Array<{ id: PlayerId; name: string }>): string {
+  return [
+    'Кот в мешке: выбравший игрок отдаёт вопрос другому. Определи, кого он назвал.',
+    'Кандидаты (id: имя):',
+    ...candidates.map((player) => `${player.id}: ${player.name}`),
+    `Распознанный текст: «${transcript}»`,
+    'Вызови selectCatRecipient. playerId — только id из списка. Если имя не прозвучало или подходит нескольким — confident=false, playerId=0.',
+  ].join('\n')
+}
+
+/** Изолированный запрос: какой из вариантов ставки на экране назвал игрок. */
+export function specialBidInstructions(transcript: string, options: AuctionOption[]): string {
+  return [
+    'Игрок называет ставку. Допустимы только варианты на экране:',
+    ...options.map((option) => option.kind === 'pass' ? '- пас: choice=pass' : option.kind === 'allIn' ? `- ва-банк ${option.amount}: choice=allIn` : `- ${option.amount}: choice=amount, amount=${option.amount}`),
+    `Распознанный текст: «${transcript}»`,
+    'Вызови resolveSpecialBid. Не выдумывай сумм вне списка. Если неясно — choice=unclear, confident=false.',
+  ].join('\n')
+}
+
 export function specialListenerId(path: string, context: GameContext): number | null {
   const special = context.special
   if (!special) return null

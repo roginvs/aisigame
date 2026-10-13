@@ -91,9 +91,31 @@ test('аукцион: торг кнопками, перекуп и пас', asyn
   await expect(page.getByRole('group', { name: 'Игрок 2: 0' })).toBeVisible()
 })
 
-async function startSpecialRound(page: Page): Promise<void> {
+test('кот: запасной разбор моделью (имя и ставка), минус ставки и апелляция на ставку', async ({ page }) => {
+  await startSpecialRound(page, 'Анна; Борис; Вера;')
+  await page.getByRole('button', { name: 'Сюрприз, 200', exact: true }).click()
+  const panel = page.getByRole('article', { name: 'Кот в мешке' })
+  await expect(panel).toHaveAttribute('data-listening', 'true')
+  const giverLine = (await panel.locator('.special-status').textContent()) ?? ''
+  const [target, nick] = giverLine.startsWith('Анна') ? ['Вера', 'Верунчик'] : ['Анна', 'Анюта']
+  // Ласкательное имя локально не узнаётся — решает модель (здесь заглушка), только из кандидатов.
+  await hear(page, `пусть будет ${nick}`)
+  await expect(panel.getByRole('group', { name: 'Ставка' })).toBeVisible()
+  await expect(panel).toHaveAttribute('data-listening', 'true')
+  await hear(page, 'давайте по-крупному')
+  await expect(page.getByRole('heading', { name: 'Какое животное самое быстрое на суше?' })).toBeVisible()
+  await answer(page, 'не знаю')
+  const group = page.getByRole('group', { name: `${target}: -300` })
+  await expect(group).toBeVisible()
+  await group.getByRole('button', { name: 'Апелляция' }).click()
+  await page.getByRole('button', { name: 'Да, я ответил правильно' }).click()
+  await expect(page.getByRole('group', { name: `${target}: 300` })).toBeVisible()
+})
+
+async function startSpecialRound(page: Page, names?: string): Promise<void> {
   await page.goto('/')
   await page.getByLabel('Модель').selectOption('mock')
+  if (names) await page.getByLabel('Имена игроков').fill(names)
   await page.getByLabel('Пакет вопросов').selectOption('demo')
   await page.getByRole('button', { name: 'Начать игру' }).click()
   await expect(page.getByRole('status').filter({ hasText: 'назовите тему и стоимость' })).toBeVisible()

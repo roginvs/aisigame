@@ -230,7 +230,10 @@ export class MockRealtimeClient implements GameVoice {
     const call: ToolCall = {
       name,
       callId: `mock-call-${++this.callSeq}`,
-      arguments: name === 'submitAnswerJudgment' ? judgeArguments(instructions) : selectArguments(instructions),
+      arguments: name === 'submitAnswerJudgment' ? judgeArguments(instructions)
+        : name === 'selectCatRecipient' ? catRecipientArguments(instructions)
+          : name === 'resolveSpecialBid' ? specialBidArguments(instructions)
+            : selectArguments(instructions),
     }
     window.setTimeout(() => this.onToolCall(call, purpose, turn), speechPauseMs)
   }
@@ -389,6 +392,29 @@ function announceLine(instructions: string): string {
     return 'Ничего не услышала, минус.'
   }
   return 'Дальше.'
+}
+
+/** Мок запасного выбора получателя: имя по первым двум буквам, ровно один кандидат. */
+function catRecipientArguments(instructions: string): Record<string, unknown> {
+  const heard = quoted(instructions, 'Распознанный текст')
+  const words = normalize(heard).split(' ').filter(Boolean)
+  const candidates = [...instructions.matchAll(/^(\d+): (.+)$/gm)].map((match) => ({ id: Number(match[1]), name: normalize(match[2] ?? '') }))
+  const hits = candidates.filter((candidate) => words.some((word) => word.length >= 3 && word.slice(0, 2) === candidate.name.slice(0, 2)))
+  const hit = hits.length === 1 ? hits[0] : undefined
+  return { playerId: hit?.id ?? 0, confident: Boolean(hit), heard }
+}
+
+/** Мок запасной ставки: «по-крупному» — максимум, «поскромнее» — минимум, «до конца» — ва-банк, «отказываюсь» — пас. */
+function specialBidArguments(instructions: string): Record<string, unknown> {
+  const heard = quoted(instructions, 'Распознанный текст')
+  const text = normalize(heard)
+  const amounts = [...instructions.matchAll(/choice=amount, amount=(\d+)/g)].map((match) => Number(match[1]))
+  const has = (kind: string) => instructions.includes(`choice=${kind}`)
+  if (/отказ|сдаюсь/.test(text) && has('pass')) return { choice: 'pass', amount: 0, confident: true, heard }
+  if (/до конца/.test(text) && has('allIn')) return { choice: 'allIn', amount: 0, confident: true, heard }
+  if (/крупн/.test(text) && amounts.length) return { choice: 'amount', amount: Math.max(...amounts), confident: true, heard }
+  if (/скромн/.test(text) && amounts.length) return { choice: 'amount', amount: Math.min(...amounts), confident: true, heard }
+  return { choice: 'unclear', amount: 0, confident: false, heard }
 }
 
 function selectArguments(instructions: string): Record<string, unknown> {

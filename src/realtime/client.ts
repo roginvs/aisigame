@@ -7,7 +7,7 @@ import type { HostAudioTimers, OutputCutState } from './playback.ts'
 import { isolatedCue, isolatedToolResponse, speechMatches, speechOverruns, verbatimResponse } from './speechMatch.ts'
 import { AudioItems, type AudioReference, type AudioItemReady } from './audioItems.ts'
 import { audioJudgmentCapable, type JudgmentCapabilities, type JudgeRequestContext } from './judgmentRequest.ts'
-import { sessionTools } from './tools.ts'
+import { sessionTools, toolPurposes } from './tools.ts'
 import { createSilentMicStream } from './pcm.ts'
 import type { VoiceWire } from './wire.ts'
 import { echoesAnswerPrompt } from '../game/answerPrompt.ts'
@@ -951,12 +951,12 @@ export class RealtimeClient {
     if (!call && !this.speech?.expect && earlyPurpose !== 'read') {
       for (const line of assistantUtterances(response)) this.publishHostLine(line, earlyPurpose)
     }
-    if (call?.name === 'selectQuestion' || call?.name === 'submitAnswerJudgment') {
+    if (call && toolPurposes[call.name]) {
       // Не трогаем speech: оценка может прийти уже после таймаута, когда
       // announce/read уже идёт. Раньше здесь обнуляли речь — stopped не
       // вызывал finishSpeech, и партия зависала в announcing.
       const turn = Number(earlyMeta.turn)
-      const purpose = call.name === 'selectQuestion' ? 'select' : 'judge'
+      const purpose = toolPurposes[call.name]!
       const pending = this.pendingTool
       if (pending && !Number.isNaN(turn) && turn !== pending.turn) {
         pushTrace('note', `поздний ${call.name} turn=${turn}, жду ${pending.turn}`)
