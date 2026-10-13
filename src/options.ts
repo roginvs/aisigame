@@ -38,6 +38,12 @@ export const matchTimings = {
    * столько ещё держим табло, чтобы клип успел прозвучать.
    */
   answerMediaHoldMs: 4_000,
+  /** Кот в мешке: пауза на «мяу» перед первой фразой ведущей. */
+  catMeowMs: 1_100,
+  /** Аукцион: пауза на «динь-динь-динь» перед первой фразой. */
+  auctionDingMs: 1_300,
+  /** Сколько ждём отключившегося получателя кота / участника торгов. */
+  catAwayWaitMs: 15_000,
 } as const
 
 export const {
@@ -61,7 +67,20 @@ export const {
   buzzerBeepMs,
   timeoutBeepMs,
   answerMediaHoldMs,
+  catMeowMs,
+  auctionDingMs,
+  catAwayWaitMs,
 } = matchTimings
 
 /** Native audio judging budgets; the game's judgeMs is unchanged. */
 export const audioJudgmentTimings = { readyMs: 1500, responseMs: 12_000 } as const
+
+/** Аукцион: множители номинала на открытии торгов. */
+export const auctionOpenMultipliers = [1, 2, 3, 4] as const
+/** Аукцион: на сколько номиналов можно перекупить. */
+export const auctionRaiseSteps = [1, 2, 3] as const
+/** Запасные цены раунда, когда в пакете их нет совсем. */
+export const defaultRoundPrices = { min: 100, max: 500 } as const
+/** Запасной номинал вопроса, когда в пакете нет ни одной цены. */
+export const defaultQuestionPrice = 100
+

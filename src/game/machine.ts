@@ -1,6 +1,9 @@
 import { and, assign, not, or, setup, stateIn } from 'xstate'
-import { appealMsLeft, appealRequestError, appealWindowMs, eligibleAppealPlayers, settleOutcome } from './appeals.ts'
+import { auctionOptions, nextAuctionBidder, sameOption } from './auction.ts'
+import { autoCatRecipient, nextInCircle } from './cat.ts'
+import { appealMsLeft, appealRequestError, appealStake, appealWindowMs, eligibleAppealPlayers, settleOutcome } from './appeals.ts'
 import { gameConfig } from '../config.ts'
+import { catAwayWaitMs } from '../options.ts'
 import { questionSpeech } from './choices.ts'
 import { earlyBuzzerMsFor } from './earlyBuzzer.ts'
 import { findQuestion, nextPlayableRound, questionById, questionsInRound } from './pack.ts'
@@ -8,7 +11,7 @@ import { defaultPlayers, openingChooser } from './players.ts'
 import { demoPack } from './questions.ts'
 import { publicAnswerHasPlayable } from './reveal.ts'
 import { restoredMatch } from './savedGame.ts'
-import type { AnnounceKind, GameContext, GameEvent, JudgmentStatus, Player, PlayerId, QuestionPack } from './types.ts'
+import type { AnnounceKind, GameContext, GameEvent, JudgmentStatus, Player, PlayerId, QuestionPack, SpecialState } from './types.ts'
 
 /** true — назвать фальстарт. Тесты подменяют flip, чтобы не зависеть от случайности. */
 export const falseStartCoin = {
@@ -71,6 +74,7 @@ function blankMatch(pack: QuestionPack, players?: Player[]): GameContext {
     earlyStartedAt: null,
     pauseStartedAt: null,
     falseStarts: {},
+    special: null,
   }
 }
 
@@ -129,8 +133,55 @@ function addMissed(missed: PlayerId[], playerId: PlayerId | null): PlayerId[] {
   return [...missed, playerId]
 }
 
+/** Кот в мешке или аукцион на текущей ячейке. */
+export function isSpecial(context: GameContext): boolean {
+  return Boolean(context.special && context.special.questionId === context.activeQuestionId)
+}
+
+function baseSpecial(kind: SpecialState['kind'], questionId: string, giverId: PlayerId, patch: Partial<SpecialState>): SpecialState {
+  return {
+    kind, questionId, giverId, recipientId: null, stakeOptions: [], stake: null, nominal: 0,
+    order: [], passed: [], leaderId: null, bid: null, allIn: false, options: [], log: [], unclear: '',
+    awayPlayerId: null, awayFrom: null, awayNextChooser: null, ...patch,
+  }
+}
+
+function playerName(context: GameContext, id: PlayerId | null | undefined): string {
+  return context.players.find((player) => player.id === id)?.name ?? `Игрок ${id ?? ''}`
+}
+
+function circleFrom(players: Player[], firstId: PlayerId): PlayerId[] {
+  const start = Math.max(0, players.findIndex((player) => player.id === firstId))
+  return players.map((_, offset) => players[(start + offset) % players.length]!.id)
+}
+
+function auctionNext(context: GameContext) {
+  const special = context.special!
+  return nextAuctionBidder({
+    order: special.order, fromId: special.recipientId ?? special.giverId, leaderId: special.leaderId, passed: special.passed,
+    scoreOf: (id) => playerScore(context, id), nominal: special.nominal, bid: special.bid, allIn: special.allIn,
+  })
+}
+
+function selectedQuestion(context: GameContext, event: GameEvent) {
+  if (event.type !== 'QUESTION_SELECTED') return undefined
+  const question = findQuestion(context.questions, context.roundIndex, event.themeId, event.value, roundKind(context), context.playedIds)
+  return question && !context.playedIds.includes(question.id) ? question : undefined
+}
+
+function awayPatch(context: GameContext, event: GameEvent, from: NonNullable<SpecialState['awayFrom']>): Partial<GameContext> {
+  if (event.type !== 'SPECIAL_PLAYER_OFFLINE' || !context.special) return {}
+  return {
+    special: { ...context.special, awayPlayerId: event.playerId, awayFrom: from, awayNextChooser: event.nextChooserId },
+    statusLine: `Ждём игрока ${playerName(context, event.playerId)}`,
+    phaseStartedAt: Date.now(), phaseDurationMs: catAwayWaitMs,
+  }
+}
+
+const heardPurpose = (purpose: string) => ({ event }: { event: GameEvent }) => event.type === 'HOST_AUDIO_FINISHED' && event.purpose === purpose
+
 function othersCanBuzz(context: GameContext, missed: PlayerId[]): boolean {
-  if (isFinal(context)) return false
+  if (isFinal(context) || isSpecial(context)) return false
   return context.players.some((player) => !missed.includes(player.id))
 }
 
@@ -302,6 +353,7 @@ export const gameMachine = setup({
     cellFlashMs: gameConfig.cellFlashMs,
     earlyLeft: ({ context }) => context.earlyLeftMs ?? gameConfig.earlyBuzzerMs,
     answerMediaHoldMs: gameConfig.answerMediaHoldMs,
+    catAwayWaitMs: catAwayWaitMs,
   },
   actions: {
     clearAppeals: assign({ appeal: () => null }),
@@ -320,13 +372,14 @@ export const gameMachine = setup({
     acceptAppeal: assign(({ context, event }) => {
       if (event.type !== 'APPEAL_REQUESTED' || !context.appeal) return {}
       return { appeal: { ...context.appeal, activePlayerId: event.playerId, startedAt: null, acceptedRequestIds: [...context.appeal.acceptedRequestIds ?? [], event.requestId] },
-        activeQuestionId: context.appeal.questionId, activePlayerId: event.playerId, activeStake: null,
+        activeQuestionId: context.appeal.questionId, activePlayerId: event.playerId,
+        activeStake: context.outcomes?.[context.appeal.questionId]?.[event.playerId]?.stake ?? null,
         attemptId: context.attemptId + 1, clarifications: 0, heard: '', judgmentStatus: null, announceKind: null,
         judgmentReason: '', phaseStartedAt: null, phaseDurationMs: null, statusLine: 'Повтор ответа' }
     }),
     confirmClosedAppeal: assign(({ context }) => {
-      const question = questionById(context.questions, context.activeQuestionId)
-      return { ...settleOutcome(context, question?.value ?? 0, true), announceKind: 'correct' as AnnounceKind, judgmentStatus: 'correct' as const,
+      const amount = context.activeQuestionId ? appealStake(context, context.activeQuestionId, context.activePlayerId) : 0
+      return { ...settleOutcome(context, amount, true), announceKind: 'correct' as AnnounceKind, judgmentStatus: 'correct' as const,
         judgmentReason: 'Апелляция: игрок подтвердил верный ответ', statusLine: 'Апелляция принята' }
     }),
     /** Минус только что получен — апелляция доступна сразу, ещё во время реплики ведущей. */
@@ -475,6 +528,7 @@ export const gameMachine = setup({
     }),
     openQuestion: assign({
       appeal: () => null,
+      special: () => null,
       activeQuestionId: ({ context, event }) => {
         if (event.type !== 'QUESTION_SELECTED') return null
         return (
@@ -588,6 +642,115 @@ export const gameMachine = setup({
         event.type === 'BUZZER_PRESSED' ? `Отвечает игрок ${event.playerId}` : 'Отвечает игрок',
       phaseStartedAt: () => null,
       phaseDurationMs: () => null,
+    }),
+    startCat: assign(({ context }) => {
+      const question = questionById(context.questions, context.activeQuestionId)
+      if (!question?.cat) return {}
+      const giverId = context.chooserId
+      return {
+        special: baseSpecial('cat', question.id, giverId, { recipientId: autoCatRecipient(context.players, giverId), stakeOptions: question.cat.options, nominal: question.value }),
+        statusLine: 'Кот в мешке', phaseStartedAt: null, phaseDurationMs: null,
+      }
+    }),
+    handoffCatGiver: assign(({ context, event }) => {
+      if (event.type !== 'CHOOSER_OFFLINE' || !context.special) return {}
+      return { chooserId: event.toPlayerId, special: { ...context.special, giverId: event.toPlayerId, recipientId: autoCatRecipient(context.players, event.toPlayerId) } }
+    }),
+    setCatRecipient: assign(({ context, event }) => {
+      if (event.type !== 'CAT_RECIPIENT' || !context.special) return {}
+      return { special: { ...context.special, recipientId: event.playerId, unclear: '' }, statusLine: `Кот у игрока ${playerName(context, event.playerId)}` }
+    }),
+    noteSpecialUnclear: assign(({ context, event }) => {
+      if (!context.special) return {}
+      const reason = event.type === 'CAT_PICK_UNCLEAR' || event.type === 'CAT_STAKE_UNCLEAR' || event.type === 'AUCTION_UNCLEAR' ? event.reason : ''
+      return { special: { ...context.special, unclear: reason } }
+    }),
+    setCatStake: assign(({ context, event }) => {
+      if (event.type !== 'CAT_STAKE' || !context.special) return {}
+      return { special: { ...context.special, stake: event.amount, unclear: '' } }
+    }),
+    setCatFixedStake: assign(({ context }) => context.special ? { special: { ...context.special, stake: context.special.stakeOptions[0] ?? context.special.nominal } } : {}),
+    placeSpecial: assign(({ context }) => {
+      const special = context.special
+      if (!special) return {}
+      const playerId = special.kind === 'cat' ? special.recipientId : special.leaderId
+      const stake = special.kind === 'cat' ? special.stake : special.bid
+      return { activePlayerId: playerId, activeStake: stake ?? special.nominal, missedIds: [], statusLine: `${playerName(context, playerId)} отвечает за ${stake ?? special.nominal}` }
+    }),
+    beginSpecialAnswer: assign(({ context }) => ({
+      attemptId: context.attemptId + 1, clarifications: 0, heard: '', judgmentReason: '', judgmentStatus: null, announceKind: null,
+      statusLine: `Отвечает игрок ${playerName(context, context.activePlayerId)}`,
+    })),
+    startAuction: assign(({ context }) => {
+      const question = questionById(context.questions, context.activeQuestionId)
+      if (!question?.auction) return {}
+      const giverId = context.chooserId
+      const nominal = question.value
+      const open = auctionOptions({ nominal, money: playerScore(context, giverId), current: null, currentAllIn: false, opening: true })
+      const auto = open.auto
+      return {
+        special: baseSpecial('auction', question.id, giverId, {
+          recipientId: giverId, nominal, order: circleFrom(context.players, giverId), options: open.options,
+          bid: auto ?? null, leaderId: auto === undefined ? null : giverId,
+          log: auto === undefined ? [] : [`${playerName(context, giverId)} — ${auto}, автоматически`],
+        }),
+        statusLine: 'Аукцион', phaseStartedAt: null, phaseDurationMs: null,
+      }
+    }),
+    auctionAutoOpen: assign(({ context }) => {
+      const special = context.special
+      if (!special) return {}
+      return { special: { ...special, bid: special.nominal, leaderId: special.giverId, options: [], log: [...special.log, `${playerName(context, special.giverId)} — ${special.nominal}, автоматически`] } }
+    }),
+    applyAuctionBid: assign(({ context, event }) => {
+      const special = context.special
+      if (event.type !== 'AUCTION_BID' || !special) return {}
+      const name = playerName(context, event.playerId)
+      if (event.option.kind === 'pass') return { special: { ...special, passed: [...special.passed, event.playerId], options: [], unclear: '', log: [...special.log, `${name} — пас`] } }
+      const allIn = event.option.kind === 'allIn'
+      return { special: { ...special, bid: event.option.amount, leaderId: event.playerId, allIn, options: [], unclear: '',
+        log: [...special.log, `${name} — ${allIn ? 'ва-банк ' : ''}${event.option.amount}`] } }
+    }),
+    nextAuctionBidder: assign(({ context }) => {
+      const special = context.special
+      if (!special) return {}
+      const next = auctionNext(context)
+      return { special: { ...special, recipientId: next.bidderId, options: next.options, passed: [...special.passed, ...next.autoPassed],
+        log: [...special.log, ...next.autoPassed.map((id) => `${playerName(context, id)} — пас (не хватает денег)`)] },
+        statusLine: `${playerName(context, next.bidderId)} решает, перекупать ли` }
+    }),
+    auctionWinner: assign(({ context }) => {
+      const special = context.special
+      if (!special) return {}
+      const next = auctionNext(context)
+      return { special: { ...special, recipientId: null, options: [], passed: [...special.passed, ...next.autoPassed],
+        log: [...special.log, ...next.autoPassed.map((id) => `${playerName(context, id)} — пас (не хватает денег)`)] },
+        statusLine: `Вопрос уходит игроку ${playerName(context, special.leaderId)} за ${special.bid ?? special.nominal}` }
+    }),
+    markAwayStaking: assign(({ context, event }) => awayPatch(context, event, 'staking')),
+    markAwayBidding: assign(({ context, event }) => awayPatch(context, event, 'bidding')),
+    markAwayAnswering: assign(({ context, event }) => ({ ...awayPatch(context, event, 'answering'), attemptId: context.attemptId + 1 })),
+    clearAway: assign(({ context }) => context.special ? { special: { ...context.special, awayPlayerId: null, awayFrom: null, awayNextChooser: null }, phaseStartedAt: null, phaseDurationMs: null } : {}),
+    restartAwayClock: assign({ phaseStartedAt: () => Date.now(), phaseDurationMs: () => catAwayWaitMs }),
+    rearmSpecialAnswer: assign(({ context }) => ({ attemptId: context.attemptId + 1, clarifications: 0, heard: '' })),
+    awayAutoPass: assign(({ context }) => {
+      const special = context.special
+      if (!special?.awayPlayerId) return {}
+      return { special: { ...special, passed: [...special.passed, special.awayPlayerId], options: [], awayPlayerId: null, awayFrom: null, awayNextChooser: null,
+        log: [...special.log, `${playerName(context, special.awayPlayerId)} — пас (не в сети)`] }, phaseStartedAt: null, phaseDurationMs: null }
+    }),
+    awayCloseQuestion: assign(({ context }) => {
+      const special = context.special
+      const away = special?.awayPlayerId ?? context.activePlayerId
+      const chooser = special?.awayNextChooser ?? (away ? nextInCircle(context.players, away) : null) ?? context.chooserId
+      return {
+        playedIds: withPlayed(context.playedIds, context.activeQuestionId),
+        announceKind: 'away' as AnnounceKind, judgmentStatus: null, sayCloseGuess: false,
+        activePlayerId: away ?? context.activePlayerId,
+        chooserId: chooser,
+        statusLine: `${playerName(context, away)} не вернулся, идём дальше`,
+        phaseStartedAt: null, phaseDurationMs: null,
+      }
     }),
     startAnswerTimer: assign({
       phaseStartedAt: () => Date.now(),
@@ -891,7 +1054,7 @@ export const gameMachine = setup({
     sayFalseStart: ({ context }) => context.sayFalseStart,
     readFinal: ({ context, event }) =>
       event.type === 'HOST_AUDIO_FINISHED' && event.purpose === 'read' && isFinal(context),
-    earlyBuzzAllowed: ({ context }) => !isFinal(context),
+    earlyBuzzAllowed: ({ context }) => !isFinal(context) && !isSpecial(context),
     moreFinalists: ({ context, event }) =>
       event.type === 'HOST_AUDIO_FINISHED' &&
       event.purpose === 'announce' &&
@@ -976,6 +1139,7 @@ export const gameMachine = setup({
       event.type === 'BUZZER_PRESSED' &&
       inRoster(context, event.playerId) &&
       !isFinal(context) &&
+      !isSpecial(context) &&
       !falseStartCooling(context.falseStarts[event.playerId], Date.now()),
     othersCanAnswer: ({ context, event }) =>
       event.type === 'HOST_AUDIO_FINISHED' &&
@@ -987,6 +1151,33 @@ export const gameMachine = setup({
     hasNextRound: ({ context }) =>
       nextPlayableRound(context.rounds, context.questions, context.roundIndex) !== -1,
     pausedAfterFinish: ({ context }) => context.resumePath === 'finished',
+    selectedCat: ({ context, event }) => !isFinal(context) && Boolean(selectedQuestion(context, event)?.cat),
+    selectedAuction: ({ context, event }) => !isFinal(context) && Boolean(selectedQuestion(context, event)?.auction),
+    catHasRecipient: ({ context }) => context.special?.recipientId != null,
+    catFixed: ({ context }) => (context.special?.stakeOptions.length ?? 0) <= 1,
+    validCatRecipient: ({ context, event }) =>
+      event.type === 'CAT_RECIPIENT' && context.special?.kind === 'cat' && context.special.recipientId === null &&
+      event.playerId !== context.special.giverId && inRoster(context, event.playerId),
+    validCatStake: ({ context, event }) =>
+      event.type === 'CAT_STAKE' && context.special?.kind === 'cat' && event.playerId === context.special.recipientId &&
+      context.special.stakeOptions.includes(event.amount),
+    catGiverOffline: ({ context, event }) =>
+      event.type === 'CHOOSER_OFFLINE' && context.special?.kind === 'cat' && context.special.recipientId === null &&
+      event.fromPlayerId === context.special.giverId && event.toPlayerId !== event.fromPlayerId && inRoster(context, event.toPlayerId),
+    auctionHasBid: ({ context }) => context.special?.bid != null,
+    auctionOpenerOffline: ({ context, event }) =>
+      event.type === 'CHOOSER_OFFLINE' && context.special?.kind === 'auction' && context.special.bid === null && event.fromPlayerId === context.special.giverId,
+    validAuctionBid: ({ context, event }) =>
+      event.type === 'AUCTION_BID' && context.special?.kind === 'auction' && event.playerId === context.special.recipientId &&
+      context.special.options.some((option) => sameOption(option, event.option)),
+    auctionContinues: ({ context }) => context.special?.kind === 'auction' && auctionNext(context).bidderId !== null,
+    auctionAwaitingBid: ({ context }) => context.special?.kind === 'auction' && context.special.recipientId !== null && context.special.options.length > 0,
+    readSpecial: ({ context, event }) => event.type === 'HOST_AUDIO_FINISHED' && event.purpose === 'read' && isSpecial(context),
+    awayRecipient: ({ context, event }) => event.type === 'SPECIAL_PLAYER_OFFLINE' && context.special?.recipientId === event.playerId,
+    awayAnswerer: ({ context, event }) => event.type === 'SPECIAL_PLAYER_OFFLINE' && isSpecial(context) && context.activePlayerId === event.playerId,
+    awayBack: ({ context, event }) => event.type === 'SPECIAL_PLAYER_BACK' && context.special?.awayPlayerId === event.playerId,
+    awayFromStaking: ({ context }) => context.special?.awayFrom === 'staking',
+    awayFromBidding: ({ context }) => context.special?.awayFrom === 'bidding',
     pendingRestore: ({ context }) => context.resumePath !== '',
     samePlayerRepeats: ({ context, event }) =>
       event.type === 'HOST_AUDIO_FINISHED' && event.purpose === 'announce' && context.announceKind === 'repeat',
@@ -1010,6 +1201,11 @@ export const gameMachine = setup({
       { guard: and([not(stateIn('paused')), 'validAppeal', 'openStageAppeal', or([stateIn('buzzing'), stateIn('announcing')])]), target: '.appealCue', actions: 'acceptAppeal' },
       // После раскрытия (ячейка закрыта): без повтора — игрок подтвердил «я ответил правильно».
       { guard: and([not(stateIn('paused')), 'validAppeal', 'closedStageAppeal', or([stateIn('choosing'), stateIn('appealWindow'), stateIn('announcing')])]), target: '.appealConfirm', actions: ['acceptAppeal', 'confirmClosedAppeal'] },
+    ],
+    SPECIAL_PLAYER_OFFLINE: [
+      { guard: and([stateIn('cat.staking'), 'awayRecipient']), target: '.specialAway', actions: 'markAwayStaking' },
+      { guard: and([or([stateIn('auction.asking'), stateIn('auction.listening'), stateIn('auction.resolving'), stateIn('auction.clarifying')]), 'awayRecipient']), target: '.specialAway', actions: 'markAwayBidding' },
+      { guard: and([or([stateIn('answering'), stateIn('judging')]), 'awayAnswerer']), target: '.specialAway', actions: 'markAwayAnswering' },
     ],
     RESET_GAME: { target: '.startMenu', actions: 'resetMatch' },
     CONNECTION_LOST: { target: '.failed', actions: 'setError' },
@@ -1055,6 +1251,9 @@ export const gameMachine = setup({
     },
     restoring: {
       always: [
+        { guard: ({ context }) => context.resumePath.startsWith('cat.'), target: 'cat.resume', actions: 'clearResume' },
+        { guard: ({ context }) => context.resumePath.startsWith('auction.'), target: 'auction.resume', actions: 'clearResume' },
+        { guard: ({ context }) => context.resumePath === 'specialAway', target: 'specialAway', actions: ['clearResume', 'restartAwayClock'] },
         { guard: ({ context }) => context.resumePath === 'appealCue', target: 'appealCue', actions: 'clearResume' },
         { guard: ({ context }) => context.resumePath === 'appealWindow', target: 'appealWindow', actions: ['clearResume', 'restartAppealClock'] },
         { guard: ({ context }) => context.resumePath === 'welcoming', target: 'welcoming', actions: 'clearResume' },
@@ -1110,6 +1309,8 @@ export const gameMachine = setup({
             QUESTION_SELECTED: [
               { guard: 'finalWithoutPlayers', target: '#game.finished' },
               { guard: 'finalQuestion', target: '#game.finalBets', actions: ['openQuestion', 'prepareFinalists'] },
+              { guard: 'selectedCat', target: '#game.cat', actions: ['openQuestion', 'startCat'] },
+              { guard: 'selectedAuction', target: '#game.auction', actions: ['openQuestion', 'startAuction'] },
               { guard: 'questionAvailable', target: '#game.flashing', actions: 'openQuestion' },
               { target: 'clarifying', actions: 'noteUnavailable' },
             ],
@@ -1123,6 +1324,8 @@ export const gameMachine = setup({
             QUESTION_SELECTED: [
               { guard: 'finalWithoutPlayers', target: '#game.finished' },
               { guard: 'finalQuestion', target: '#game.finalBets', actions: ['openQuestion', 'prepareFinalists'] },
+              { guard: 'selectedCat', target: '#game.cat', actions: ['openQuestion', 'startCat'] },
+              { guard: 'selectedAuction', target: '#game.auction', actions: ['openQuestion', 'startAuction'] },
               { guard: 'questionAvailable', target: '#game.flashing', actions: 'openQuestion' },
               { target: 'clarifying', actions: 'noteUnavailable' },
             ],
@@ -1147,6 +1350,166 @@ export const gameMachine = setup({
         HOST_AUDIO_FINISHED: { guard: 'purposeChooserHandoff', target: 'choosing' },
       },
     },
+    cat: {
+      initial: 'announcing',
+      on: {
+        CHOOSER_OFFLINE: { guard: 'catGiverOffline', target: '.announcing', reenter: true, actions: 'handoffCatGiver' },
+      },
+      states: {
+        announcing: {
+          on: {
+            HOST_AUDIO_FINISHED: [
+              { guard: and([heardPurpose('cat'), 'catHasRecipient']), target: 'staking' },
+              { guard: heardPurpose('cat'), target: 'picking' },
+            ],
+            CAT_RECIPIENT: { guard: 'validCatRecipient', target: '#game.cat.staking', actions: 'setCatRecipient' },
+          },
+        },
+        picking: {
+          on: {
+            PLAYER_SPEECH_FINISHED: 'resolving',
+            CAT_RECIPIENT: { guard: 'validCatRecipient', target: '#game.cat.staking', actions: 'setCatRecipient' },
+            CAT_PICK_UNCLEAR: { target: 'clarifying', actions: 'noteSpecialUnclear' },
+          },
+        },
+        /** Как choosing.resolving: локально не узнали — модель выбирает из кандидатов. */
+        resolving: {
+          after: { judgeMs: 'picking' },
+          on: {
+            CAT_RECIPIENT: { guard: 'validCatRecipient', target: '#game.cat.staking', actions: 'setCatRecipient' },
+            CAT_PICK_UNCLEAR: { target: 'clarifying', actions: 'noteSpecialUnclear' },
+            SELECTION_FAILED: 'picking',
+          },
+        },
+        clarifying: {
+          on: {
+            HOST_AUDIO_FINISHED: { guard: heardPurpose('catClarify'), target: 'picking' },
+            PLAYER_SPEECH_STARTED: 'picking',
+            CAT_RECIPIENT: { guard: 'validCatRecipient', target: '#game.cat.staking', actions: 'setCatRecipient' },
+          },
+        },
+        staking: {
+          initial: 'asking',
+          on: {
+            CAT_STAKE: { guard: 'validCatStake', target: 'placed', actions: 'setCatStake' },
+          },
+          states: {
+            asking: {
+              on: {
+                HOST_AUDIO_FINISHED: [
+                  { guard: and([heardPurpose('catStake'), 'catFixed']), target: '#game.cat.placed', actions: 'setCatFixedStake' },
+                  { guard: heardPurpose('catStake'), target: 'listening' },
+                ],
+              },
+            },
+            listening: {
+              on: {
+                PLAYER_SPEECH_FINISHED: 'resolving',
+                CAT_STAKE_UNCLEAR: { target: 'clarifying', actions: 'noteSpecialUnclear' },
+              },
+            },
+            resolving: {
+              after: { judgeMs: 'listening' },
+              on: {
+                CAT_STAKE_UNCLEAR: { target: 'clarifying', actions: 'noteSpecialUnclear' },
+                SELECTION_FAILED: 'listening',
+              },
+            },
+            clarifying: {
+              on: {
+                HOST_AUDIO_FINISHED: { guard: heardPurpose('catStakeClarify'), target: 'listening' },
+                PLAYER_SPEECH_STARTED: 'listening',
+              },
+            },
+          },
+        },
+        placed: { always: { target: '#game.flashing', actions: 'placeSpecial' } },
+        /** Восстановление и RESUME: получатель уже есть — к ставке, иначе снова объявление. */
+        resume: {
+          always: [
+            { guard: 'catHasRecipient', target: 'staking' },
+            { target: 'announcing' },
+          ],
+        },
+      },
+    },
+    auction: {
+      initial: 'announcing',
+      on: {
+        CHOOSER_OFFLINE: { guard: 'auctionOpenerOffline', target: '.advancing', actions: 'auctionAutoOpen' },
+      },
+      states: {
+        announcing: {
+          on: {
+            HOST_AUDIO_FINISHED: [
+              { guard: and([heardPurpose('auction'), 'auctionHasBid']), target: 'advancing' },
+              { guard: heardPurpose('auction'), target: 'listening' },
+            ],
+            AUCTION_BID: { guard: 'validAuctionBid', target: '#game.auction.advancing', actions: 'applyAuctionBid' },
+          },
+        },
+        asking: {
+          on: {
+            HOST_AUDIO_FINISHED: { guard: heardPurpose('auctionAsk'), target: 'listening' },
+            AUCTION_BID: { guard: 'validAuctionBid', target: '#game.auction.advancing', actions: 'applyAuctionBid' },
+          },
+        },
+        listening: {
+          on: {
+            PLAYER_SPEECH_FINISHED: 'resolving',
+            AUCTION_BID: { guard: 'validAuctionBid', target: '#game.auction.advancing', actions: 'applyAuctionBid' },
+            AUCTION_UNCLEAR: { target: 'clarifying', actions: 'noteSpecialUnclear' },
+          },
+        },
+        resolving: {
+          after: { judgeMs: 'listening' },
+          on: {
+            AUCTION_BID: { guard: 'validAuctionBid', target: '#game.auction.advancing', actions: 'applyAuctionBid' },
+            AUCTION_UNCLEAR: { target: 'clarifying', actions: 'noteSpecialUnclear' },
+            SELECTION_FAILED: 'listening',
+          },
+        },
+        clarifying: {
+          on: {
+            HOST_AUDIO_FINISHED: { guard: heardPurpose('auctionClarify'), target: 'listening' },
+            PLAYER_SPEECH_STARTED: 'listening',
+            AUCTION_BID: { guard: 'validAuctionBid', target: '#game.auction.advancing', actions: 'applyAuctionBid' },
+          },
+        },
+        advancing: {
+          always: [
+            { guard: 'auctionContinues', target: 'asking', actions: 'nextAuctionBidder' },
+            { target: 'won', actions: 'auctionWinner' },
+          ],
+        },
+        won: {
+          on: { HOST_AUDIO_FINISHED: { guard: heardPurpose('auctionWon'), target: '#game.flashing', actions: 'placeSpecial' } },
+        },
+        resume: {
+          always: [
+            { guard: 'auctionAwaitingBid', target: 'asking' },
+            { guard: 'auctionHasBid', target: 'advancing' },
+            { target: 'announcing' },
+          ],
+        },
+      },
+    },
+    /** Получатель кота / участник торгов / отвечающий на спецвопросе отключился: ждём 15 с. */
+    specialAway: {
+      after: {
+        catAwayWaitMs: [
+          { guard: 'awayFromBidding', target: 'auction.advancing', actions: 'awayAutoPass' },
+          { target: 'announcing', actions: 'awayCloseQuestion' },
+        ],
+      },
+      on: {
+        SPECIAL_PLAYER_BACK: [
+          { guard: and(['awayBack', 'awayFromStaking']), target: 'cat.staking', actions: 'clearAway' },
+          { guard: and(['awayBack', 'awayFromBidding']), target: 'auction.asking', actions: 'clearAway' },
+          { guard: 'awayBack', target: 'answering', actions: ['clearAway', 'rearmSpecialAnswer'] },
+        ],
+      },
+    },
     flashing: {
       after: { cellFlashMs: { target: 'reading', actions: 'armEarlyClock' } },
       on: {
@@ -1168,6 +1531,7 @@ export const gameMachine = setup({
           on: {
             BUZZER_PRESSED: { guard: 'canFalseStart', actions: 'markFalseStart' },
             HOST_AUDIO_FINISHED: [
+              { guard: 'readSpecial', target: '#game.answering', actions: ['clearEarlyBuzz', 'beginSpecialAnswer'] },
               { guard: 'readFinal', target: '#game.turnCue', actions: 'clearEarlyBuzz' },
               { guard: 'purposeRead', target: '#game.afterReading', actions: ['clearEarlyBuzz', 'decideFalseStartCallout'] },
             ],
@@ -1354,11 +1718,11 @@ export const gameMachine = setup({
       states: {
         speaking: {
           on: {
-            QUESTION_SELECTED: {
-              guard: and([({ context }) => earlyPickOpen('announcing.speaking', context), 'questionAvailable']),
-              target: '#game.flashing',
-              actions: 'openQuestion',
-            },
+            QUESTION_SELECTED: [
+              { guard: and([({ context }) => earlyPickOpen('announcing.speaking', context), 'selectedCat']), target: '#game.cat', actions: ['openQuestion', 'startCat'] },
+              { guard: and([({ context }) => earlyPickOpen('announcing.speaking', context), 'selectedAuction']), target: '#game.auction', actions: ['openQuestion', 'startAuction'] },
+              { guard: and([({ context }) => earlyPickOpen('announcing.speaking', context), 'questionAvailable']), target: '#game.flashing', actions: 'openQuestion' },
+            ],
             HOST_AUDIO_FINISHED: [
               { guard: 'samePlayerRepeats', target: '#game.answering', actions: 'rearmAnswer' },
               { guard: 'moreFinalists', target: '#game.turnCue', actions: 'nextFinalist' },
@@ -1388,6 +1752,9 @@ export const gameMachine = setup({
     paused: {
       on: {
         RESUME: [
+        { guard: ({ context }) => context.resumePath.startsWith('cat.'), target: 'cat.resume', actions: 'resumeClock' },
+        { guard: ({ context }) => context.resumePath.startsWith('auction.'), target: 'auction.resume', actions: 'resumeClock' },
+        { guard: ({ context }) => context.resumePath === 'specialAway', target: 'specialAway', actions: ['resumeClock', 'restartAwayClock'] },
         { guard: ({ context }) => context.resumePath === 'appealCue', target: 'appealCue', actions: 'resumeClock' },
         { guard: ({ context }) => context.resumePath === 'appealWindow', target: 'appealWindow', actions: ['resumeClock', 'restartAppealClock'] },
           { guard: ({ context }) => context.resumePath === 'welcoming', target: 'welcoming', actions: 'resumeClock' },

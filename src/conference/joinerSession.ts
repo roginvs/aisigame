@@ -187,6 +187,10 @@ export class JoinerSession {
     this.transport.send({ type: 'buzz', clientId: this.clientId, authToken: this.authToken })
   }
 
+  sendSpecialPick(pick: { target: 'player' | 'stake' | 'auction'; playerId?: number; amount?: number; choice?: 'pass' | 'allIn' | number }): void {
+    this.transport.send({ type: 'specialPick', clientId: this.clientId, authToken: this.authToken, ...pick })
+  }
+
   sendPick(themeId: string, value: number): void {
     if (!this.hashOk) return
     this.transport.send({ type: 'pick', clientId: this.clientId, authToken: this.authToken, themeId, value })

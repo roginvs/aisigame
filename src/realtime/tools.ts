@@ -53,4 +53,47 @@ export const submitAnswerJudgmentTool = {
   },
 } as const
 
-export const sessionTools = [selectQuestionTool, submitAnswerJudgmentTool]
+/** Кот в мешке: кому отдаёт выбравший. Только если локальный разбор не нашёл ровно одного игрока. */
+export const selectCatRecipientTool = {
+  type: 'function',
+  name: 'selectCatRecipient',
+  description: 'Определяет, какому игроку из списка кандидатов выбравший отдаёт кота в мешке. Если имя не прозвучало или подходит нескольким — confident=false и playerId=0.',
+  parameters: {
+    type: 'object',
+    additionalProperties: false,
+    properties: {
+      playerId: { type: 'integer', description: 'id игрока из списка кандидатов, 0 если неясно.' },
+      confident: { type: 'boolean', description: 'true только если ясно назван ровно один кандидат.' },
+      heard: { type: 'string', description: 'Дословно, что сказал игрок.' },
+    },
+    required: ['playerId', 'confident', 'heard'],
+  },
+} as const
+
+/** Ставка кота или аукциона: только один из вариантов на экране. */
+export const resolveSpecialBidTool = {
+  type: 'function',
+  name: 'resolveSpecialBid',
+  description: 'Сопоставляет реплику игрока с одним из вариантов ставки на экране (кот в мешке или аукцион). Если вариант неясен — confident=false и choice="unclear".',
+  parameters: {
+    type: 'object',
+    additionalProperties: false,
+    properties: {
+      choice: { type: 'string', enum: ['amount', 'pass', 'allIn', 'unclear'], description: 'amount — названа сумма из вариантов; pass — пас; allIn — ва-банк; unclear — неясно.' },
+      amount: { type: 'integer', description: 'Сумма из списка вариантов при choice=amount, иначе 0.' },
+      confident: { type: 'boolean' },
+      heard: { type: 'string', description: 'Дословно, что сказал игрок.' },
+    },
+    required: ['choice', 'amount', 'confident', 'heard'],
+  },
+} as const
+
+export const sessionTools = [selectQuestionTool, submitAnswerJudgmentTool, selectCatRecipientTool, resolveSpecialBidTool]
+
+/** Назначение tool-вызова по имени: так controller узнаёт, кому ответ. */
+export const toolPurposes: Record<string, string> = {
+  selectQuestion: 'select',
+  submitAnswerJudgment: 'judge',
+  selectCatRecipient: 'catPick',
+  resolveSpecialBid: 'specialBid',
+}

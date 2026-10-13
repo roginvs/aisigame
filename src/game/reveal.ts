@@ -3,7 +3,7 @@ import type { AnnounceKind, QuestionMedia } from './types.ts'
 /** Правильный ответ виден и произносится, только когда ячейка закрыта без верного ответа. */
 export function answerIsPublic(kind: AnnounceKind | null, cellClosed: boolean): boolean {
   if (!cellClosed) return false
-  return kind === 'nobody' || kind === 'incorrect' || kind === 'silence' || kind === 'unclear'
+  return kind === 'nobody' || kind === 'incorrect' || kind === 'silence' || kind === 'unclear' || kind === 'away'
 }
 
 /** Звук или ролик ответа на табло после публичного эталона — их нужно доиграть. */

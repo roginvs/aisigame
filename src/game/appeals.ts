@@ -39,6 +39,12 @@ export function appealButton(context: GameContext, path: string, playerId: Playe
 }
 
 /** Новая попытка заменяет итог пары; старый/дублированный результат ничего не применяет. */
+/** Сумма апелляции: ставка кота/аукциона, если была, иначе номинал ячейки. */
+export function appealStake(context: Pick<GameContext, 'outcomes' | 'questions'>, questionId: string, playerId: PlayerId | null): number {
+  const stake = playerId ? context.outcomes?.[questionId]?.[playerId]?.stake : undefined
+  return stake ?? context.questions.find((question) => question.id === questionId)?.value ?? 0
+}
+
 export function settleOutcome(context: GameContext, amount: number, correct = amount > 0): Pick<GameContext, 'players' | 'outcomes'> {
   const questionId = context.activeQuestionId
   const playerId = context.activePlayerId
@@ -46,9 +52,10 @@ export function settleOutcome(context: GameContext, amount: number, correct = am
   const previous = context.outcomes?.[questionId]?.[playerId]
   if (previous && previous.attemptId >= context.attemptId) return { players: context.players, outcomes: context.outcomes }
   const correction = amount - (previous?.amount ?? 0)
+  const stake = context.activeStake ?? previous?.stake
   return {
     players: context.players.map((player) => player.id === playerId ? { ...player, score: player.score + correction } : player),
-    outcomes: { ...context.outcomes, [questionId]: { ...context.outcomes?.[questionId], [playerId]: { amount, attemptId: context.attemptId, correct, previous: previous?.amount ?? 0 } } },
+    outcomes: { ...context.outcomes, [questionId]: { ...context.outcomes?.[questionId], [playerId]: { amount, attemptId: context.attemptId, correct, previous: previous?.amount ?? 0, ...(stake != null ? { stake } : {}) } } },
   }
 }
 
@@ -60,7 +67,7 @@ export function readOutcomes(value: unknown): OutcomeLedger | null {
     for (const [id, outcome] of Object.entries(players)) {
       if (!/^[1-9]\d*$/.test(id) || !outcome || typeof outcome !== 'object') return null
       const row = outcome as Record<string, unknown>
-      if (!Number.isFinite(row.amount) || !Number.isSafeInteger(row.attemptId) || Number(row.attemptId) < 0 || (row.correct !== undefined && typeof row.correct !== 'boolean') || (row.previous !== undefined && !Number.isFinite(row.previous))) return null
+      if (!Number.isFinite(row.amount) || !Number.isSafeInteger(row.attemptId) || Number(row.attemptId) < 0 || (row.correct !== undefined && typeof row.correct !== 'boolean') || (row.previous !== undefined && !Number.isFinite(row.previous)) || (row.stake !== undefined && !Number.isFinite(row.stake))) return null
     }
   }
   return value as OutcomeLedger

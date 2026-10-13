@@ -105,3 +105,29 @@ describe('conferenceSoloListenHint', () => {
     ).toBe('Слушаю Аня')
   })
 })
+
+describe('conferenceTurnTitle: кот и аукцион', () => {
+  const base = {
+    players, chooserId: 1, activePlayerId: null, finalists: [], finalCursor: 0,
+    rounds: [{ index: 0, name: 'Раунд', kind: 'normal' as const }], roundIndex: 0,
+  }
+  const special = {
+    kind: 'cat' as const, questionId: 'q', giverId: 1, recipientId: null, stakeOptions: [100, 500], stake: null, nominal: 100,
+    order: [], passed: [], leaderId: null, bid: null, allIn: false, options: [], log: [], unclear: '',
+    awayPlayerId: null, awayFrom: null, awayNextChooser: null,
+  }
+  it('кот: даритель отдаёт, получатель ставит', () => {
+    expect(conferenceTurnTitle('cat.picking', true, { ...base, special })).toBe('Аня отдаёт вопрос')
+    expect(conferenceTurnTitle('cat.staking.listening', true, { ...base, special: { ...special, recipientId: 2 } })).toBe('Борис делает ставку')
+    expect(conferenceTurnTitle('cat.announcing', true, { ...base, special })).toBeNull()
+  })
+  it('аукцион: первая ставка и перекуп', () => {
+    const auction = { ...special, kind: 'auction' as const, recipientId: 2 }
+    expect(conferenceTurnTitle('auction.listening', true, { ...base, special: auction })).toBe('Борис делает ставку')
+    expect(conferenceTurnTitle('auction.asking', true, { ...base, special: { ...auction, leaderId: 1, bid: 200 } })).toBe('Борис решает, перекупать ли')
+  })
+  it('подпись «Слушаю» в коте и аукционе', () => {
+    expect(conferenceSoloListenHint('cat.staking.listening', true, { focusName: 'Борис' })).toBe('Слушаю Борис')
+    expect(conferenceSoloListenHint('auction.listening', true, { focusName: 'Аня' })).toBe('Слушаю Аня')
+  })
+})

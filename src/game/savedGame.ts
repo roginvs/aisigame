@@ -3,6 +3,7 @@ import { messageRingFromLegacyChat, readMessageRing } from '../conference/messag
 import { appealMsLeft, readAppeal, readOutcomes } from './appeals.ts'
 import { questionById } from './pack.ts'
 import { openingChooser } from './players.ts'
+import { readSpecialState } from './specialState.ts'
 import type {
   AnnounceKind,
   Bet,
@@ -111,7 +112,7 @@ export function readMatchMode(saved: SavedGame | null | undefined): 'table' | 'c
   return 'table'
 }
 
-const announceKinds: AnnounceKind[] = ['correct', 'incorrect', 'silence', 'nobody', 'unclear', 'repeat']
+const announceKinds: AnnounceKind[] = ['correct', 'incorrect', 'silence', 'nobody', 'unclear', 'repeat', 'away']
 const judgmentStatuses: JudgmentStatus[] = [
   'correct',
   'incorrect',
@@ -154,6 +155,24 @@ const canonicalPhases: Record<string, string> = {
   'finalBets.resolving': 'finalBets.asking',
   'finalBets.placed': 'finalBets.asking',
   finished: 'finished',
+  // Кот и аукцион: восстанавливаемся в узел resume, он сам выберет шаг по контексту.
+  'cat.resume': 'cat.resume',
+  'cat.announcing': 'cat.resume',
+  'cat.picking': 'cat.resume',
+  'cat.clarifying': 'cat.resume',
+  'cat.resolving': 'cat.resume',
+  'cat.staking.resolving': 'cat.resume',
+  'auction.resolving': 'auction.resume',
+  'cat.staking.asking': 'cat.resume',
+  'cat.staking.listening': 'cat.resume',
+  'cat.staking.clarifying': 'cat.resume',
+  'auction.resume': 'auction.resume',
+  'auction.announcing': 'auction.resume',
+  'auction.asking': 'auction.resume',
+  'auction.listening': 'auction.resume',
+  'auction.clarifying': 'auction.resume',
+  'auction.won': 'auction.resume',
+  specialAway: 'specialAway',
 }
 
 const questionPhases = new Set([
@@ -168,6 +187,9 @@ const questionPhases = new Set([
   'announcing',
   'turnCue',
   'finalBets.asking',
+  'cat.resume',
+  'auction.resume',
+  'specialAway',
 ])
 
 export function readSavedGame(storage: Storage = localStorage): SavedGame | null {
@@ -322,6 +344,7 @@ export function restoredMatch(pack: QuestionPack, saved: SavedMatch): Pick<
   | 'judgmentStatus'
   | 'resumePath'
   | 'statusLine'
+  | 'special'
 > {
   const roundIndex = pack.rounds.some((round) => round.index === saved.roundIndex)
     ? saved.roundIndex
@@ -338,6 +361,8 @@ export function restoredMatch(pack: QuestionPack, saved: SavedMatch): Pick<
   if (appeal && (questionById(pack.questions, appeal.questionId)?.roundIndex !== roundIndex || round?.kind === 'final')) appeal = null
   if (appeal?.activePlayerId !== null && appeal && phase === 'answering.waiting') phase = 'appealCue'
   if ((phase === 'appealCue' || phase === 'appealWindow') && !appeal) phase = 'choosing.listening'
+  const special = questionOk && saved.special?.questionId === saved.activeQuestionId ? saved.special : null
+  if ((phase === 'cat.resume' || phase === 'auction.resume' || phase === 'specialAway') && !special) phase = 'choosing.listening'
   const openQuestion = questionOk && questionPhases.has(phase)
 
   return {
@@ -363,6 +388,7 @@ export function restoredMatch(pack: QuestionPack, saved: SavedMatch): Pick<
     sayCloseGuess: phase === 'announcing' && openQuestion ? saved.sayCloseGuess : false,
     announceKind: phase === 'announcing' ? saved.announceKind : null,
     judgmentStatus: phase === 'announcing' ? saved.judgmentStatus : null,
+    special: openQuestion ? special : null,
     resumePath: phase,
     statusLine: statusFor(phase, pack.name, round?.name ?? 'Раунд', round?.kind === 'final', saved.activePlayerId),
   }
@@ -450,6 +476,7 @@ function matchFromContext(context: GameContext, phase: string): SavedMatch {
     announceKind: context.announceKind,
     judgmentStatus: context.judgmentStatus,
     phase,
+    special: context.special ? { ...context.special } : null,
   }
 }
 
@@ -572,6 +599,7 @@ function sanitize(value: unknown): SavedGame | null {
     announceKind,
     judgmentStatus,
     phase,
+    special: readSpecialState(record.special, roster),
   }
 }
 
@@ -661,3 +689,4 @@ function whole(value: unknown): number | null {
 function isPlayerId(value: unknown): value is PlayerId {
   return typeof value === 'number' && Number.isInteger(value) && value >= 1
 }
+

@@ -1,3 +1,7 @@
+import { auctionDingSound, catMeowSound, playAuctionDing, playCatMeow, preloadPublicSound } from '../audio/beep.ts'
+import { specialListenerId } from '../game/controller.ts'
+import { SpecialPanel, type SpecialPick } from './SpecialPanel.tsx'
+import { specialPanelPath } from './specialPanelPath.ts'
 import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from 'react'
 import { flushSync } from 'react-dom'
 import type { SnapshotFrom } from 'xstate'
@@ -114,6 +118,8 @@ export function GameScreen(props: {
   modelMeter?: () => AnalyserNode | null
   onAppeal?: (request: AppealRequest) => Promise<{ accepted: boolean; reason: string }>
   onBuzz: (playerId: PlayerId) => void
+  /** Кот/аукцион: кнопка «кому отдать», ставка или торг. */
+  onSpecialPick?: (pick: SpecialPick, playerId: PlayerId) => void
   onPick: (themeId: string, value: number) => void
   onPause: () => void
   onStop: () => void
@@ -255,6 +261,20 @@ export function GameScreen(props: {
     return () => window.removeEventListener('aisigame-beep', onBeep)
   }, [])
   const usage = useSyncExternalStore(subscribeUsage, getUsageSnapshot)
+  useEffect(() => {
+    void preloadPublicSound(catMeowSound)
+    void preloadPublicSound(auctionDingSound)
+  }, [])
+  // Мяу/гонг — один раз на ячейку, на входе в объявление (у каждого клиента свой).
+  const specialSoundRef = useRef<string | null>(null)
+  const specialSoundKey = context.special && (path === 'cat.announcing' || path === 'auction.announcing')
+    ? `${context.special.kind}:${context.special.questionId}`
+    : null
+  useEffect(() => {
+    if (!specialSoundKey || specialSoundRef.current === specialSoundKey) return
+    specialSoundRef.current = specialSoundKey
+    void (specialSoundKey.startsWith('cat:') ? playCatMeow() : playAuctionDing())
+  }, [specialSoundKey])
   const buttonsOpen = buttonsLive(path)
   const earlyLive = path === 'reading.armed'
   const canFalseStart = falseStartOpen(path, finalRound)
@@ -277,6 +297,10 @@ export function GameScreen(props: {
     }
     if (root === 'answering' || root === 'appealCue') {
       return context.players.find((player) => player.id === context.activePlayerId)?.name ?? null
+    }
+    if ((root === 'cat' || root === 'auction') && context.special) {
+      const id = specialListenerId(path, context)
+      return context.players.find((player) => player.id === id)?.name ?? null
     }
     if (root === 'finalBets') {
       return context.players.find((player) => player.id === context.finalists[context.finalCursor])?.name ?? null
@@ -476,6 +500,23 @@ export function GameScreen(props: {
         ) : null}
         {conference?.awaitingPack && conference.packProgress ? (
           <PackAwaitPanel progress={conference.packProgress} packName={conference.packName} />
+        ) : specialPanelPath(path, context) ? (
+          <SpecialPanel
+            context={context}
+            path={path}
+            canAct={(playerId) => {
+              const player = context.players.find((item) => item.id === playerId)
+              return Boolean(player && props.onSpecialPick && canBuzzPlayer(Boolean(conference?.layout), conference?.selfClientId, player))
+            }}
+            onPick={(pick) => {
+              const special = context.special
+              if (!special) return
+              props.onSpecialPick?.(pick, pick.target === 'player' ? special.giverId : (special.recipientId ?? special.giverId))
+            }}
+            timer={showTimer && context.phaseStartedAt !== null && context.phaseDurationMs !== null
+              ? <Countdown startedAt={context.phaseStartedAt} durationMs={context.phaseDurationMs} />
+              : null}
+          />
         ) : showQuestion && question ? (
           <article className="question">
             <p className="eyebrow">

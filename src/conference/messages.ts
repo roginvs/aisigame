@@ -1,6 +1,7 @@
 /** Сообщения конференции — plain JSON, без классов. */
 import { readAppeal, readOutcomes } from '../game/appeals.ts'
-import type { AppealFields, AppealRequest, AnnounceKind, JudgmentStatus } from '../game/types.ts'
+import { readSpecialState } from '../game/specialState.ts'
+import type { AppealFields, AppealRequest, AnnounceKind, JudgmentStatus, SpecialState } from '../game/types.ts'
 
 /** Общий кольцевой буфер текстового чата и реплик «Разговора». */
 export const CONFERENCE_HISTORY_LIMIT = 200
@@ -94,6 +95,8 @@ export type ConferenceSnapshot = AppealFields & {
   statusLine: string
   phaseDurationMs: number | null
   timerRemainingMs: number | null
+  /** Кот в мешке / аукцион; старые мастера не шлют. */
+  special?: SpecialState | null
 } & ConferenceMessageRing
 
 /** Единая история состояния, сохранения и экрана — сообщения в отдельных слотах. */
@@ -236,6 +239,17 @@ export type PickMessage = {
   value: number
 }
 
+/** Кот/аукцион: клик игрока. Мастер сам проверяет право и варианты. */
+export type SpecialPickMessage = {
+  type: 'specialPick'
+  clientId: string
+  authToken: string
+  target: 'player' | 'stake' | 'auction'
+  playerId?: number
+  amount?: number
+  choice?: 'pass' | 'allIn' | number
+}
+
 export type ChatMessage = {
   type: 'chat'
   clientId: string
@@ -283,6 +297,7 @@ export type ConferenceMessage =
   | AppealReplyMessage
   | BuzzMessage
   | PickMessage
+  | SpecialPickMessage
   | ChatMessage
   | DebugLogMessage
   | SnapshotMessage
@@ -347,6 +362,11 @@ export function isConferenceMessage(value: unknown): value is ConferenceMessage 
       return authority(value) && shortString(value.targetClientId, 200) && shortString(value.requestId, 200) && typeof value.accepted === 'boolean' && validText(value.reason)
     case 'pick':
       return client() && shortString(value.themeId, 500) && Number.isFinite(value.value)
+    case 'specialPick':
+      return client() && (
+        (value.target === 'player' && integer(value.playerId, 1)) ||
+        (value.target === 'stake' && integer(value.amount, 1)) ||
+        (value.target === 'auction' && (value.choice === 'pass' || value.choice === 'allIn' || integer(value.choice, 1))))
     case 'chat':
       return client() && typeof value.text === 'string' && value.text.length <= 4_000
     case 'debugLog':
@@ -460,6 +480,7 @@ const stateValidators = {
   announceKind: (value: unknown) => nullableString(value, 100),
   phaseDurationMs: nullableFinite,
   timerRemainingMs: nullableFinite,
+  special: (value: unknown) => value === undefined || value === null || readSpecialState(value) !== null,
 } satisfies Record<keyof StateFields, (value: unknown) => boolean>
 
 function validPackManifest(value: unknown): boolean {

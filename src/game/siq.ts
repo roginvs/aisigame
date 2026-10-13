@@ -1,7 +1,9 @@
+import { catStakeOptions } from './cat.ts'
+import { questionNominal, roundPriceRange, type PriceGrid, type PriceRound } from './prices.ts'
 import { XMLParser } from 'fast-xml-parser'
 import JSZip from 'jszip'
 import { withChoiceTexts } from './choices.ts'
-import type { MediaKind, Question, QuestionChoice, QuestionMedia, QuestionPack, RoundKind } from './types.ts'
+import type { CatInfo, CatPrice, MediaKind, Question, QuestionChoice, QuestionMedia, QuestionPack, RoundKind } from './types.ts'
 
 const parser = new XMLParser({
   ignoreAttributes: false,
@@ -11,7 +13,9 @@ const parser = new XMLParser({
   isArray: (name) => ['round', 'theme', 'question', 'param', 'item', 'answer', 'atom'].includes(name),
 })
 
-const specials = new Set(['cat', 'auction', 'bag', 'sponsored', 'secret', 'stake', 'marker'])
+const specials = new Set(['bag', 'sponsored', 'secret', 'marker'])
+const catKinds = new Set(['cat', 'bagcat'])
+const auctionKinds = new Set(['auction', 'stake'])
 
 export function parseContentXml(xml: string): QuestionPack {
   const doc = parser.parse(xml) as { package?: Record<string, unknown> }
@@ -21,12 +25,21 @@ export function parseContentXml(xml: string): QuestionPack {
   const questions: Question[] = []
   const warnings: string[] = []
   const rounds: QuestionPack['rounds'] = []
+  const grid: PriceGrid = []
+  /** Цены кота/аукциона уточняются после чтения всех цен пакета. */
+  const pending: Array<{ question: Question; roundIndex: number; themeIndex: number; questionIndex: number; where: string }> = []
 
   asArray(child(packageNode, 'rounds', 'round')).forEach((round, roundIndex) => {
     const roundName = attr(round, 'name') || `Раунд ${roundIndex + 1}`
     const kind: RoundKind = attr(round, 'type') === 'final' ? 'final' : 'normal'
     let keptThemes = 0
+    const priceRound: PriceRound = { final: kind === 'final', themes: [] }
+    grid[roundIndex] = priceRound
     asArray(child(round, 'themes', 'theme')).forEach((theme, themeIndex) => {
+      priceRound.themes[themeIndex] = asArray(child(theme, 'questions', 'question')).map((question) => {
+        const value = Number(attr(question, 'price') || '0')
+        return Number.isFinite(value) ? value : 0
+      })
       const themeName = attr(theme, 'name') || `Тема ${themeIndex + 1}`
       const themeId = `r${roundIndex}-t${themeIndex}`
       let kept = 0
@@ -36,6 +49,17 @@ export function parseContentXml(xml: string): QuestionPack {
         const special = questionKind(question)
         if (specials.has(special)) {
           warnings.push(`${where}: пропущен спецвопрос «${special}»`)
+          return
+        }
+        const isCat = catKinds.has(special)
+        const isAuction = auctionKinds.has(special)
+        if ((isCat || isAuction) && kind === 'final') {
+          warnings.push(`${where}: ${isCat ? 'кот в мешке' : 'аукцион'} в финале пока не поддерживается, пропущен`)
+          return
+        }
+        const cat = isCat ? readCat(question, special as 'cat' | 'bagcat') : undefined
+        if (cat?.knows === 'never') {
+          warnings.push(`${where}: кот без показа вопроса (knows=never) пока не поддерживается, пропущен`)
           return
         }
         const body = readBody(question)
@@ -50,7 +74,7 @@ export function parseContentXml(xml: string): QuestionPack {
           warnings.push(`${where}: нет ответа`)
           return
         }
-        questions.push({
+        const entry: Question = {
           id: `${themeId}-${price}-${questionIndex}`,
           roundIndex,
           themeId,
@@ -61,7 +85,11 @@ export function parseContentXml(xml: string): QuestionPack {
           media: body.media,
           answerMedia: body.answerMedia,
           ...(choices.length ? { choices } : {}),
-        })
+          ...(cat ? { cat } : {}),
+          ...(isAuction ? { auction: { source: special as 'auction' | 'stake' } } : {}),
+        }
+        questions.push(entry)
+        if (cat || isAuction) pending.push({ question: entry, roundIndex, themeIndex, questionIndex, where })
         kept += 1
       })
       if (kept) keptThemes += 1
@@ -69,7 +97,65 @@ export function parseContentXml(xml: string): QuestionPack {
     if (keptThemes) rounds.push({ index: roundIndex, name: roundName, kind })
   })
 
+  for (const item of pending) {
+    const { question } = item
+    const range = roundPriceRange(grid, item.roundIndex)
+    if (question.auction && !(question.value > 0)) {
+      // Решение автора: номинал аукциона без цены — минимальная цена раунда.
+      question.value = range.min
+      warnings.push(`${item.where}: цена аукциона выведена: ${range.min}`)
+    }
+    if (question.cat) {
+      if (!(question.value > 0)) {
+        const nominal = questionNominal(grid, item.roundIndex, item.themeIndex, item.questionIndex)
+        question.value = nominal.value
+        warnings.push(`${item.where}: цена ячейки кота выведена: ${nominal.value}`)
+      }
+      if (question.cat.price.kind === 'roundMinMax' && range.derived) warnings.push(`${item.where}: цены кота выведены: ${range.min}–${range.max}`)
+      question.cat.options = catStakeOptions(question.cat.price, range)
+    }
+  }
+
   return { name, rounds, questions, warnings }
+}
+
+/** v4 `cat`/`bagcat`: `theme`, `cost`, `knows`; `self` игнорируется (себе нельзя). */
+function readCat(question: Record<string, unknown>, source: 'cat' | 'bagcat'): CatInfo {
+  const params = typeParams(question)
+  const knowsRaw = (params.knows ?? '').toLowerCase()
+  const knows: CatInfo['knows'] = source === 'cat' ? 'after' : knowsRaw === 'before' || knowsRaw === 'never' ? knowsRaw : 'after'
+  return { source, theme: (params.theme ?? '').trim(), price: parseCatPrice(params.cost ?? ''), knows, options: [] }
+}
+
+/** По SIGame NumberSetTypeConverter: «300» — фиксированная, «[min;max]/step» — диапазон, иначе — мин/макс раунда. */
+export function parseCatPrice(raw: string): CatPrice {
+  const text = raw.trim()
+  const single = /^\d+$/.exec(text)
+  if (single) {
+    const value = Number(text)
+    return value > 0 ? { kind: 'fixed', value } : { kind: 'roundMinMax' }
+  }
+  const range = /^\[(\d+);(\d+)\](?:\/(\d+))?$/.exec(text.replace(/\s+/g, ''))
+  if (range) {
+    const min = Number(range[1])
+    const max = Number(range[2])
+    const step = Number(range[3] ?? max - min)
+    if (max > 0 && min > 0 && max >= min) return min === max ? { kind: 'fixed', value: min } : { kind: 'range', min, max, step }
+  }
+  return { kind: 'roundMinMax' }
+}
+
+function typeParams(question: Record<string, unknown>): Record<string, string> {
+  const result: Record<string, string> = {}
+  const node = record(question.type)
+  if (!node) return result
+  for (const param of asArray(node.param)) {
+    const name = attr(param, 'name').toLowerCase()
+    if (!name) continue
+    const text = param['#text']
+    result[name] = typeof text === 'string' || typeof text === 'number' ? String(text) : ''
+  }
+  return result
 }
 
 export async function loadSiq(data: ArrayBuffer): Promise<QuestionPack> {

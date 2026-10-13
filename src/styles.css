@@ -2025,3 +2025,35 @@ button.buzzer.chooser:disabled {
   text-shadow: -1px -1px 0 #000, 1px -1px 0 #000, -1px 1px 0 #000, 1px 1px 0 #000;
   pointer-events: none;
 }
+
+/* Кот в мешке и аукцион */
+.special-panel {
+  text-align: center;
+  align-items: center;
+}
+.special-art {
+  width: min(180px, 40vw);
+  height: auto;
+  margin: 0 auto;
+}
+.special-status,
+.special-bid {
+  font-size: 1.15rem;
+}
+.special-bid {
+  font-weight: 700;
+}
+.special-options {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  justify-content: center;
+  margin-top: 8px;
+}
+.special-log {
+  list-style: none;
+  padding: 0;
+  margin: 8px 0 0;
+  opacity: 0.75;
+  font-size: 0.9rem;
+}

@@ -13,6 +13,7 @@ export function contextFromSnapshot(snapshot: ConferenceSnapshot, pack: Question
     outcomes: snapshot.outcomes ?? {},
     appeal: snapshot.appeal ?? null,
     appealSerial: snapshot.appealSerial ?? 0,
+    special: snapshot.special ?? null,
     players: snapshot.players.map((player) => ({
       id: player.id,
       name: player.name,

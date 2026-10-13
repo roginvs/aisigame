@@ -189,6 +189,7 @@ export class MasterSession {
       this.onRosterCb()
       if (this.gameStarted) {
         this.handoffOfflineChooser(now)
+        this.watchSpecialPlayers(now)
         this.broadcastGameSnapshot()
       }
       else this.broadcastLobbySnapshot()
@@ -470,6 +471,24 @@ export class MasterSession {
       this.actor.send({ type: 'QUESTION_SELECTED', themeId: message.themeId, value: message.value })
       return
     }
+    if (message.type === 'specialPick') {
+      if (!this.gameStarted || !this.verified.has(message.clientId)) return
+      const sender = this.roster.get(message.clientId)?.playerId
+      const snap = this.actor.getSnapshot()
+      const special = snap.context.special
+      if (!sender || !special) return
+      if (message.target === 'player' && message.playerId !== undefined && special.giverId === sender) {
+        this.actor.send({ type: 'CAT_RECIPIENT', playerId: message.playerId })
+      }
+      if (message.target === 'stake' && message.amount !== undefined) this.actor.send({ type: 'CAT_STAKE', playerId: sender, amount: message.amount })
+      if (message.target === 'auction' && message.choice !== undefined) {
+        // Варианты пересчитаны мастером; клиентским не верим.
+        const option = special.options.find((item) => message.choice === 'pass' ? item.kind === 'pass'
+          : message.choice === 'allIn' ? item.kind === 'allIn' : item.kind === 'stake' && item.amount === message.choice)
+        if (option) this.actor.send({ type: 'AUCTION_BID', playerId: sender, option })
+      }
+      return
+    }
     if (message.type === 'chat') {
       const clean = message.text.trim()
       const name = this.roster.get(message.clientId)?.name
@@ -641,11 +660,56 @@ export class MasterSession {
     return player
   }
 
+  /** Онлайн-игроки по ростеру: мастер всегда онлайн. */
+  private onlinePlayers(now: number): Set<number> {
+    return new Set(
+      this.roster.allIncludingHidden(now)
+        .filter((entry) => entry.playerId !== null && entry.hashOk && (entry.isMaster || (!entry.stale && !entry.hidden)))
+        .map((entry) => entry.playerId as number),
+    )
+  }
+
+  /** Кот/аукцион: получатель, участник торгов или отвечающий ушёл — 15 с ожидания; вернулся — продолжаем. */
+  private watchSpecialPlayers(now: number): void {
+    const snapshot = this.actor.getSnapshot()
+    const path = statePath(snapshot.value)
+    const context = snapshot.context
+    const special = context.special
+    if (!special) return
+    const online = this.onlinePlayers(now)
+    const remote = (id: number | null | undefined) => {
+      const player = context.players.find((item) => item.id === id)
+      return Boolean(player?.clientId && player.clientId !== this.masterClientId)
+    }
+    if (path === 'specialAway') {
+      if (special.awayPlayerId !== null && online.has(special.awayPlayerId)) this.actor.send({ type: 'SPECIAL_PLAYER_BACK', playerId: special.awayPlayerId })
+      return
+    }
+    const watched = path.startsWith('cat.staking') || path === 'auction.asking' || path === 'auction.listening' || path === 'auction.resolving' || path === 'auction.clarifying'
+      ? special.recipientId
+      : (path.startsWith('answering') || path === 'judging') && special.questionId === context.activeQuestionId ? context.activePlayerId : null
+    if (watched === null || !remote(watched) || online.has(watched)) return
+    if (now - this.gameStartedAt < PRESENCE_STALE_MS) return
+    const players = context.players
+    const index = players.findIndex((player) => player.id === watched)
+    let nextChooserId: number | null = null
+    for (let offset = 1; offset < players.length; offset += 1) {
+      const candidate = players[(index + offset) % players.length]
+      if (candidate && online.has(candidate.id)) { nextChooserId = candidate.id; break }
+    }
+    this.actor.send({ type: 'SPECIAL_PLAYER_OFFLINE', playerId: watched, nextChooserId })
+  }
+
   private handoffOfflineChooser(now: number): void {
     const snapshot = this.actor.getSnapshot()
-    if (!statePath(snapshot.value).startsWith('choosing')) return
+    const path = statePath(snapshot.value)
+    const special = snapshot.context.special
+    // Кот до выбора получателя и аукцион до первой ставки: уходит отдающий/открывающий.
+    const giverPhase = (path.startsWith('cat.') && special?.recipientId === null) || (path.startsWith('auction.') && special?.bid === null)
+    if (!path.startsWith('choosing') && !giverPhase) return
     const players = snapshot.context.players
-    const chooserIndex = players.findIndex((player) => player.id === snapshot.context.chooserId)
+    const fromId = giverPhase ? special!.giverId : snapshot.context.chooserId
+    const chooserIndex = players.findIndex((player) => player.id === fromId)
     const chooser = players[chooserIndex]
     if (!chooser?.clientId || chooser.clientId === this.masterClientId) return
 
