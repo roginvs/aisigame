@@ -30,6 +30,8 @@ export type ConferenceMedia = {
    * HTML/Jitsi playback для людей не трогает.
    */
   setModelHearOnly: (participantId: string | null | false) => void
+  /** Отвод выхода микшера модели для индикатора (только Jitsi-мастер). */
+  modelMeter?: () => AnalyserNode | null
   /** Есть ли речь людей в комнате (без дорожки «Ведущей»). */
   anyoneSpeaking: () => boolean
   localParticipantId: () => string
@@ -48,6 +50,10 @@ export function createBroadcastMedia(displayName: string): ConferenceMedia & { d
   let mic = false
   let camera = false
   let micStream: MediaStream | null = null
+  // Индикатор «что слышит модель» в тестовом режиме: модель берёт сам micStream.
+  let meterContext: AudioContext | null = null
+  let meterNode: AnalyserNode | null = null
+  let meterStream: MediaStream | null = null
   const listeners = new Set<(tiles: ConferenceTile[]) => void>()
   const hostSpeakingListeners = new Set<(speaking: boolean) => void>()
 
@@ -83,6 +89,19 @@ export function createBroadcastMedia(displayName: string): ConferenceMedia & { d
     cameraOn: () => camera,
     localMicStream: () => micStream,
     modelInputStream: () => micStream,
+    modelMeter() {
+      if (typeof AudioContext === 'undefined') return null
+      meterContext ??= new AudioContext()
+      if (!meterNode) {
+        meterNode = meterContext.createAnalyser()
+        meterNode.fftSize = 512
+      }
+      if (micStream && meterStream !== micStream) {
+        meterStream = micStream
+        meterContext.createMediaStreamSource(micStream).connect(meterNode)
+      }
+      return meterNode
+    },
     setModelHearOnly() {},
     anyoneSpeaking: () => false,
     localParticipantId: () => 'local',
@@ -104,6 +123,9 @@ export function createBroadcastMedia(displayName: string): ConferenceMedia & { d
       hostSpeakingListeners.clear()
       micStream?.getTracks().forEach((track) => track.stop())
       micStream = null
+      void meterContext?.close().catch(() => undefined)
+      meterContext = null
+      meterNode = null
     },
   }
 }
