@@ -43,7 +43,7 @@ export function SpecialPanel(props: {
     const stakeButtons = path.startsWith('cat.staking') && special.stakeOptions.length > 1 && special.recipientId !== null && canAct(special.recipientId)
     const giverActs = picking && canAct(special.giverId)
     return (
-      <article className="question special-panel special-cat" aria-label="Кот в мешке">
+      <article className="question special-panel special-cat" aria-label="Кот в мешке" data-listening={path === 'cat.picking' || path === 'cat.staking.listening' ? 'true' : undefined}>
         {picking ? (
           <>
             <img className="special-art" src={publicFile('images/cat.svg')} alt="Кот в мешке" />
@@ -84,7 +84,7 @@ export function SpecialPanel(props: {
 
   const bidderActs = special.recipientId !== null && special.options.length > 0 && path !== 'auction.won' && canAct(special.recipientId)
   return (
-    <article className="question special-panel special-auction" aria-label="Аукцион">
+    <article className="question special-panel special-auction" aria-label="Аукцион" data-listening={path === 'auction.listening' ? 'true' : undefined}>
       <img className="special-art" src={publicFile('images/auction.svg')} alt="Аукцион" />
       <p className="eyebrow">{question?.themeName} · {special.nominal}</p>
       <h2>Аукцион</h2>

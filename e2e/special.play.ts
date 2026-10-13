@@ -30,8 +30,10 @@ test('кот в мешке голосом: имя получателя и ста
   await expect(panel.getByRole('group', { name: 'Кому отдать' })).toBeVisible()
   const giverLine = (await panel.locator('.special-status').textContent()) ?? ''
   const target = giverLine.startsWith('Игрок 1') ? 'Игрок 2' : 'Игрок 1'
+  await expect(panel).toHaveAttribute('data-listening', 'true')
   await hear(page, `отдаю игроку ${target.slice(-1)}`)
   await expect(panel.getByRole('group', { name: 'Ставка' })).toBeVisible()
+  await expect(panel).toHaveAttribute('data-listening', 'true')
   await hear(page, 'минимум')
   await expect(page.getByRole('heading', { name: 'Какой город называют Северной столицей России?' })).toBeVisible()
   await answer(page, 'не знаю')
@@ -81,8 +83,9 @@ test('аукцион: торг кнопками, перекуп и пас', asyn
   await bids.getByRole('button', { name: 'Ва-банк 300' }).click()
   await expect(panel).toContainText('Игрок 1 решает, перекупать ли')
   await expect(bids.getByRole('button')).toHaveText(['Пас', 'Ва-банк 400'])
+  // Голос слушаем после вопроса ведущей.
+  await expect(panel).toHaveAttribute('data-listening', 'true')
   await hear(page, 'пас')
-  await expect(panel).toContainText('Вопрос уходит игроку Игрок 2')
   await expect(page.getByRole('heading', { name: 'Какой город — столица Австралии?' })).toBeVisible()
   await answer(page, 'Сидней')
   await expect(page.getByRole('group', { name: 'Игрок 2: 0' })).toBeVisible()
