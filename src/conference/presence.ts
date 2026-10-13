@@ -79,3 +79,6 @@ export function clearRememberedPlayersForTests(): void {
   remembered.clear()
   lastSeenByClient.clear()
 }
+
+/** Мастер замеряет RTT до каждого клиента примерно раз в 3 с. */
+export const PING_INTERVAL_MS = 3_000

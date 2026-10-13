@@ -29,6 +29,8 @@ export type RosterEntry = {
   stale: boolean
   hidden: boolean
   isMaster: boolean
+  /** Последний RTT ping/pong мастер ↔ клиент, мс; null — ещё не измерен. */
+  pingMs?: number | null
 }
 
 export class ConferenceRoster {
@@ -204,6 +206,14 @@ export class ConferenceRoster {
     const entry = this.entries.get(this.masterClientId)
     if (!entry) return false
     return now - entry.lastSeen <= ms
+  }
+
+  /** RTT из pong — тоже признак жизни клиента. */
+  setPing(clientId: string, pingMs: number, now = Date.now()): void {
+    const entry = this.entries.get(clientId)
+    if (!entry) return
+    touch(clientId, now)
+    this.entries.set(clientId, { ...entry, pingMs: Math.max(0, Math.round(pingMs)), lastSeen: now })
   }
 
   heartbeat(clientId: string, now = Date.now()): void {

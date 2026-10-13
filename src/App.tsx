@@ -1200,6 +1200,7 @@ export default function App() {
         stale: entry.stale || (joinerLobby.masterOffline && entry.isMaster),
         hidden: entry.hidden,
         isMaster: entry.isMaster,
+        pingMs: entry.pingMs ?? null,
         lastSeen: 0,
       }
     })

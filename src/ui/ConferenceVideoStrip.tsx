@@ -11,8 +11,10 @@ export function ConferenceVideoTile(props: {
    * В лобби имя остаётся в кадре, в meta только «мастер» / «мик выкл.».
    */
   hideName?: boolean
+  /** RTT до мастера, мс: мелкий текст в углу кадра. */
+  pingMs?: number | null
 }) {
-  const { tile, bindVideo, masterBadge, hideName = false } = props
+  const { tile, bindVideo, masterBadge, hideName = false, pingMs } = props
   const videoRef = useRef<HTMLVideoElement | null>(null)
   const bindVideoRef = useRef(bindVideo)
   const name = tile.name.trim() || 'Игрок'
@@ -50,6 +52,7 @@ export function ConferenceVideoTile(props: {
         ) : (
           <span className="video-placeholder">{name}</span>
         )}
+        {pingLabel(pingMs) ? <span className="video-ping" aria-label={`Пинг ${pingLabel(pingMs)}`}>{pingLabel(pingMs)}</span> : null}
         {showMeta ? (
           <div className="video-meta">
             {showNameInMeta ? <span className="video-name">{name}</span> : <span />}
@@ -60,6 +63,11 @@ export function ConferenceVideoTile(props: {
       </div>
     </div>
   )
+}
+
+/** «42 ms»; без замера — пусто. */
+export function pingLabel(pingMs: number | null | undefined): string {
+  return typeof pingMs === 'number' && Number.isFinite(pingMs) && pingMs >= 0 ? `${Math.round(pingMs)} ms` : ''
 }
 
 /** Локальные mic / cam / следующая камера — ряд над полем чата. */

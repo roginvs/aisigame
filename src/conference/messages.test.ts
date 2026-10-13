@@ -105,3 +105,12 @@ describe('isConferenceMessage', () => {
     ).toBe(false)
   })
 })
+
+describe('ping/pong', () => {
+  it('проверяет поля ping, pong и pingMs в presence', () => {
+    expect(isConferenceMessage({ type: 'ping', authorityToken: 't', seq: 1, sentAt: 1000 })).toBe(true)
+    expect(isConferenceMessage({ type: 'ping', authorityToken: 't', seq: -1, sentAt: 1000 })).toBe(false)
+    expect(isConferenceMessage({ type: 'pong', clientId: 'c', authToken: 'a', seq: 1, sentAt: 1000 })).toBe(true)
+    expect(isConferenceMessage({ type: 'pong', clientId: 'c', authToken: 'a', seq: 1, sentAt: 'x' })).toBe(false)
+  })
+})

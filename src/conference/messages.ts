@@ -47,6 +47,8 @@ export type ConferenceSnapshotPresence = {
   packPhase?: string
   ready: boolean
   hashOk: boolean
+  /** RTT мастер ↔ клиент, мс; старые мастера не шлют. */
+  pingMs?: number | null
 }
 
 export type ConferencePackManifest = {
@@ -256,6 +258,10 @@ export type DebugLogMessage = {
   entries: ConferenceDebugEntry[]
 }
 
+/** Мастер → все: замер задержки; клиент возвращает sentAt в pong без изменений. */
+export type PingMessage = { type: 'ping'; authorityToken: string; seq: number; sentAt: number }
+export type PongMessage = { type: 'pong'; clientId: string; authToken: string; seq: number; sentAt: number }
+
 export type SnapshotMessage = {
   type: 'snapshot'
   authorityToken: string
@@ -282,6 +288,8 @@ export type ConferenceMessage =
   | SnapshotMessage
   | PartialUpdateMessage
   | StatusRequestMessage
+  | PingMessage
+  | PongMessage
 
 export function isConferenceMessage(value: unknown): value is ConferenceMessage {
   if (!isRecord(value) || typeof value.type !== 'string') return false
@@ -350,6 +358,10 @@ export function isConferenceMessage(value: unknown): value is ConferenceMessage 
         value.entries.every(validDebugEntry) &&
         debugEntriesSize(value.entries) <= 32_000
       )
+    case 'ping':
+      return authority(value) && integer(value.seq, 0) && Number.isFinite(value.sentAt)
+    case 'pong':
+      return client() && integer(value.seq, 0) && Number.isFinite(value.sentAt)
     case 'snapshot':
       return authority(value) && integer(value.revision, 0) && validConferenceState(value)
     case 'partialUpdate':
@@ -509,7 +521,8 @@ function validPresence(value: unknown): boolean {
     typeof value.hashOk === 'boolean' &&
     (value.downloadBps === undefined || value.downloadBps === null || Number.isFinite(value.downloadBps)) &&
     (value.etaSeconds === undefined || value.etaSeconds === null || Number.isFinite(value.etaSeconds)) &&
-    (value.packPhase === undefined || (typeof value.packPhase === 'string' && value.packPhase.length <= 40))
+    (value.packPhase === undefined || (typeof value.packPhase === 'string' && value.packPhase.length <= 40)) &&
+    (value.pingMs === undefined || value.pingMs === null || (Number.isFinite(value.pingMs) && (value.pingMs as number) >= 0))
 }
 
 function validConversationLine(value: unknown): boolean {

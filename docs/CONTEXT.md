@@ -222,3 +222,5 @@ XState ведёт фазы, вопрос, игрока, кнопки, тайме
 13 октября 2026: апелляции двух видов. До объявления ответа — переответ (`appealCue`); после — подтверждение «Да, я ответил правильно» / «Нет, не надо апелляцию» без переответа (`appealConfirm`, `confirmClosedAppeal`). Кнопка доступна сразу после минуса (`openAppealNow` на входе `announcing`). Если никто не ответил верно, ведущая называет ровно один вариант эталона и короткую связку (`spokenAnswerCue`). Тесты: `appeals.test.ts`, `stateSessions.test.ts`, `e2e/appeals.play.ts`.
 
 13 октября 2026: из шапки убраны значки микрофона и «ведущая говорит»; остался значок связи. Тесты: `airStatusMarks.test.ts`, `e2e/match.play.ts`.
+
+13 октября 2026: пинг игроков — `ping`/`pong` раз в 3 с, `pingMs` в ростере и снимке, «42 ms» в углу кадра. Тесты: `stateSessions.test.ts` (ping), `messages.test.ts`, `pingLabel.test.ts`, `e2e/ping.play.ts`.

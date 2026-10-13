@@ -573,6 +573,7 @@ h1, h2, p { margin: 0; }
   background: #0f1620;
   display: grid;
   place-items: center;
+  position: relative;
 }
 
 .video-frame video {
@@ -2009,4 +2010,18 @@ button.buzzer.chooser:disabled {
   justify-content: center;
   flex-wrap: wrap;
   margin: 8px 0;
+}
+
+/* RTT до мастера: крошечный белый текст с тёмной обводкой в углу кадра. */
+.video-ping {
+  position: absolute;
+  top: 3px;
+  right: 5px;
+  z-index: 2;
+  font-size: 10px;
+  line-height: 1;
+  font-variant-numeric: tabular-nums;
+  color: #fff;
+  text-shadow: -1px -1px 0 #000, 1px -1px 0 #000, -1px 1px 0 #000, 1px 1px 0 #000;
+  pointer-events: none;
 }

@@ -34,6 +34,7 @@ export function buildConferenceSnapshot(input: {
     packPhase: entry.packPhase,
     ready: entry.ready,
     hashOk: entry.hashOk,
+    pingMs: entry.pingMs ?? null,
   }))
 
   return {

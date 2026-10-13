@@ -18,6 +18,7 @@ class Room {
   dropPackOffers = false
   dropAppealReplies = false
   dropAppealRequests = false
+  pongDelayMs = 0
   connect(id: string): RoomTransport {
     const transport = new RoomTransport(this, id)
     this.members.push(transport)
@@ -38,6 +39,14 @@ class RoomTransport implements ConferenceTransport {
     if (wire.type === 'packOffer' && this.room.dropPackOffers) return
     if (wire.type === 'appealReply' && this.room.dropAppealReplies) return
     if (wire.type === 'appeal' && this.room.dropAppealRequests) return
+    if (wire.type === 'pong' && this.room.pongDelayMs > 0) {
+      const delay = this.room.pongDelayMs
+      setTimeout(() => this.deliver(wire), delay)
+      return
+    }
+    this.deliver(wire)
+  }
+  deliver(wire: ConferenceMessage): void {
     for (const member of this.room.members) {
       if (member === this) continue
       if (member.id === this.room.dropNextUpdateFor && wire.type === 'partialUpdate') {
@@ -244,3 +253,40 @@ it('апелляции: подтверждение, чужой playerId, дуб�
     expect(joiner.snapshot()?.outcomes).toEqual(actor.getSnapshot().context.outcomes)
   } finally { joiner.dispose(); master.dispose(); actor.stop() }
 })
+
+it('ping: мастер каждые ~3 с меряет RTT гостя, значение уходит в снимок', async () => {
+  const room = new Room()
+  room.pongDelayMs = 42
+  const transport = room.connect('master')
+  const actor = createActor(gameMachine).start()
+  const players = [{ id: 1, name: 'Мастер', score: 0, clientId: 'master' }, { id: 2, name: 'Гость', score: 0, clientId: 'guest' }]
+  actor.send({ type: 'START_GAME', pack: demoPack, players })
+  const bytes = new Uint8Array([1, 2, 3])
+  const hash = await sha256Hex(bytes)
+  const master = new MasterSession({ transport, actor, client: { requestSpeech: vi.fn() } as unknown as GameVoice,
+    masterClientId: 'master', masterName: 'Мастер', pack: demoPack, packBytes: bytes, packHash: hash, authorityToken: 'master-token', onRoster: () => {}, resumePlayers: players })
+  const guest = room.connect('guest-endpoint')
+  const callbacks = { onSnapshot: vi.fn(), onLobby: vi.fn(), onPackReady: vi.fn(), onError: vi.fn(), onFatalError: vi.fn() }
+  const joiner = new JoinerSession({ transport: guest, clientId: 'guest', authToken: 'guest-token', name: 'Гость', callbacks,
+    packCache: { get: async () => bytes, put: async () => {}, delete: async () => {} } })
+  try {
+    await vi.advanceTimersByTimeAsync(0)
+    expect(master.rosterList().find((entry) => entry.clientId === 'guest')?.pingMs ?? null).toBeNull()
+    await vi.advanceTimersByTimeAsync(3_000 + 42)
+    expect(master.rosterList().find((entry) => entry.clientId === 'guest')?.pingMs).toBe(42)
+    expect(guest.sent.some((message) => message.type === 'pong')).toBe(true)
+    // Чужой pong (неверный токен) RTT не меняет.
+    room.pongDelayMs = 0
+    guest.send({ type: 'pong', clientId: 'guest', authToken: 'wrong', seq: 1, sentAt: Date.now() - 900 })
+    expect(master.rosterList().find((entry) => entry.clientId === 'guest')?.pingMs).toBe(42)
+    await vi.advanceTimersByTimeAsync(1_000)
+    expect(joiner.snapshot()?.presence.find((entry) => entry.clientId === 'guest')?.pingMs).toBeGreaterThanOrEqual(0)
+    // Pong задержан на 120 мс — следующий замер обновляет значение.
+    room.pongDelayMs = 120
+    await vi.advanceTimersByTimeAsync(3_000)
+    expect(master.rosterList().find((entry) => entry.clientId === 'guest')?.pingMs).toBe(120)
+  } finally {
+    joiner.dispose(); master.dispose(); actor.stop()
+  }
+})
+

@@ -25,7 +25,7 @@ import {
 import { paceAfterAck, type TransferPace } from './packProgress.ts'
 import { ConferenceRoster } from './roster.ts'
 import type { ConferenceTransport } from './transport.ts'
-import { PRESENCE_HEARTBEAT_MS, PRESENCE_STALE_MS } from './presence.ts'
+import { PING_INTERVAL_MS, PRESENCE_HEARTBEAT_MS, PRESENCE_STALE_MS } from './presence.ts'
 import { appendRemoteDebug, clearRemoteDebug, getTrace, subscribeTrace } from '../debug/trace.ts'
 import { messageRingEntries } from './messageRing.ts'
 import { commentaryContext } from '../game/commentary.ts'
@@ -81,6 +81,8 @@ export class MasterSession {
   private lobbyNeedsOpenedSpeech = false
   private heartbeatTimer = 0
   private presenceTimer = 0
+  private pingTimer = 0
+  private pingSeq = 0
   private onRosterCb: () => void
   private initialHistory: ConferenceMessageRing
   private onHistory: (history: ConferenceMessageRing) => void
@@ -180,6 +182,8 @@ export class MasterSession {
     this.heartbeatTimer = window.setInterval(() => {
       this.roster.heartbeat(this.masterClientId)
     }, PRESENCE_HEARTBEAT_MS)
+    // RTT каждому клиенту: один широковещательный ping, ответ — pong с тем же sentAt.
+    this.pingTimer = window.setInterval(() => this.sendPing(), PING_INTERVAL_MS)
     this.presenceTimer = window.setInterval(() => {
       const now = Date.now()
       this.onRosterCb()
@@ -277,6 +281,7 @@ export class MasterSession {
   dispose(): void {
     window.clearInterval(this.heartbeatTimer)
     window.clearInterval(this.presenceTimer)
+    window.clearInterval(this.pingTimer)
     this.clearLobbySpeechTimer()
     this.machineSub?.unsubscribe()
     this.traceUnsub()
@@ -330,6 +335,12 @@ export class MasterSession {
     this.onRosterCb()
   }
 
+  private sendPing(): void {
+    if (this.disposedFallback) return
+    this.pingSeq += 1
+    this.transport.send({ type: 'ping', authorityToken: this.authorityToken, seq: this.pingSeq, sentAt: Date.now() })
+  }
+
   private onMessage(message: ConferenceMessage, senderId: string): void {
     if (message.type === 'hello') {
       const previousEndpoint = this.clientSender.get(message.clientId)
@@ -380,6 +391,12 @@ export class MasterSession {
     }
     if (!('clientId' in message) || !('authToken' in message)) return
     if (!this.clientMatches(message.clientId, message.authToken, senderId)) return
+    if (message.type === 'pong') {
+      const rtt = Date.now() - message.sentAt
+      if (message.seq > this.pingSeq || rtt < 0 || rtt > 60_000) return
+      this.roster.setPing(message.clientId, rtt)
+      return
+    }
     if (message.type === 'statusRequest') {
       this.broadcastFullStatus()
       return

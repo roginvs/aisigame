@@ -267,6 +267,12 @@ export class JoinerSession {
 
   private async onMessage(message: ConferenceMessage, senderId: string): Promise<void> {
     if (this.buildRejected || this.disposed) return
+    if (message.type === 'ping') {
+      if (!this.acceptMaster(message.authorityToken, senderId, false)) return
+      this.transport.send({ type: 'pong', clientId: this.clientId, authToken: this.authToken, seq: message.seq, sentAt: message.sentAt })
+      this.noteMasterAlive()
+      return
+    }
     if (message.type === 'appealReply') {
       if (message.targetClientId !== this.clientId || !this.acceptMaster(message.authorityToken, senderId, false)) return
       const pending = this.appealPending.get(message.requestId)

@@ -87,7 +87,7 @@ export function ConferencePlayersRow(props: {
               role="group"
               aria-label={entry.name}
             >
-              <ConferenceVideoTile tile={tile} bindVideo={bindVideo} masterBadge={entry.isMaster} />
+              <ConferenceVideoTile tile={tile} bindVideo={bindVideo} masterBadge={entry.isMaster} pingMs={entry.pingMs} />
               {entry.isMaster ? (
                 <div className="player-lobby-progress player-lobby-spacer" aria-hidden="true" />
               ) : (
@@ -157,7 +157,7 @@ export function ConferencePlayersRow(props: {
             role="group"
             aria-label={`${label}: ${hasMatchData ? player.score : '—'}${stale ? ', нет связи' : ''}`}
           >
-            <ConferenceVideoTile tile={tile} bindVideo={bindVideo} hideName />
+            <ConferenceVideoTile tile={tile} bindVideo={bindVideo} hideName pingMs={presence?.pingMs} />
             <div className="player-game-slot">
               <div className="player-meta">
                 <strong>{label}</strong>
