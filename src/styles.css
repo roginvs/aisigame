@@ -1306,12 +1306,8 @@ button.continue-with-file .continue-file {
   position: relative;
 }
 
-.host-with-hear-less {
+.host.host-with-hear-less {
   padding-bottom: 32px;
-}
-
-.host-with-two-switches {
-  padding-bottom: 62px;
 }
 
 .host-switches {
@@ -1319,13 +1315,15 @@ button.continue-with-file .continue-file {
   right: 10px;
   bottom: 8px;
   display: flex;
-  flex-direction: column;
-  align-items: flex-end;
-  gap: 4px;
+  align-items: center;
+  gap: 6px;
+  max-width: calc(100% - 20px);
 }
 
 .host-hear-less {
   position: relative;
+  flex: 0 0 auto;
+  white-space: nowrap;
   display: inline-flex;
   align-items: center;
   gap: 8px;
@@ -1410,6 +1408,13 @@ button.continue-with-file .continue-file {
 .host-hear-less.is-on .host-hear-less-thumb {
   transform: translateX(14px);
   background: #f2f7fc;
+}
+
+@media (max-width: 380px) {
+  .host-switches { gap: 4px; }
+  .host-hear-less { gap: 4px; padding-inline: 4px; font-size: 0.6rem; }
+  .host-hear-less-track { width: 24px; }
+  .host-hear-less.is-on .host-hear-less-thumb { transform: translateX(6px); }
 }
 
 .host img {
