@@ -53,13 +53,13 @@ export function conferenceTurnTitle(
   } else if (path === 'finalBets.hearing') {
     playerId = context.finalists[context.finalCursor] ?? null
     action = 'делает ставку'
-  } else if (context.special && /^cat\.(picking|clarifying)$/.test(path)) {
+  } else if (context.special && /^cat\.(picking|resolving|clarifying)$/.test(path)) {
     playerId = context.special.giverId
     action = 'отдаёт вопрос'
   } else if (context.special && path.startsWith('cat.staking')) {
     playerId = context.special.recipientId
     action = 'делает ставку'
-  } else if (context.special && /^auction\.(asking|listening|clarifying)$/.test(path)) {
+  } else if (context.special && /^auction\.(asking|listening|resolving|clarifying)$/.test(path)) {
     playerId = context.special.recipientId
     action = context.special.leaderId === null ? 'делает ставку' : 'решает, перекупать ли'
   }

@@ -67,3 +67,39 @@ describe('инструменты запасного разбора', () => {
     expect(bid).toContain('- ва-банк 900: choice=allIn')
   })
 })
+
+import { echoesChoicePrompt, optionsPrompt, playersPrompt } from './choicePrompt.ts'
+import { answerPromptFor, finalBetInstructions, specialPrompt } from './controller.ts'
+
+describe('подсказки распознаванию — как каталог ячеек', () => {
+  it('имена кандидатов и варианты ставок в фигурных скобках, суммы со словами', () => {
+    expect(playersPrompt(['Анна', 'Вера'])).toBe('{Анна; Вера}')
+    expect(optionsPrompt([{ kind: 'pass' }, { kind: 'stake', amount: 300 }, { kind: 'allIn', amount: 900 }])).toBe('{пас; 300 триста; ва-банк 900 девятьсот}')
+    expect(optionsPrompt([{ kind: 'min', amount: 100 }, { kind: 'max', amount: 500 }])).toBe('{минимум 100 сто; максимум 500 пятьсот}')
+  })
+  it('предел длины 1024 как у каталога', () => {
+    const many = Array.from({ length: 300 }, (_, i) => `Игрок номер ${i}`)
+    expect(playersPrompt(many).length).toBeLessThanOrEqual(1024)
+  })
+  it('specialPrompt по узлу: без выбравшего; ставка мин/макс; варианты торгов', () => {
+    expect(specialPrompt('cat.picking', context)).toBe('{Боря; Вася}')
+    expect(specialPrompt('cat.clarifying', context)).toBe('{Боря; Вася}')
+    expect(specialPrompt('cat.staking.listening', { ...context, special: { ...special, recipientId: 2 } })).toBe('{минимум 100 сто; максимум 500 пятьсот}')
+    expect(specialPrompt('auction.listening', { ...context, special: { ...special, kind: 'auction', options: [{ kind: 'pass' }, { kind: 'allIn', amount: 700 }] } })).toBe('{пас; ва-банк 700 семьсот}')
+  })
+  it('эхо подсказки имён отфильтровывается тем же echoesChoicePrompt', () => {
+    const prompt = playersPrompt(['Анна', 'Вера', 'Борис'])
+    expect(echoesChoicePrompt('Анна; Вера; Борис', prompt)).toBe(true)
+    expect(echoesChoicePrompt('отдаю Вере', prompt)).toBe(false)
+  })
+  it('вопрос с вариантами: в подсказке все варианты, не только эталон', () => {
+    const q = { id: 'c', themeId: 't', themeName: 'Выбор', roundIndex: 0, value: 100, text: '?', answers: ['D'],
+      choices: [{ label: 'A', text: 'Индиана', media: [] }, { label: 'D', text: 'Звёздные войны', media: [] }] }
+    const prompt = answerPromptFor({ ...context, questions: [q], activeQuestionId: 'c' } as unknown as GameContext)
+    expect(prompt).toContain('A Индиана')
+    expect(prompt).toContain('D Звёздные войны')
+  })
+  it('ставка финала: модель получает предел денег', () => {
+    expect(finalBetInstructions('ну половину', 800)).toContain('от 0 до 800')
+  })
+})

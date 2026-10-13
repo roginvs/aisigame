@@ -685,7 +685,7 @@ export class MasterSession {
       if (special.awayPlayerId !== null && online.has(special.awayPlayerId)) this.actor.send({ type: 'SPECIAL_PLAYER_BACK', playerId: special.awayPlayerId })
       return
     }
-    const watched = path.startsWith('cat.staking') || path === 'auction.asking' || path === 'auction.listening' || path === 'auction.clarifying'
+    const watched = path.startsWith('cat.staking') || path === 'auction.asking' || path === 'auction.listening' || path === 'auction.resolving' || path === 'auction.clarifying'
       ? special.recipientId
       : (path.startsWith('answering') || path === 'judging') && special.questionId === context.activeQuestionId ? context.activePlayerId : null
     if (watched === null || !remote(watched) || online.has(watched)) return

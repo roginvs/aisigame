@@ -93,7 +93,7 @@ export function SpecialPanel(props: {
       </p>
       {path === 'auction.won'
         ? <p className="special-status">Вопрос уходит игроку {name(special.leaderId)}</p>
-        : special.recipientId !== null && /^auction\.(asking|listening|clarifying)$/.test(path)
+        : special.recipientId !== null && /^auction\.(asking|listening|resolving|clarifying)$/.test(path)
           ? <p className="special-status">{name(special.recipientId)} {special.leaderId === null ? 'делает ставку' : 'решает, перекупать ли'}</p>
           : null}
       {bidderActs ? (

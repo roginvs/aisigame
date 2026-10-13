@@ -1,9 +1,9 @@
 import type { Actor, SnapshotFrom } from 'xstate'
 import { playTimeoutBeep } from '../audio/beep.ts'
-import { auctionDingMs, audioJudgmentTimings, catMeowMs, specialToolTimeoutMs } from '../options.ts'
+import { auctionDingMs, audioJudgmentTimings, catMeowMs } from '../options.ts'
 import { matchAuctionSpeech, optionLabel } from './auction.ts'
 import { matchCatStake } from './cat.ts'
-import { matchSpokenPlayer, nameHints, spokenPlayers } from './nameMatch.ts'
+import { matchSpokenPlayer, spokenPlayers } from './nameMatch.ts'
 import type { JudgmentInputMode, JudgmentSource, JudgeRequestContext } from '../realtime/judgmentRequest.ts'
 import { JudgmentClock } from './judgmentClock.ts'
 import { gameConfig } from '../config.ts'
@@ -18,7 +18,7 @@ import { parseBet } from './bet.ts'
 import { questionSpeech, spokenChoiceForms } from './choices.ts'
 import { matchSpokenCell, selectionChatText } from './choiceMatch.ts'
 import { answerListeningPrompt, echoesAnswerPrompt, phantomListedAnswer } from './answerPrompt.ts'
-import { choicePrompt, echoesChoicePrompt } from './choicePrompt.ts'
+import { choicePrompt, echoesChoicePrompt, optionsPrompt, playersPrompt } from './choicePrompt.ts'
 import { blurtGate, choiceGate, repeatsQuestion } from './heard.ts'
 import { judgmentChatText, settleJudgment } from './judgment.ts'
 import { currentRound, findQuestion, nextPlayableRound, questionById, roundThemes } from './pack.ts'
@@ -89,7 +89,7 @@ export function attachController(options: {
   /** Инвалидирует in-flight разбор ставки при смене финалиста. */
   let betEpoch = 0
   let specialEpoch = 0
-  let pendingSpecialTool: { turn: number; path: string; text: string; timer: number; finish: () => boolean; unclear: () => void } | null = null
+  let specialHeard = ''
   let specialIntroTimer: ReturnType<typeof setTimeout> | null = null
   /** Инвалидирует фразу без кнопки после смены окна buzzing. */
   let buzzEpoch = 0
@@ -310,13 +310,13 @@ export function attachController(options: {
         if (expectingToolTurn === null || turn !== expectingToolTurn) return
         if (purpose === 'select') handleSelection(call, turn)
         if (purpose === 'judge') handleJudgment(call, turn)
-        if (purpose === 'catPick' || purpose === 'specialBid') handleSpecialTool(call)
+        if (purpose === 'catPick' || purpose === 'specialBid') handleSpecialTool(call, turn)
       })
       return
     }
     if (purpose === 'select') handleSelection(call, turn)
     if (purpose === 'judge') handleJudgment(call, turn)
-    if (purpose === 'catPick' || purpose === 'specialBid') handleSpecialTool(call)
+    if (purpose === 'catPick' || purpose === 'specialBid') handleSpecialTool(call, turn)
   }
 
   let previousRound = actor.getSnapshot().context.roundIndex
@@ -452,14 +452,17 @@ export function attachController(options: {
     }
     if (specialListening(path)) {
       specialEpoch += 1
-      const special = context.special
-      const names = context.players.filter((player) => player.id !== special?.giverId).map((player) => player.name)
-      client.setTranscriptionPrompt(path === 'cat.picking'
-        ? `Игрок называет, кому отдаёт вопрос: ${nameHints(names)}.`
-        : path === 'cat.staking.listening'
-          ? `Игрок выбирает ставку: минимум или максимум, ${special?.stakeOptions.join(' или ')}.`
-          : `Игрок делает ставку: пас, ва-банк, номинал или сумма: ${special?.options.map(optionLabel).join(', ')}.`)
+      expectingToolTurn = null
+      client.setTranscriptionPrompt(specialPrompt(path, context))
       client.setMicEnabled(true)
+    }
+    if (path === 'cat.resolving' || path === 'cat.staking.resolving' || path === 'auction.resolving') {
+      client.interruptSpeech()
+      client.setMicEnabled(false)
+      requestSpecialResolve(path, context)
+    }
+    if (path === 'cat.clarifying' || path === 'cat.staking.clarifying' || path === 'auction.clarifying') {
+      client.setTranscriptionPrompt(specialPrompt(path, context))
     }
     if (path === 'cat.clarifying') speakWhileListening('catClarify', catClarifyCue(context))
     if (path === 'cat.staking.clarifying') speakWhileListening('catStakeClarify', catStakeClarifyCue(context))
@@ -541,11 +544,11 @@ export function attachController(options: {
     if (path !== 'paused' && !buzzerChimeLive(path)) clearBuzzerWarning()
     if (path === 'answering.waiting') {
       armAnswerAttempt(context.attemptId)
-      client.setTranscriptionPrompt(answerListeningPrompt(questionById(context.questions, context.activeQuestionId)?.answers ?? []))
+      client.setTranscriptionPrompt(answerPromptFor(context))
       client.setMicEnabled(true)
     }
     if (path === 'answering.hearing') {
-      client.setTranscriptionPrompt(answerListeningPrompt(questionById(context.questions, context.activeQuestionId)?.answers ?? []))
+      client.setTranscriptionPrompt(answerPromptFor(context))
     }
     if (isAnnouncingPath(path) || path.startsWith('answering')) expectingToolTurn = null
     if (isAnnounceSpeakingPath(path) && !isAnnouncingPath(from)) dropAnswerAttempt()
@@ -559,7 +562,7 @@ export function attachController(options: {
     }
     if (path === 'finalBets.hearing') {
       betEpoch += 1
-      client.setTranscriptionPrompt('Игрок называет ставку числом или говорит ва-банк.')
+      client.setTranscriptionPrompt(finalBetPrompt(context))
       client.setMicEnabled(true)
     }
     if (path === 'turnCue') speak('turn', turnInstructions(context))
@@ -760,26 +763,33 @@ export function attachController(options: {
     actor.send({ type: 'TALKED_OVER' })
   }
 
-  /** Голос в коте/аукционе: только локальный разбор; результат — всегда вариант из экрана или переспрос. */
+  /** Голос в коте/аукционе — как considerChoice: эхо подсказки, гейт шума, локальный разбор, иначе resolving и модель. */
   async function considerSpecial(path: string, durationMs: number, itemId: string | null): Promise<void> {
     const epoch = specialEpoch
-    if (durationMs < 250) {
-      pushTrace('note', 'короткий звук в коте/аукционе — пропуск')
-      return
-    }
     const heard = await client.waitForTranscript(itemId, 2200)
     if (epoch !== specialEpoch) return
     const snapshot = actor.getSnapshot()
-    const now = statePath(snapshot.value)
-    if (now !== path) return
-    const text = heard.text.trim()
-    if (!heard.arrived || !text) {
-      pushPlayerLine('речь не распознана')
-      return
-    }
+    if (statePath(snapshot.value) !== path) return
     const context = snapshot.context
     const special = context.special
     if (!special) return
+    if (echoesChoicePrompt(heard.text, specialPrompt(path, context))) {
+      pushTrace('note', 'распознавание повторило подсказку вариантов, это не выбор')
+      return
+    }
+    if (!heard.arrived) pushPlayerLine('речь не распознана')
+    const text = heard.text.trim()
+    const shown = text || 'речь не распознана'
+    const gate = choiceGate(text, durationMs, 2)
+    if (gate === 'ignore') {
+      pushTrace('note', `короткий звук ${durationMs} мс в коте/аукционе: ${shown}`)
+      return
+    }
+    if (gate === 'ask-again') {
+      pushJudgeLine(`Услышала: «${shown}», это не выбор`)
+      sendSpecialUnclear(path, 'не расслышала')
+      return
+    }
     if (path === 'cat.picking') {
       const candidates = context.players.filter((player) => player.id !== special.giverId)
       const playerId = matchSpokenPlayer(text, candidates)
@@ -794,25 +804,14 @@ export function attachController(options: {
         actor.send({ type: 'CAT_PICK_UNCLEAR', reason: 'себе оставить нельзя' })
         return
       }
-      // Ни одного или несколько имён — спрашиваем модель, она выбирает только из кандидатов.
-      askSpecialModel(path, 'catPick', 'selectCatRecipient', catRecipientInstructions(text, candidates), text, () => {
-        pushJudgeLine(`Услышала: «${text}», нужно имя другого игрока`)
-        actor.send({ type: 'CAT_PICK_UNCLEAR', reason: 'нужно имя другого игрока' })
-      })
-      return
     }
-    if (path === 'cat.staking.listening') {
+    if (path === 'cat.staking.listening' && special.recipientId !== null) {
       const amount = matchCatStake(text, special.stakeOptions)
-      if (amount !== null && special.recipientId !== null) {
+      if (amount !== null) {
         pushJudgeLine(`Ставка: ${amount}`)
         actor.send({ type: 'CAT_STAKE', playerId: special.recipientId, amount })
         return
       }
-      askSpecialModel(path, 'specialBid', 'resolveSpecialBid', specialBidInstructions(text, special.stakeOptions.map((amount) => ({ kind: 'stake' as const, amount }))), text, () => {
-        pushJudgeLine(`Услышала: «${text}», нужна ставка ${special.stakeOptions.join(' или ')}`)
-        actor.send({ type: 'CAT_STAKE_UNCLEAR', reason: `услышала «${text}»` })
-      })
-      return
     }
     if (path === 'auction.listening' && special.recipientId !== null) {
       const money = context.players.find((player) => player.id === special.recipientId)?.score ?? 0
@@ -822,68 +821,102 @@ export function attachController(options: {
         actor.send({ type: 'AUCTION_BID', playerId: special.recipientId, option })
         return
       }
-      askSpecialModel(path, 'specialBid', 'resolveSpecialBid', specialBidInstructions(text, special.options), text, () => {
-        pushJudgeLine(`Услышала: «${text}», нужен один из вариантов: ${special.options.map(optionLabel).join(', ')}`)
-        actor.send({ type: 'AUCTION_UNCLEAR', reason: `услышала «${text}»` })
-      })
     }
+    // Локально не вышло: как в выборе ячейки — resolving, модель выбирает только из вариантов.
+    specialHeard = text
+    actor.send({ type: 'PLAYER_SPEECH_FINISHED' })
   }
 
-  /** Запасной путь: изолированный вызов модели. Принимаем только вариант из списка, иначе — переспрос. */
-  function askSpecialModel(path: string, purpose: string, name: string, instructions: string, text: string, unclear: () => void): void {
+  function sendSpecialUnclear(path: string, reason: string): void {
+    if (path.startsWith('cat.staking')) actor.send({ type: 'CAT_STAKE_UNCLEAR', reason })
+    else if (path.startsWith('cat.')) actor.send({ type: 'CAT_PICK_UNCLEAR', reason })
+    else if (path.startsWith('auction.')) actor.send({ type: 'AUCTION_UNCLEAR', reason })
+  }
+
+  /** Вход в resolving кота/аукциона: изолированный вызов, как requestSelection. */
+  function requestSpecialResolve(path: string, context: GameContext): void {
+    const special = context.special
+    if (!special) return
     toolTurn += 1
     expectingToolTurn = toolTurn
-    const turn = toolTurn
-    const epoch = specialEpoch
-    const finish = () => {
-      if (pendingSpecialTool?.turn !== turn) return false
-      window.clearTimeout(pendingSpecialTool.timer)
-      pendingSpecialTool = null
-      if (expectingToolTurn === turn) expectingToolTurn = null
-      return epoch === specialEpoch && statePath(actor.getSnapshot().value) === path
+    if (path === 'cat.resolving') {
+      const candidates = context.players.filter((player) => player.id !== special.giverId)
+      client.requestTool('catPick', toolTurn, 'selectCatRecipient', catRecipientInstructions(specialHeard, candidates), true)
+      return
     }
-    const timer = window.setTimeout(() => {
-      if (finish()) { pushTrace('note', `${name}: модель не ответила`); unclear() }
-    }, specialToolTimeoutMs)
-    pendingSpecialTool = { turn, path, text, timer, finish, unclear }
-    pushTrace('note', `${name}: локально не разобрала «${text}», спрашиваю модель`)
-    client.requestTool(purpose, turn, name, instructions, true)
+    const options: AuctionOption[] = path === 'cat.staking.resolving'
+      ? special.stakeOptions.map((amount) => ({ kind: 'stake' as const, amount }))
+      : special.options
+    client.requestTool('specialBid', toolTurn, 'resolveSpecialBid', specialBidInstructions(specialHeard, options), true)
   }
 
-  function handleSpecialTool(call: ToolCall | null): void {
-    const pending = pendingSpecialTool
-    if (!pending || !pending.finish()) return
+  function handleSpecialTool(call: ToolCall | null, turn: number): void {
+    if (expectingToolTurn === null || turn !== expectingToolTurn) {
+      if (call) client.sendToolOutput(call.callId, { accepted: false, reason: 'Выбор уже не актуален' })
+      return
+    }
+    expectingToolTurn = null
+    const path = statePath(actor.getSnapshot().value)
+    if (path === 'finalBets.resolving') { handleBetTool(call); return }
+    if (path !== 'cat.resolving' && path !== 'cat.staking.resolving' && path !== 'auction.resolving') {
+      if (call) client.sendToolOutput(call.callId, { accepted: false, reason: 'Выбор уже не актуален' })
+      return
+    }
     const args = asRecord(call?.arguments)
     const context = actor.getSnapshot().context
     const special = context.special
-    if (call) client.sendToolOutput(call.callId, { accepted: true })
-    if (!special || args.confident !== true) { pending.unclear(); return }
-    if (call?.name === 'selectCatRecipient' && pending.path === 'cat.picking') {
+    const heard = specialHeard || 'речь не распознана'
+    const unclear = (reason: string) => {
+      if (call) client.sendToolOutput(call.callId, { accepted: false, reason })
+      pushJudgeLine(`Услышала: «${heard}», ${reason}`)
+      sendSpecialUnclear(path, reason)
+    }
+    if (!special || args.confident !== true) { unclear('не разобрала'); return }
+    if (path === 'cat.resolving') {
       const playerId = Number(args.playerId)
-      const ok = context.players.some((player) => player.id === playerId && player.id !== special.giverId)
-      if (!ok) { pending.unclear(); return }
-      pushJudgeLine(`Услышала: «${pending.text}» — кот уходит игроку ${nameOf(context, playerId)}`)
+      if (call?.name !== 'selectCatRecipient' || !context.players.some((player) => player.id === playerId && player.id !== special.giverId)) {
+        unclear('нужно имя другого игрока')
+        return
+      }
+      if (call) client.sendToolOutput(call.callId, { accepted: true })
+      pushJudgeLine(`Услышала: «${heard}» — кот уходит игроку ${nameOf(context, playerId)}`)
       actor.send({ type: 'CAT_RECIPIENT', playerId })
       return
     }
-    if (call?.name !== 'resolveSpecialBid' || special.recipientId === null) { pending.unclear(); return }
+    if (call?.name !== 'resolveSpecialBid' || special.recipientId === null) { unclear('нужен один из вариантов'); return }
     const amount = Number(args.amount)
-    if (pending.path === 'cat.staking.listening') {
-      if (args.choice !== 'amount' || !special.stakeOptions.includes(amount)) { pending.unclear(); return }
+    if (path === 'cat.staking.resolving') {
+      if (args.choice !== 'amount' || !special.stakeOptions.includes(amount)) { unclear(`нужна ставка ${special.stakeOptions.join(' или ')}`); return }
+      if (call) client.sendToolOutput(call.callId, { accepted: true })
       pushJudgeLine(`Ставка: ${amount}`)
       actor.send({ type: 'CAT_STAKE', playerId: special.recipientId, amount })
       return
     }
-    if (pending.path === 'auction.listening') {
-      const option = special.options.find((item) => args.choice === 'pass' ? item.kind === 'pass'
-        : args.choice === 'allIn' ? item.kind === 'allIn'
-          : args.choice === 'amount' && item.kind !== 'pass' && item.amount === amount)
-      if (!option) { pending.unclear(); return }
-      pushJudgeLine(`Аукцион: ${optionLabel(option)}`)
-      actor.send({ type: 'AUCTION_BID', playerId: special.recipientId, option })
+    const option = special.options.find((item) => args.choice === 'pass' ? item.kind === 'pass'
+      : args.choice === 'allIn' ? item.kind === 'allIn'
+        : args.choice === 'amount' && item.kind !== 'pass' && item.amount === amount)
+    if (!option) { unclear(`нужен один из вариантов: ${special.options.map(optionLabel).join(', ')}`); return }
+    if (call) client.sendToolOutput(call.callId, { accepted: true })
+    pushJudgeLine(`Аукцион: ${optionLabel(option)}`)
+    actor.send({ type: 'AUCTION_BID', playerId: special.recipientId, option })
+  }
+
+  /** Ставка финала: локальный parseBet не справился — модель называет сумму в пределах денег игрока. */
+  function handleBetTool(call: ToolCall | null): void {
+    const snapshot = actor.getSnapshot()
+    const playerId = snapshot.context.finalists[snapshot.context.finalCursor]
+    const score = snapshot.context.players.find((player) => player.id === playerId)?.score ?? 0
+    const args = asRecord(call?.arguments)
+    const amount = args.choice === 'allIn' ? score : args.choice === 'amount' ? Number(args.amount) : NaN
+    const ok = call?.name === 'resolveSpecialBid' && args.confident === true && playerId !== undefined &&
+      Number.isSafeInteger(amount) && amount >= 0 && amount <= Math.max(0, score)
+    if (call) client.sendToolOutput(call.callId, { accepted: ok })
+    if (!ok || playerId === undefined) {
+      actor.send({ type: 'BET_UNCLEAR' })
       return
     }
-    pending.unclear()
+    pushJudgeLine(`Ставка: ${amount}`)
+    actor.send({ type: 'BET_PLACED', playerId, amount })
   }
 
   async function considerBet(itemId: string | null): Promise<void> {
@@ -896,6 +929,13 @@ export function attachController(options: {
     const playerId = snapshot.context.finalists[snapshot.context.finalCursor]
     const score = snapshot.context.players.find((player) => player.id === playerId)?.score ?? 0
     const amount = parseBet(heard.text, score)
+    if (playerId && amount === null && heard.text.trim()) {
+      // Как в выборе ячейки: локально не вышло — изолированный вызов модели, ответ проверяется по деньгам игрока.
+      toolTurn += 1
+      expectingToolTurn = toolTurn
+      client.requestTool('specialBid', toolTurn, 'resolveSpecialBid', finalBetInstructions(heard.text, score), true)
+      return
+    }
     if (!playerId || amount === null) {
       actor.send({ type: 'BET_UNCLEAR' })
       return
@@ -980,7 +1020,7 @@ export function attachController(options: {
       : { text: '', arrived: false, confidence: null as number | null }
     await run.clock.active()
     if (!judgeLive(run) || run.clock.remaining() <= 0) return
-    const answerPrompt = answerListeningPrompt(questionById(context.questions, context.activeQuestionId)?.answers ?? [])
+    const answerPrompt = answerPromptFor(context)
     const echo = echoesAnswerPrompt(heard.text, answerPrompt)
     if (echo || phantomListedAnswer(heard.text, answerPrompt, answerDurationMs, heard.confidence)) {
       pushTrace('note', echo ? 'распознавание повторило подсказку ответа, это не ответ' : `фантом ответа из подсказки (${answerDurationMs} мс, conf ${heard.confidence ?? '—'}): ${heard.text}`)
@@ -1695,6 +1735,43 @@ export function awayAnnounceCue(context: GameContext): string {
 }
 
 /** Чьё слово сейчас решает в коте/аукционе (для микса модели и подписи «… делает ставку»). */
+/** Вопрос с вариантами — фиксированный набор: в подсказку идут все варианты (буква и текст), не только эталон. */
+export function answerPromptFor(context: GameContext): string {
+  const question = questionById(context.questions, context.activeQuestionId)
+  const choices = question?.choices ?? []
+  if (!choices.length) return answerListeningPrompt(question?.answers ?? [])
+  return answerListeningPrompt(choices.map((choice) => choice.text ? `${choice.label} ${choice.text}` : choice.label))
+}
+
+/** Подсказка распознаванию на узле кота/аукциона: варианты, как каталог ячеек в choosing. */
+export function specialPrompt(path: string, context: GameContext): string {
+  const special = context.special
+  if (!special) return ''
+  if (path.startsWith('cat.staking')) {
+    const options = special.stakeOptions
+    return optionsPrompt(options.length > 1
+      ? [{ kind: 'min' as const, amount: options[0]! }, { kind: 'max' as const, amount: options.at(-1)! }]
+      : options.map((amount) => ({ kind: 'stake' as const, amount })))
+  }
+  if (path.startsWith('cat.')) return playersPrompt(context.players.filter((player) => player.id !== special.giverId).map((player) => player.name))
+  return optionsPrompt(special.options)
+}
+
+function finalBetPrompt(context: GameContext): string {
+  const playerId = context.finalists[context.finalCursor]
+  const score = context.players.find((player) => player.id === playerId)?.score ?? 0
+  return optionsPrompt([{ kind: 'stake', amount: 0 }, { kind: 'allIn', amount: Math.max(0, score) }])
+}
+
+/** Изолированный запрос ставки финала: любая сумма от 0 до денег игрока или ва-банк. */
+export function finalBetInstructions(transcript: string, score: number): string {
+  return [
+    `Игрок делает ставку в финале. Допустимо: любая сумма от 0 до ${Math.max(0, score)} (choice=amount, amount=сумма) или ва-банк ${Math.max(0, score)} (choice=allIn).`,
+    `Распознанный текст: «${transcript}»`,
+    'Вызови resolveSpecialBid. Не выдумывай сумму. Если неясно — choice=unclear, confident=false.',
+  ].join('\n')
+}
+
 /** Изолированный запрос: кому отдают кота. Кандидаты — только «id: имя», сам выбравший не входит. */
 export function catRecipientInstructions(transcript: string, candidates: Array<{ id: PlayerId; name: string }>): string {
   return [
@@ -1719,7 +1796,7 @@ export function specialBidInstructions(transcript: string, options: AuctionOptio
 export function specialListenerId(path: string, context: GameContext): number | null {
   const special = context.special
   if (!special) return null
-  if (path.startsWith('cat.picking') || path.startsWith('cat.clarifying') || path === 'cat.announcing') return special.recipientId == null ? special.giverId : null
+  if (path.startsWith('cat.picking') || path === 'cat.resolving' || path.startsWith('cat.clarifying') || path === 'cat.announcing') return special.recipientId == null ? special.giverId : null
   if (path.startsWith('cat.staking')) return special.recipientId
   if (path.startsWith('auction.') && path !== 'auction.won') return special.recipientId
   return null

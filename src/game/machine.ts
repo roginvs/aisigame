@@ -1204,7 +1204,7 @@ export const gameMachine = setup({
     ],
     SPECIAL_PLAYER_OFFLINE: [
       { guard: and([stateIn('cat.staking'), 'awayRecipient']), target: '.specialAway', actions: 'markAwayStaking' },
-      { guard: and([or([stateIn('auction.asking'), stateIn('auction.listening'), stateIn('auction.clarifying')]), 'awayRecipient']), target: '.specialAway', actions: 'markAwayBidding' },
+      { guard: and([or([stateIn('auction.asking'), stateIn('auction.listening'), stateIn('auction.resolving'), stateIn('auction.clarifying')]), 'awayRecipient']), target: '.specialAway', actions: 'markAwayBidding' },
       { guard: and([or([stateIn('answering'), stateIn('judging')]), 'awayAnswerer']), target: '.specialAway', actions: 'markAwayAnswering' },
     ],
     RESET_GAME: { target: '.startMenu', actions: 'resetMatch' },
@@ -1367,8 +1367,18 @@ export const gameMachine = setup({
         },
         picking: {
           on: {
+            PLAYER_SPEECH_FINISHED: 'resolving',
             CAT_RECIPIENT: { guard: 'validCatRecipient', target: '#game.cat.staking', actions: 'setCatRecipient' },
             CAT_PICK_UNCLEAR: { target: 'clarifying', actions: 'noteSpecialUnclear' },
+          },
+        },
+        /** Как choosing.resolving: локально не узнали — модель выбирает из кандидатов. */
+        resolving: {
+          after: { judgeMs: 'picking' },
+          on: {
+            CAT_RECIPIENT: { guard: 'validCatRecipient', target: '#game.cat.staking', actions: 'setCatRecipient' },
+            CAT_PICK_UNCLEAR: { target: 'clarifying', actions: 'noteSpecialUnclear' },
+            SELECTION_FAILED: 'picking',
           },
         },
         clarifying: {
@@ -1393,7 +1403,17 @@ export const gameMachine = setup({
               },
             },
             listening: {
-              on: { CAT_STAKE_UNCLEAR: { target: 'clarifying', actions: 'noteSpecialUnclear' } },
+              on: {
+                PLAYER_SPEECH_FINISHED: 'resolving',
+                CAT_STAKE_UNCLEAR: { target: 'clarifying', actions: 'noteSpecialUnclear' },
+              },
+            },
+            resolving: {
+              after: { judgeMs: 'listening' },
+              on: {
+                CAT_STAKE_UNCLEAR: { target: 'clarifying', actions: 'noteSpecialUnclear' },
+                SELECTION_FAILED: 'listening',
+              },
             },
             clarifying: {
               on: {
@@ -1436,8 +1456,17 @@ export const gameMachine = setup({
         },
         listening: {
           on: {
+            PLAYER_SPEECH_FINISHED: 'resolving',
             AUCTION_BID: { guard: 'validAuctionBid', target: '#game.auction.advancing', actions: 'applyAuctionBid' },
             AUCTION_UNCLEAR: { target: 'clarifying', actions: 'noteSpecialUnclear' },
+          },
+        },
+        resolving: {
+          after: { judgeMs: 'listening' },
+          on: {
+            AUCTION_BID: { guard: 'validAuctionBid', target: '#game.auction.advancing', actions: 'applyAuctionBid' },
+            AUCTION_UNCLEAR: { target: 'clarifying', actions: 'noteSpecialUnclear' },
+            SELECTION_FAILED: 'listening',
           },
         },
         clarifying: {

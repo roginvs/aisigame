@@ -76,7 +76,7 @@ function priceHint(value: number, words: boolean): string {
   return spoken === digits ? digits : `${digits} ${spoken}`
 }
 
-function wrapCatalog(body: string): string {
+export function wrapCatalog(body: string): string {
   const room = transcriptionPromptMax - 2
   let slice = body
   if (slice.length > room) {
@@ -136,4 +136,23 @@ function mentions(haystack: string, phrase: string): boolean {
 
 function priceCount(text: string): number {
   return fold(text).match(/(?<![\p{L}\p{N}])\d{2,5}(?![\p{L}\p{N}])/gu)?.length ?? 0
+}
+
+/** Подсказка распознаванию при выборе получателя кота: имена кандидатов, тот же формат и предел длины, что у каталога ячеек. */
+export function playersPrompt(names: string[]): string {
+  if (!names.length) return 'Игрок называет другого игрока.'
+  return wrapCatalog(names.join('; '))
+}
+
+/** Подсказка для ставки: варианты экрана суммами со словами («300 триста»), «пас», «ва-банк». */
+export function optionsPrompt(options: Array<{ kind: 'pass' } | { kind: 'stake' | 'allIn' | 'min' | 'max'; amount: number }>): string {
+  if (!options.length) return 'Игрок называет ставку.'
+  return wrapCatalog(options.map((option) => {
+    if (option.kind === 'pass') return 'пас'
+    const amount = priceHint(option.amount, true)
+    if (option.kind === 'allIn') return `ва-банк ${amount}`
+    if (option.kind === 'min') return `минимум ${amount}`
+    if (option.kind === 'max') return `максимум ${amount}`
+    return amount
+  }).join('; '))
 }
