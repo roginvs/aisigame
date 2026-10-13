@@ -30,3 +30,44 @@ for (const [name, device] of Object.entries(phones)) {
     })
   })
 }
+
+async function startDemo(page: import('@playwright/test').Page) {
+  await page.goto('/?mock=1')
+  await page.getByLabel('Модель').selectOption('mock')
+  await page.getByLabel('Пакет вопросов').selectOption('demo')
+  await page.getByRole('button', { name: 'Начать игру' }).click()
+  await expect(page.getByRole('grid', { name: 'Игровое поле' })).toBeVisible()
+}
+
+test.describe('планшет 820×1180', () => {
+  test.use({ viewport: { width: 820, height: 1180 }, hasTouch: true })
+  test('сразу после старта табло полного размера, без клика', async ({ page }) => {
+    await startDemo(page)
+    const board = (await page.getByRole('grid', { name: 'Игровое поле' }).boundingBox())!
+    expect(board.height).toBeGreaterThan(400)
+    const cell = (await page.getByRole('button', { name: 'Текст, 100', exact: true }).boundingBox())!
+    expect(cell.height).toBeGreaterThan(60)
+  })
+})
+
+test.describe('телефон 390×844', () => {
+  test.use({ viewport: { width: 390, height: 844 }, hasTouch: true, isMobile: true })
+  test('три карточки игроков помещаются без горизонтального скролла', async ({ page }) => {
+    await startDemo(page)
+    const row = page.locator('.players')
+    const [scroll, client] = await row.evaluate((el) => [el.scrollWidth, el.clientWidth])
+    expect(scroll).toBeLessThanOrEqual(client + 1)
+    const third = (await page.getByRole('group', { name: /^Игрок 3:/ }).boundingBox())!
+    expect(third.x + third.width).toBeLessThanOrEqual(390)
+  })
+})
+
+test.describe('телефон ландшафт 844×390', () => {
+  test.use({ viewport: { width: 844, height: 390 }, hasTouch: true, isMobile: true })
+  test('нижний ряд табло на экране', async ({ page }) => {
+    await startDemo(page)
+    const board = (await page.getByRole('grid', { name: 'Игровое поле' }).boundingBox())!
+    expect(board.y).toBeGreaterThanOrEqual(0)
+    expect(board.y + board.height).toBeLessThanOrEqual(390)
+  })
+})

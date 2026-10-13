@@ -1733,13 +1733,14 @@ button.buzzer.chooser:disabled {
   .stage > .board,
   .board {
     flex: 0 0 auto;
-    min-height: min(560px, 68dvh);
+    /* Floor in px: some browsers (DevTools device mode right after a resize) resolve dvh too small. */
+    min-height: max(220px, min(560px, 68dvh));
     height: auto;
   }
   .stage > .question,
   .question {
     flex: 0 0 auto;
-    min-height: min(520px, 68dvh);
+    min-height: max(220px, min(520px, 68dvh));
   }
   .board, .question, .play .players { grid-column: auto; grid-row: auto; }
   .topbar { align-items: flex-start; flex-direction: column; }
@@ -1853,7 +1854,8 @@ button.buzzer.chooser:disabled {
   }
 
   .players {
-    grid-auto-columns: minmax(145px, 72vw);
+    /* Three cards fit a 360-390px phone; more players scroll horizontally. */
+    grid-auto-columns: minmax(96px, 1fr);
     gap: 8px;
     padding: 3px 3px 6px;
     overflow-x: auto;
@@ -1979,5 +1981,13 @@ button.buzzer.chooser:disabled {
   .conference-layout .conference-player {
     flex-basis: min(70vw, 280px);
     max-width: 85vw;
+  }
+}
+
+/* Phone landscape: the board has to fit under the top bar without its last row below the fold. */
+@media (max-width: 1100px) and (max-height: 500px) and (orientation: landscape) {
+  .stage > .board,
+  .board {
+    min-height: max(200px, min(560px, calc(100dvh - 150px)));
   }
 }
