@@ -22,7 +22,7 @@ describe('HostPresence', () => {
       path: 'choosing.listening', link: { host: 'idle', mic: 'live' }, status: '',
     }))
     expect(quiet).toContain('host host-listen')
-    expect(quiet).not.toContain('data-ear')
+    expect(quiet).toContain('data-ear="listening"')
   })
 
   it('adds speaking class when conference audio level is active', () => {
@@ -146,7 +146,27 @@ describe('стиль «Слышу…»', () => {
   it('без рамки и свечения, значок волны остаётся', () => {
     const css = readFileSync(new URL('../styles.css', import.meta.url), 'utf8')
     expect(css).toMatch(/\.host-hear \{ border-color: transparent; box-shadow: none; \}/)
+    expect(css).toMatch(/\.host-badge \{[^}]*border: none;/)
     expect(css).not.toMatch(/\.host-hear img \{/)
     expect(css).toContain('.host-badge-hear i')
+  })
+})
+
+describe('значок в углу: слушает / слышит / думает', () => {
+  const render = (path: string, mic: 'live' | 'muted', ear: 'idle' | 'hearing' | 'processing', host: 'idle' | 'speaking' = 'idle') =>
+    renderToStaticMarkup(createElement(HostPresence, { path, link: { host, mic }, status: '', ear }))
+  it('мик открыт, речи нет — статичный зелёный кружок', () => {
+    expect(render('choosing.listening', 'live', 'idle')).toContain('data-ear="listening"')
+  })
+  it('после speech_started — волна', () => {
+    expect(render('choosing.listening', 'live', 'hearing')).toContain('data-ear="hearing"')
+  })
+  it('разбор — спиннер', () => {
+    expect(render('choosing.listening', 'live', 'processing')).toContain('data-ear="processing"')
+  })
+  it('ведущая говорит, мик закрыт, лобби — без значка', () => {
+    expect(render('choosing.listening', 'live', 'idle', 'speaking')).not.toContain('data-ear')
+    expect(render('choosing.listening', 'muted', 'idle')).not.toContain('data-ear')
+    expect(render('lobby', 'live', 'idle')).not.toContain('data-ear')
   })
 })

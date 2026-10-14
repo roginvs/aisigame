@@ -5,7 +5,8 @@
  * Игра это не читает. Таймеров нет: гасят только события игры и сессии
  * (смена состояния, разбор фразы без перехода, речь ведущей, закрытый мик, обрыв).
  */
-export type HostEar = 'idle' | 'hearing' | 'processing'
+/** listening — только для показа: мик открыт и ход ждёт речь, но речи ещё нет (в снимке конференции). */
+export type HostEar = 'idle' | 'listening' | 'hearing' | 'processing'
 
 let ear: HostEar = 'idle'
 /** Растёт на каждой смене: отложенный разбор гасит только «свою» фразу. */
@@ -55,5 +56,5 @@ export function hostEarSurvives(path: string, from = ''): boolean {
 }
 
 export function readHostEar(value: unknown): HostEar | null {
-  return value === 'idle' || value === 'hearing' || value === 'processing' ? value : null
+  return value === 'idle' || value === 'listening' || value === 'hearing' || value === 'processing' ? value : null
 }

@@ -1,4 +1,6 @@
-import { getHostEar, subscribeHostEar } from '../game/hostEar.ts'
+import { getHostEar, subscribeHostEar, type HostEar } from '../game/hostEar.ts'
+import { hostMood } from '../ui/hostMood.ts'
+import type { LinkStatus } from '../realtime/client.ts'
 import { appealRequestError } from '../game/appeals.ts'
 import type { Actor, SnapshotFrom } from 'xstate'
 import type { GameVoice } from '../realtime/client.ts'
@@ -27,7 +29,7 @@ import { paceAfterAck, type TransferPace } from './packProgress.ts'
 import { ConferenceRoster } from './roster.ts'
 import type { ConferenceTransport } from './transport.ts'
 import { PING_INTERVAL_MS, PRESENCE_HEARTBEAT_MS, PRESENCE_STALE_MS } from './presence.ts'
-import { appendRemoteDebug, clearRemoteDebug, getLivePlayerLine, getTrace, subscribeLivePlayerLine, subscribeTrace } from '../debug/trace.ts'
+import { appendRemoteDebug, clearRemoteDebug, getLinkStatus, getLivePlayerLine, getTrace, subscribeLinkStatus, subscribeLivePlayerLine, subscribeTrace } from '../debug/trace.ts'
 import { messageRingEntries } from './messageRing.ts'
 import { commentaryContext } from '../game/commentary.ts'
 import { emptyMessageRing } from './messageRing.ts'
@@ -112,6 +114,7 @@ export class MasterSession {
   private traceUnsub: () => void
   private liveUnsub: () => void = () => {}
   private earUnsub: () => void = () => {}
+  private linkUnsub: () => void = () => {}
   private liveThrottle = throttleLatest<null>(LIVE_SPEECH_THROTTLE_MS, () => {
     if (this.statePublisher) this.broadcastCurrentSnapshot()
   })
@@ -212,6 +215,7 @@ export class MasterSession {
     }
     this.traceCursor = getTrace().at(-1)?.id ?? 0
     this.earUnsub = subscribeHostEar(() => this.broadcastCurrentSnapshot())
+    this.linkUnsub = subscribeLinkStatus(() => this.broadcastCurrentSnapshot())
     this.liveUnsub = subscribeLivePlayerLine(() => this.liveThrottle.push(null, getLivePlayerLine() === null))
     this.traceUnsub = subscribeTrace(() => {
       const entries = getTrace().filter((entry) => entry.id > this.traceCursor)
@@ -300,6 +304,7 @@ export class MasterSession {
     this.traceUnsub()
     this.liveUnsub()
     this.earUnsub()
+    this.linkUnsub()
     this.liveThrottle.stop()
     this.unsub()
     this.packPipe?.dispose()
@@ -573,7 +578,7 @@ export class MasterSession {
       roster: this.roster.allIncludingHidden(now),
       messageRing: this.statePublisher?.history() ?? this.initialHistory,
       liveSpeech: liveSpeechOf(getLivePlayerLine()),
-      hostEar: getHostEar(),
+      hostEar: this.publicEar(phase),
       timerRemainingMs: this.gameStarted ? timerRemainingMs(context, now) : null,
       falseStartIds: this.gameStarted
         ? Object.entries(this.actor.getSnapshot().context.falseStarts)
@@ -581,6 +586,14 @@ export class MasterSession {
             .map(([id]) => Number(id))
         : [],
     })
+  }
+
+  /** Для гостей: «слушаю» (мик открыт, речи нет) выводим у мастера — у гостя нет его микрофона. */
+  private publicEar(phase: string): HostEar {
+    const ear = getHostEar()
+    if (ear !== 'idle' || !this.gameStarted) return ear
+    const link = getLinkStatus()
+    return hostMood(phase, { host: link.host as LinkStatus['host'], mic: link.mic as LinkStatus['mic'] }, 'idle') === 'listen' ? 'listening' : 'idle'
   }
 
   private maybeOpenLobbySpeech(): void {

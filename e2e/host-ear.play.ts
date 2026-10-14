@@ -32,6 +32,8 @@ test('плашка ведущей: «Слышу…» → «Поняла, дум�
   await master.getByRole('button', { name: 'Начать игру' }).click()
   await expect(joiner.getByRole('status').filter({ hasText: 'Гость выбирает вопрос' })).toBeVisible({ timeout: 30_000 })
 
+  // Мик открыт, речи нет — статичный зелёный кружок у мастера и гостя.
+  for (const page of [master, joiner]) await expect(page.getByTestId('host-ear')).toHaveAttribute('data-ear', 'listening')
   await master.evaluate(() => window.__aisigame?.hearSlow?.('Текст сто', 3000, 1500))
   for (const page of [master, joiner]) {
     await expect(page.getByTestId('host-ear')).toHaveAttribute('data-ear', 'hearing')
@@ -42,7 +44,8 @@ test('плашка ведущей: «Слышу…» → «Поняла, дум�
     await expect(page.locator('.host strong')).toHaveText('Поняла, думаю…')
   }
   for (const page of [master, joiner]) {
-    await expect(page.getByTestId('host-ear')).toHaveCount(0, { timeout: 10_000 })
+    // После разбора — снова статичный кружок «слушаю» или без значка (говорит ведущая).
+    await expect(page.locator('[data-ear="hearing"], [data-ear="processing"]')).toHaveCount(0, { timeout: 10_000 })
   }
   await context.close()
 })

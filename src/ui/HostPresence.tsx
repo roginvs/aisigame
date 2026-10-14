@@ -71,7 +71,11 @@ export function HostPresence(props: {
     <figure className={classes} role="status" aria-live="polite">
       <div className="host-portrait">
         <img src={portrait[mood]} alt="" />
-        {mood === 'hear' ? (
+        {(mood === 'listen' || props.ear === 'listening') && mood !== 'hear' && mood !== 'process' && !lobbyInvite && !paused && !stopped ? (
+          <span className="host-badge host-badge-listen" data-testid="host-ear" data-ear="listening" aria-hidden="true">
+            <i />
+          </span>
+        ) : mood === 'hear' ? (
           <span className="host-badge host-badge-hear" data-testid="host-ear" data-ear="hearing" aria-hidden="true">
             <i /><i /><i /><i /><i />
           </span>

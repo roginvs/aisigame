@@ -31,6 +31,17 @@ const remoteSnapshot = new Map<string, { name: string; entries: SharedDebugEntry
 let lastHostLine = ''
 let linkStatus = { connection: 'idle', mic: 'idle', host: 'idle' }
 
+export function getLinkStatus(): Readonly<typeof linkStatus> {
+  return linkStatus
+}
+
+const linkListeners = new Set<() => void>()
+
+export function subscribeLinkStatus(listener: () => void): () => void {
+  linkListeners.add(listener)
+  return () => linkListeners.delete(listener)
+}
+
 export function noteLink(patch: Partial<typeof linkStatus>): void {
   const next = { ...linkStatus, ...patch }
   if (
@@ -41,6 +52,7 @@ export function noteLink(patch: Partial<typeof linkStatus>): void {
     return
   }
   linkStatus = next
+  for (const listener of linkListeners) listener()
   pushTrace('note', `связь ${next.connection}, микрофон ${next.mic}, звук ${next.host}`)
 }
 
