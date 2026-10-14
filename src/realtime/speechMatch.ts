@@ -52,6 +52,11 @@ export function playNote(cue: string): string {
   return cue.slice(at + playNoteMark.length).trim()
 }
 
+/** Короткое сообщение хода для tool-запроса: сама инструкция — в instructions. */
+export function toolTurnInput(name: string): string {
+  return `Выполни инструкцию этого хода и вызови ${name}.`
+}
+
 export function isolatedToolResponse(options: {
   name: string
   instructions: string
@@ -66,14 +71,16 @@ export function isolatedToolResponse(options: {
     conversation: 'none' as const,
     output_modalities: [options.mode === 'text' ? 'text' : 'audio'] as ['text'] | ['audio'],
     tool_choice: { type: 'function' as const, name: options.name },
-    tools: options.audioItemId ? options.tools.filter((tool) => (tool as { name?: string }).name === options.name) : options.tools,
+    // tool_choice всё равно вызывает одну функцию — остальные схемы только отвлекают модель.
+    tools: options.tools.filter((tool) => (tool as { name?: string }).name === options.name),
     metadata: { purpose: options.purpose, turn: String(options.turn), ...options.metadata },
     instructions: withHostRules(options.instructions),
     input: [
       {
         type: 'message' as const,
         role: 'user' as const,
-        content: [{ type: 'input_text' as const, text: options.instructions }],
+        // Инструкция хода уже в instructions; дубль в input удлинял запрос вдвое.
+        content: [{ type: 'input_text' as const, text: toolTurnInput(options.name) }],
       },
       ...(options.audioItemId ? [{ type: 'item_reference' as const, id: options.audioItemId }] : []),
     ] as const,

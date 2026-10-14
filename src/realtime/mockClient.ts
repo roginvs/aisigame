@@ -527,15 +527,18 @@ function finalBetArguments(instructions: string, tool: unknown): Record<string, 
 function selectArguments(instructions: string): Record<string, unknown> {
   const heard = quoted(instructions, 'Распознанный текст')
   const needle = normalize(heard)
-  const cells = [...instructions.matchAll(/^(.+?) — (.+?) — (\d+)\s*$/gm)].map((match) => ({
-    id: (match[1] ?? '').trim(),
-    name: (match[2] ?? '').trim(),
-    value: Number(match[3]),
-  }))
+  // Строки «id — тема: 200, 400» (свободные ячейки по темам).
+  const cells = [...instructions.matchAll(/^(\S+) — (.+): ([\d, ]+)$/gm)].flatMap((match) =>
+    (match[3] ?? '').split(',').map((value) => ({
+      id: (match[1] ?? '').trim(),
+      name: (match[2] ?? '').trim(),
+      value: Number(value.trim()),
+    })))
+  const hint = /уже назвала тему (\S+) — /.exec(instructions)?.[1]
   const hit = cells.find((cell) => {
     const name = normalize(cell.name)
     return name.length > 0 && needle.includes(name) && hasNumber(needle, cell.value)
-  })
+  }) ?? cells.find((cell) => cell.id === hint && hasNumber(needle, cell.value))
   return {
     themeId: hit?.id ?? '',
     value: hit?.value ?? 0,

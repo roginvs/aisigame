@@ -143,6 +143,8 @@ export class RealtimeClient {
   private inputItemId: string | null = null
   private transcriptionPrompt = ''
   private transcripts = new Map<string, StoredTranscript>()
+  /** Реплики ведущей (item_id), уже отданные в чат по готовой расшифровке: response.done их не повторяет. */
+  private hostItemsInChat = new Set<string>()
   private transcriptWaiters = new Map<string, Array<(text: string) => void>>()
   private looseTranscriptWaiters: Array<(text: string) => void> = []
   /** Пока открыта попытка ответа: в чат только после allow / не после suppress. */
@@ -693,6 +695,7 @@ export class RealtimeClient {
     this.inputItemId = null
     this.transcriptionPrompt = ''
     this.transcripts.clear()
+    this.hostItemsInChat.clear()
     this.transcriptWaiters.clear()
     this.looseTranscriptWaiters = []
     this.playerChatGated = false
@@ -1015,7 +1018,7 @@ export class RealtimeClient {
     const earlyMeta = asRecord(response.metadata)
     const earlyPurpose = typeof earlyMeta.purpose === 'string' ? earlyMeta.purpose : ''
     if (!call && !this.speech?.expect && earlyPurpose !== 'read') {
-      for (const line of assistantUtterances(response)) this.publishHostLine(line, earlyPurpose)
+      for (const { line, itemId } of assistantUtterances(response)) this.publishHostLine(line, earlyPurpose, itemId)
     }
     if (call && toolPurposes[call.name]) {
       // Не трогаем speech: оценка может прийти уже после таймаута, когда
@@ -1096,10 +1099,15 @@ export class RealtimeClient {
       }
       return
     }
-    this.publishHostLine(line, speech.purpose)
+    this.publishHostLine(line, speech.purpose, readItemId(event))
   }
 
-  private publishHostLine(line: string, purpose: string): void {
+  private publishHostLine(line: string, purpose: string, itemId: string | null = null): void {
+    if (itemId) {
+      if (this.hostItemsInChat.has(itemId)) return
+      this.hostItemsInChat.add(itemId)
+      if (this.hostItemsInChat.size > 200) this.hostItemsInChat.delete(this.hostItemsInChat.values().next().value!)
+    }
     const speech = this.speech
     if (speech?.mustSay && purpose === speech.purpose && !saysAnswer(line, speech.mustSay)) {
       this.missedReveal(line)
@@ -1436,17 +1444,19 @@ function eventType(event: object): string {
   return 'event'
 }
 
-function assistantUtterances(response: Record<string, unknown>): string[] {
+/** Реплики ответа с item_id: по нему чат не пишет одну реплику дважды. */
+export function assistantUtterances(response: Record<string, unknown>): Array<{ line: string; itemId: string | null }> {
   const output = Array.isArray(response.output) ? response.output : []
-  const lines: string[] = []
+  const lines: Array<{ line: string; itemId: string | null }> = []
   for (const item of output) {
     const record = asRecord(item)
     if (record.type !== 'message') continue
+    const itemId = typeof record.id === 'string' && record.id ? record.id : null
     const content = Array.isArray(record.content) ? record.content : []
     for (const part of content) {
       const piece = asRecord(part)
-      if (typeof piece.transcript === 'string' && piece.transcript.trim()) lines.push(piece.transcript)
-      if (typeof piece.text === 'string' && piece.text.trim()) lines.push(piece.text)
+      if (typeof piece.transcript === 'string' && piece.transcript.trim()) lines.push({ line: piece.transcript, itemId })
+      if (typeof piece.text === 'string' && piece.text.trim()) lines.push({ line: piece.text, itemId })
     }
   }
   return lines

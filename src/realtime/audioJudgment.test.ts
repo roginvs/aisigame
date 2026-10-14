@@ -1,3 +1,4 @@
+import { toolTurnInput } from './speechMatch.ts'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { getTrace } from '../debug/trace.ts'
 import { RealtimeClient } from './client.ts'
@@ -41,9 +42,10 @@ describe('native audio dispatcher', () => {
     expect(payload.response.tools.map((tool: { name: string }) => tool.name)).toEqual(['submitAnswerJudgment'])
     expect(payload.response.tools[0].parameters.properties.playerId).toBeUndefined()
     expect(payload.response.input).toEqual([
-      { type: 'message', role: 'user', content: [{ type: 'input_text', text: 'question + answers' }] },
+      { type: 'message', role: 'user', content: [{ type: 'input_text', text: toolTurnInput('submitAnswerJudgment') }] },
       { type: 'item_reference', id: 'a' },
     ])
+    expect(payload.response.instructions).toContain('question + answers')
     const generic = vi.fn(); client.onToolCall = generic
     done('primary'); done('primary')
     expect((await primary).name).toBe('submitAnswerJudgment')

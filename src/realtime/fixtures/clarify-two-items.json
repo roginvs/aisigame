@@ -1,0 +1,300 @@
+[
+ {
+  "type": "response.created",
+  "event_id": "event_EYxFQmChu5VHrcXPbNQdl",
+  "response": {
+   "object": "realtime.response",
+   "id": "resp_EYxFQWNagoeEvuCWJTeRh",
+   "status": "in_progress",
+   "status_details": null,
+   "output": [],
+   "conversation_id": null,
+   "output_modalities": [
+    "audio"
+   ],
+   "max_output_tokens": 800,
+   "audio": {
+    "output": {
+     "format": {
+      "type": "audio/pcm",
+      "rate": 24000
+     },
+     "voice": "marin"
+    }
+   },
+   "usage": null,
+   "metadata": {
+    "purpose": "clarify",
+    "turn": "28",
+    "take": "1"
+   }
+  }
+ },
+ {
+  "type": "response.output_item.added",
+  "event_id": "event_EYxFQKeGV33szXrBzwjPu",
+  "response_id": "resp_EYxFQWNagoeEvuCWJTeRh",
+  "output_index": 0,
+  "item": {
+   "id": "item_EYxFQGhj5AFQ7KJBtD9ZB",
+   "type": "message",
+   "status": "in_progress",
+   "role": "assistant",
+   "content": [],
+   "phase": "commentary"
+  }
+ },
+ {
+  "type": "response.content_part.added",
+  "event_id": "event_EYxFQhKHA6Pbb1TcnQdfY",
+  "response_id": "resp_EYxFQWNagoeEvuCWJTeRh",
+  "item_id": "item_EYxFQGhj5AFQ7KJBtD9ZB",
+  "output_index": 0,
+  "content_index": 0,
+  "part": {
+   "type": "audio",
+   "transcript": ""
+  }
+ },
+ {
+  "type": "output_audio_buffer.started",
+  "event_id": "event_c20262d984ca4cc7",
+  "response_id": "resp_EYxFQWNagoeEvuCWJTeRh"
+ },
+ {
+  "type": "response.output_item.added",
+  "event_id": "event_EYxFSzLvEmRvPKHHQMaMA",
+  "response_id": "resp_EYxFQWNagoeEvuCWJTeRh",
+  "output_index": 1,
+  "item": {
+   "id": "item_EYxFSJ47prV62KyZvVx0G",
+   "type": "message",
+   "status": "in_progress",
+   "role": "assistant",
+   "content": [],
+   "phase": "final_answer"
+  }
+ },
+ {
+  "type": "response.content_part.added",
+  "event_id": "event_EYxFSSO8k0D211yndvKLG",
+  "response_id": "resp_EYxFQWNagoeEvuCWJTeRh",
+  "item_id": "item_EYxFSJ47prV62KyZvVx0G",
+  "output_index": 1,
+  "content_index": 0,
+  "part": {
+   "type": "audio",
+   "transcript": ""
+  }
+ },
+ {
+  "type": "response.output_audio.done",
+  "event_id": "event_EYxFSo36R75Cg1mkNgcuW",
+  "response_id": "resp_EYxFQWNagoeEvuCWJTeRh",
+  "item_id": "item_EYxFQGhj5AFQ7KJBtD9ZB",
+  "output_index": 0,
+  "content_index": 0
+ },
+ {
+  "type": "response.output_audio_transcript.done",
+  "event_id": "event_EYxFShhIbqJKU4Olav9Kw",
+  "response_id": "resp_EYxFQWNagoeEvuCWJTeRh",
+  "item_id": "item_EYxFQGhj5AFQ7KJBtD9ZB",
+  "output_index": 0,
+  "content_index": 0,
+  "transcript": "Хорошо, давайте уточним выбор, чтобы не пропускать снова."
+ },
+ {
+  "type": "response.content_part.done",
+  "event_id": "event_EYxFSD4Qaei2YXMu5M16f",
+  "response_id": "resp_EYxFQWNagoeEvuCWJTeRh",
+  "item_id": "item_EYxFQGhj5AFQ7KJBtD9ZB",
+  "output_index": 0,
+  "content_index": 0,
+  "part": {
+   "type": "audio",
+   "transcript": "Хорошо, давайте уточним выбор, чтобы не пропускать снова."
+  }
+ },
+ {
+  "type": "conversation.item.done",
+  "event_id": "event_EYxFSCAHOIkf6rRGyLNt6",
+  "previous_item_id": null,
+  "item": {
+   "id": "item_EYxFQGhj5AFQ7KJBtD9ZB",
+   "type": "message",
+   "status": "completed",
+   "role": "assistant",
+   "content": [
+    {
+     "type": "output_audio",
+     "transcript": "Хорошо, давайте уточним выбор, чтобы не пропускать снова."
+    }
+   ],
+   "phase": "commentary"
+  }
+ },
+ {
+  "type": "response.output_item.done",
+  "event_id": "event_EYxFSlWnDmjU1O2hqlrIc",
+  "response_id": "resp_EYxFQWNagoeEvuCWJTeRh",
+  "output_index": 0,
+  "item": {
+   "id": "item_EYxFQGhj5AFQ7KJBtD9ZB",
+   "type": "message",
+   "status": "completed",
+   "role": "assistant",
+   "content": [
+    {
+     "type": "output_audio",
+     "transcript": "Хорошо, давайте уточним выбор, чтобы не пропускать снова."
+    }
+   ],
+   "phase": "commentary"
+  }
+ },
+ {
+  "type": "response.output_audio.done",
+  "event_id": "event_EYxFSCYL50nwjdyn8WEtw",
+  "response_id": "resp_EYxFQWNagoeEvuCWJTeRh",
+  "item_id": "item_EYxFSJ47prV62KyZvVx0G",
+  "output_index": 1,
+  "content_index": 0
+ },
+ {
+  "type": "response.output_audio_transcript.done",
+  "event_id": "event_EYxFSmJS6q3GEmu59hvhp",
+  "response_id": "resp_EYxFQWNagoeEvuCWJTeRh",
+  "item_id": "item_EYxFSJ47prV62KyZvVx0G",
+  "output_index": 1,
+  "content_index": 0,
+  "transcript": "Вася, выбери ячейку ещё раз, пожалуйста."
+ },
+ {
+  "type": "response.content_part.done",
+  "event_id": "event_EYxFSQQzChsHsu1F4TXl8",
+  "response_id": "resp_EYxFQWNagoeEvuCWJTeRh",
+  "item_id": "item_EYxFSJ47prV62KyZvVx0G",
+  "output_index": 1,
+  "content_index": 0,
+  "part": {
+   "type": "audio",
+   "transcript": "Вася, выбери ячейку ещё раз, пожалуйста."
+  }
+ },
+ {
+  "type": "conversation.item.done",
+  "event_id": "event_EYxFSNeWbuqYlSQETAbDr",
+  "previous_item_id": "item_EYxFQGhj5AFQ7KJBtD9ZB",
+  "item": {
+   "id": "item_EYxFSJ47prV62KyZvVx0G",
+   "type": "message",
+   "status": "completed",
+   "role": "assistant",
+   "content": [
+    {
+     "type": "output_audio",
+     "transcript": "Вася, выбери ячейку ещё раз, пожалуйста."
+    }
+   ],
+   "phase": "final_answer"
+  }
+ },
+ {
+  "type": "response.output_item.done",
+  "event_id": "event_EYxFSpYoOF3dHCyCiRJ63",
+  "response_id": "resp_EYxFQWNagoeEvuCWJTeRh",
+  "output_index": 1,
+  "item": {
+   "id": "item_EYxFSJ47prV62KyZvVx0G",
+   "type": "message",
+   "status": "completed",
+   "role": "assistant",
+   "content": [
+    {
+     "type": "output_audio",
+     "transcript": "Вася, выбери ячейку ещё раз, пожалуйста."
+    }
+   ],
+   "phase": "final_answer"
+  }
+ },
+ {
+  "type": "response.done",
+  "event_id": "event_EYxFSslFypk45rgYvPE5G",
+  "response": {
+   "object": "realtime.response",
+   "id": "resp_EYxFQWNagoeEvuCWJTeRh",
+   "status": "completed",
+   "status_details": null,
+   "output": [
+    {
+     "id": "item_EYxFQGhj5AFQ7KJBtD9ZB",
+     "type": "message",
+     "status": "completed",
+     "role": "assistant",
+     "content": [
+      {
+       "type": "output_audio",
+       "transcript": "Хорошо, давайте уточним выбор, чтобы не пропускать снова."
+      }
+     ],
+     "phase": "commentary"
+    },
+    {
+     "id": "item_EYxFSJ47prV62KyZvVx0G",
+     "type": "message",
+     "status": "completed",
+     "role": "assistant",
+     "content": [
+      {
+       "type": "output_audio",
+       "transcript": "Вася, выбери ячейку ещё раз, пожалуйста."
+      }
+     ],
+     "phase": "final_answer"
+    }
+   ],
+   "conversation_id": null,
+   "output_modalities": [
+    "audio"
+   ],
+   "max_output_tokens": 800,
+   "audio": {
+    "output": {
+     "format": {
+      "type": "audio/pcm",
+      "rate": 24000
+     },
+     "voice": "marin"
+    }
+   },
+   "usage": {
+    "total_tokens": 2077,
+    "input_tokens": 1781,
+    "output_tokens": 296,
+    "input_token_details": {
+     "text_tokens": 1781,
+     "audio_tokens": 0,
+     "image_tokens": 0,
+     "cached_tokens": 0,
+     "cached_tokens_details": {
+      "text_tokens": 0,
+      "audio_tokens": 0,
+      "image_tokens": 0
+     }
+    },
+    "output_token_details": {
+     "text_tokens": 134,
+     "audio_tokens": 162,
+     "reasoning_tokens": 69
+    }
+   },
+   "metadata": {
+    "purpose": "clarify",
+    "turn": "28",
+    "take": "1"
+   }
+  }
+ }
+]

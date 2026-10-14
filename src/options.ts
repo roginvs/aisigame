@@ -123,3 +123,20 @@ export const gameSoundsRetryDelaysMs = [1000, 2000, 5000, 10_000] as const
 
 /** Гость: полоска таймера не переякоривается, если новый расчёт старта отличается не больше чем на столько (сетевой джиттер). */
 export const TIMER_RESYNC_THRESHOLD_MS = 300
+
+/**
+ * Ожидание расшифровки реплики: длинные реплики сервис распознавания отдаёт дольше
+ * (в живой игре 2,3–7 с после конца речи). База + доля длительности, не больше потолка.
+ */
+export const transcriptWait = { baseMs: 2_500, perSpeechMs: 0.3, maxMs: 6_000 } as const
+
+/** Сколько ещё ждём опоздавшую расшифровку выбора после переспроса. */
+export const lateTranscriptMs = 8_000
+
+export function transcriptWaitMs(durationMs: number): number {
+  const spoken = Number.isFinite(durationMs) && durationMs > 0 ? durationMs : 0
+  return Math.min(transcriptWait.maxMs, Math.round(transcriptWait.baseMs + transcriptWait.perSpeechMs * spoken))
+}
+
+/** Сколько ждём расшифровку, чтобы подтвердить эталон, услышанный аудиооценкой. */
+export const audioEtalonTranscriptMs = 1_500

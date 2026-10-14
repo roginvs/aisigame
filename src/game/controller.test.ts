@@ -151,7 +151,7 @@ describe('attachController choice', () => {
     const read = speech.mock.calls.find(([purpose]) => purpose === 'read')
     expect(read?.[2]).not.toContain('CHAT_MARKER')
     actor.send({ type: 'BUZZER_PRESSED', playerId: 1 })
-    client.hear('ответ', 1200)
+    client.hear('мой ответ', 1200)
     await vi.advanceTimersByTimeAsync(100)
     const judge = tools.mock.calls.find(([purpose]) => purpose === 'judge')
     expect(judge?.[3]).toContain('Вопрос: Вопрос')
@@ -697,5 +697,116 @@ describe('specialListening — ранний слух', () => {
     expect(specialListening('auction.listening')).toBe(true)
     expect(specialListening('reading.sealed')).toBe(false)
     expect(specialListening('choosing.listening')).toBe(false)
+  })
+})
+
+import { selectionInstructions } from './controller.ts'
+import { transcriptWaitMs } from '../options.ts'
+
+async function toChoosing(actor: { getSnapshot: () => { value: unknown } }) {
+  for (let i = 0; i < 40 && statePath(actor.getSnapshot().value as never) !== 'choosing.listening'; i += 1) await vi.advanceTimersByTimeAsync(250)
+}
+
+describe('выбор ячейки голосом: тема в любой форме, мягкий номинал, опоздавшая расшифровка', () => {
+  afterEach(() => { vi.useRealTimers(); vi.unstubAllGlobals() })
+
+  it('промпт выбора: свободные ячейки по темам и правила формы темы и номинала', async () => {
+    const { actor, stop } = await boot(new MockRealtimeClient())
+    const text = selectionInstructions(actor.getSnapshot().context, 'Волге 200')
+    expect(text).toContain('v — ВОЛГА: 200')
+    expect(text).toContain('в другом падеже или числе')
+    expect(text).toContain('лишней буквой у числа')
+    expect(text).toContain('одного слова из длинного названия, если оно подходит только к одной теме')
+    expect(text).toContain('осталась одна свободная ячейка — бери её')
+    expect(text).toContain('бери ближайший')
+    expect(text).toContain('нет ни темы, ни номинала')
+    expect(text).not.toContain('Не считай, что ячейку уже назвали')
+    stop(); actor.stop()
+  })
+
+  it('тема понятна без номинала → переспрос только стоимости, следующая реплика «200» открывает ячейку', async () => {
+    class ThemeOnlyClient extends MockRealtimeClient {
+      calls = 0
+      override requestTool(purpose: string, turn: number, name: string, instructions: string, isolated = false, tool?: { name: string }): void {
+        this.calls += 1
+        if (this.calls > 1) { super.requestTool(purpose, turn, name, instructions, isolated, tool); return }
+        window.setTimeout(() => this.onToolCall({ name, callId: 'c1', arguments: { themeId: 'v', value: 0, confident: false, heard: 'Волжское что-то' } }, purpose, turn), 10)
+      }
+    }
+    const client = new ThemeOnlyClient()
+    const { actor, stop } = await boot(client)
+    await toChoosing(actor)
+    client.hear('Волжское что-то такое длинное', 1500)
+    await vi.advanceTimersByTimeAsync(200)
+    expect(getTrace().some((line) => line.kind === 'state' && JSON.stringify(line.detail).includes('«ВОЛГА» понятна'))).toBe(true)
+    for (let i = 0; i < 20 && statePath(actor.getSnapshot().value) !== 'choosing.listening'; i += 1) await vi.advanceTimersByTimeAsync(100)
+    client.hear('двести', 800)
+    await vi.advanceTimersByTimeAsync(300)
+    expect(actor.getSnapshot().context.activeQuestionId).toBe('v-200')
+    stop(); actor.stop()
+  })
+
+  it('ожидание расшифровки растёт с длиной реплики до потолка', () => {
+    expect(transcriptWaitMs(0)).toBe(2500)
+    expect(transcriptWaitMs(5000)).toBe(4000)
+    expect(transcriptWaitMs(60_000)).toBe(6000)
+  })
+
+  it('расшифровка пришла после переспроса — ведущая обрывается, ячейка открывается', async () => {
+    const client = new MockRealtimeClient()
+    const interrupt = vi.spyOn(client, 'interruptSpeech')
+    const { actor, stop } = await boot(client)
+    await toChoosing(actor)
+    client.setSpeechMs(15_000)
+    const item = client.hearDeferred(10_000)
+    await vi.advanceTimersByTimeAsync(transcriptWaitMs(10_000) + 500)
+    expect(statePath(actor.getSnapshot().value)).toBe('choosing.clarifying')
+    interrupt.mockClear()
+    client.deliverTranscript(item, 'Волга 200')
+    await vi.advanceTimersByTimeAsync(50)
+    expect(interrupt).toHaveBeenCalled()
+    expect(actor.getSnapshot().context.activeQuestionId).toBe('v-200')
+    stop(); actor.stop()
+  })
+})
+
+import { judgmentMediaNote } from './controller.ts'
+
+describe('оценка: эталон засчитывается без модели, медиа вопроса не повод для ambiguous', () => {
+  afterEach(() => { vi.useRealTimers(); vi.unstubAllGlobals() })
+
+  it('расшифровка равна эталону → correct без запроса оценки к модели', async () => {
+    const client = new MockRealtimeClient()
+    const tool = vi.spyOn(client, 'requestTool')
+    const { actor, stop } = await boot(client)
+    await toChoosing(actor)
+    actor.send({ type: 'QUESTION_SELECTED', themeId: 'v', value: 200 })
+    await vi.advanceTimersByTimeAsync(gameConfig.cellFlashMs + 80)
+    for (let i = 0; i < 40 && statePath(actor.getSnapshot().value) !== 'buzzing.open'; i += 1) await vi.advanceTimersByTimeAsync(100)
+    actor.send({ type: 'BUZZER_PRESSED', playerId: 1 })
+    tool.mockClear()
+    client.hear('Ответ.', 900)
+    await vi.advanceTimersByTimeAsync(300)
+    expect(tool.mock.calls.some((call) => call[0] === 'judge')).toBe(false)
+    expect(actor.getSnapshot().context.players[0]?.score).toBe(200)
+    stop(); actor.stop()
+  })
+
+  it('правило про невидимые медиа и транслитерацию есть в промпте и не конфликтует с needs_clarification', () => {
+    expect(judgmentMediaNote).toContain('это не причина для ambiguous')
+    expect(judgmentMediaNote).toContain('транслитерация')
+  })
+})
+
+import { unclearSituation } from './controller.ts'
+
+describe('спорный ответ: модели — объяснение ситуации, не готовая фраза', () => {
+  it('объяснение называет игрока и разницу «спорный» / «не расслышала»', async () => {
+    const { actor, stop } = await boot(new MockRealtimeClient())
+    const context = { ...actor.getSnapshot().context, activePlayerId: 1 }
+    expect(unclearSituation({ ...context, judgmentStatus: 'ambiguous' })).toContain('неверным он не признан')
+    expect(unclearSituation({ ...context, judgmentStatus: 'unintelligible' })).toContain('не удалось расслышать')
+    expect(unclearSituation({ ...context, judgmentStatus: 'ambiguous' })).not.toContain('итог нулевой')
+    stop(); actor.stop()
   })
 })

@@ -601,3 +601,15 @@ describe('audio-authoritative settlement', () => {
     expect(settleJudgment({ ...input, heard: '', transcript: 'Вивальди' }).status).toBe('unintelligible')
   })
 })
+
+import { exactAnswer } from './judgment.ts'
+
+describe('точное совпадение с эталоном', () => {
+  it('регистр, ё, пробелы и знаки не важны; другое слово — не совпадение', () => {
+    expect(exactAnswer('Spotify', ['Spotify'])).toBe(true)
+    expect(exactAnswer('spotify.', ['Spotify'])).toBe(true)
+    expect(exactAnswer('Ёжик', ['ежик'])).toBe(true)
+    expect(exactAnswer('Spotify Music', ['Spotify'])).toBe(false)
+    expect(exactAnswer('', ['Spotify'])).toBe(false)
+  })
+})

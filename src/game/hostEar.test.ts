@@ -1,4 +1,5 @@
 import { createActor } from 'xstate'
+import { transcriptWaitMs } from '../options.ts'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { MockRealtimeClient } from '../realtime/mockClient.ts'
 vi.mock('../audio/beep.ts', () => ({ playTimeoutBeep: vi.fn(), unlockAudio: vi.fn() }))
@@ -163,12 +164,12 @@ describe('hostEar: контроллер', () => {
     stop()
   })
 
-  it('потерянный транскрипт: ждём 2,2 с разбора и гасим без таймера уха', async () => {
+  it('потерянный транскрипт: ждём разбор (transcriptWaitMs) и гасим без таймера уха', async () => {
     const { client, actor, stop } = await boot()
     client.onSpeechStarted({ itemId: 'lost' })
     client.onSpeechStopped({ durationMs: 120, itemId: 'lost' })
     expect(getHostEar()).toBe('processing')
-    await vi.advanceTimersByTimeAsync(2300)
+    await vi.advanceTimersByTimeAsync(transcriptWaitMs(120) + 100)
     expect(statePath(actor.getSnapshot().value)).toBe('choosing.listening')
     expect(getHostEar()).toBe('idle')
     stop()

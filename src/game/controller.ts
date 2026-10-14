@@ -2,7 +2,7 @@ import { auctionBidToolFor, finalBetToolFor, selectQuestionToolFor } from '../re
 import type { Actor, SnapshotFrom } from 'xstate'
 import { clearHostEar, getHostEar, subscribeHostEar, hostEarHearing, hostEarHostSpoke, hostEarMicClosed, hostEarProcessing, hostEarShown, hostEarSurvives, settleHostEar } from './hostEar.ts'
 import { playTimeoutBeep } from '../audio/beep.ts'
-import { auctionDingMs, audioJudgmentTimings, catMeowMs } from '../options.ts'
+import { audioEtalonTranscriptMs, auctionDingMs, audioJudgmentTimings, catMeowMs, lateTranscriptMs, transcriptWaitMs } from '../options.ts'
 import { matchAuctionSpeech, optionLabel } from './auction.ts'
 import { matchCatStake, nextInCircle } from './cat.ts'
 import { idleThresholds } from './idle.ts'
@@ -25,7 +25,7 @@ import { matchSpokenCell, selectionChatText } from './choiceMatch.ts'
 import { answerListeningPrompt, echoesAnswerPrompt, phantomListedAnswer } from './answerPrompt.ts'
 import { choicePrompt, echoesChoicePrompt, optionsPrompt, playersPrompt } from './choicePrompt.ts'
 import { blurtGate, choiceGate, repeatsQuestion } from './heard.ts'
-import { judgmentChatText, settleJudgment } from './judgment.ts'
+import { exactAnswer, judgmentChatText, settleJudgment } from './judgment.ts'
 import { currentRound, findQuestion, nextPlayableRound, questionById, roundThemes } from './pack.ts'
 import { answerIsPublic } from './reveal.ts'
 import {
@@ -106,6 +106,8 @@ export function attachController(options: {
   /** Инвалидирует talkover после нового чтения. */
   let readEpoch = 0
   let choiceHeard = ''
+  /** Тема, понятая из прошлой реплики без номинала (до открытия ячейки). */
+  let choiceTheme: string | null = null
   /** Попытка, для которой сейчас принимаем речь ответа. */
   let liveAttemptId: number | null = null
   /** Когда открыли эту попытку: речь, начавшаяся раньше, отбрасывается (кроме carry). */
@@ -647,6 +649,7 @@ export function attachController(options: {
       speakWhileListening('clarify', clarifyInstructions(context))
     }
     if (path === 'flashing') {
+      choiceTheme = null
       client.interruptSpeech()
       client.setMicEnabled(false)
     }
@@ -845,15 +848,36 @@ export function attachController(options: {
     const cells = openChoiceCells(context)
     const offer = choosingOffer
     choosingOffer = null
-    client.requestTool('select', toolTurn, 'selectQuestion', selectionInstructions(context, choiceHeard, offer), true,
+    client.requestTool('select', toolTurn, 'selectQuestion', selectionInstructions(context, choiceHeard, offer, choiceTheme), true,
       selectQuestionToolFor(cells.map((cell) => cell.themeId), cells.map((cell) => cell.value)))
   }
 
   async function considerChoice(durationMs: number, itemId: string | null): Promise<void> {
     const epoch = choiceEpoch
-    const heard = await client.waitForTranscript(itemId, 2200)
+    const heard = await client.waitForTranscript(itemId, transcriptWaitMs(durationMs))
     if (epoch !== choiceEpoch) return
     if (statePath(actor.getSnapshot().value) !== 'choosing.listening') return
+    decideChoice(heard, durationMs)
+    if (!heard.arrived && itemId && statePath(actor.getSnapshot().value) === 'choosing.clarifying') void lateChoice(itemId, durationMs)
+  }
+
+  /**
+   * Расшифровка длинной реплики может прийти после переспроса. Если ведущая ещё уточняет —
+   * обрываем её и выбираем ячейку по опоздавшему тексту.
+   */
+  async function lateChoice(itemId: string, durationMs: number): Promise<void> {
+    const epoch = choiceEpoch
+    const late = await client.waitForTranscript(itemId, lateTranscriptMs)
+    if (!late.arrived || !late.text.trim() || epoch !== choiceEpoch) return
+    if (statePath(actor.getSnapshot().value) !== 'choosing.clarifying') return
+    pushTrace('note', `расшифровка пришла после переспроса: ${late.text}`)
+    client.interruptSpeech()
+    actor.send({ type: 'PLAYER_SPEECH_STARTED' })
+    if (statePath(actor.getSnapshot().value) !== 'choosing.listening') return
+    decideChoice(late, durationMs)
+  }
+
+  function decideChoice(heard: { text: string; arrived: boolean }, durationMs: number): void {
     if (echoesChoicePrompt(heard.text, listeningPrompt(actor.getSnapshot().context))) {
       pushTrace('note', 'распознавание повторило подсказку тем, это не выбор')
       return
@@ -878,9 +902,10 @@ export function attachController(options: {
     }
     const snapshot = actor.getSnapshot()
     const kind = round?.kind === 'final' ? 'final' : 'normal'
-    const local = matchSpokenCell(heard.text, openChoiceCells(snapshot.context), kind)
+    const local = matchSpokenCell(heard.text, openChoiceCells(snapshot.context), kind, choiceTheme)
     choiceHeard = heard.text
     if (local) {
+      choiceTheme = null
       const price = kind === 'final' ? '' : ` ${local.value}`
       pushTrace('note', `ячейка по словам: ${local.themeName}${price}`)
       actor.send({ type: 'QUESTION_SELECTED', themeId: local.themeId, value: local.value })
@@ -893,7 +918,7 @@ export function attachController(options: {
     const startedAt = Date.now() - durationMs
     if (startedAt < buzzerEarAt) return
     const epoch = buzzEpoch
-    const heard = await client.waitForTranscript(itemId, 2200)
+    const heard = await client.waitForTranscript(itemId, transcriptWaitMs(durationMs))
     if (epoch !== buzzEpoch) return
     if (statePath(actor.getSnapshot().value) !== 'buzzing.open') return
     if (blurtGate(heard.text, durationMs) === 'ignore') {
@@ -907,7 +932,7 @@ export function attachController(options: {
 
   async function considerTalkover(durationMs: number, itemId: string | null): Promise<void> {
     const epoch = readEpoch
-    const heard = await client.waitForTranscript(itemId, 2200)
+    const heard = await client.waitForTranscript(itemId, transcriptWaitMs(durationMs))
     if (epoch !== readEpoch) return
     const path = statePath(actor.getSnapshot().value)
     const relevant =
@@ -933,7 +958,7 @@ export function attachController(options: {
   /** Голос в коте/аукционе — как considerChoice: эхо подсказки, гейт шума, локальный разбор, иначе resolving и модель. */
   async function considerSpecial(path: string, durationMs: number, itemId: string | null): Promise<void> {
     const epoch = specialEpoch
-    const heard = await client.waitForTranscript(itemId, 2200)
+    const heard = await client.waitForTranscript(itemId, transcriptWaitMs(durationMs))
     if (epoch !== specialEpoch) return
     const snapshot = actor.getSnapshot()
     if (statePath(snapshot.value) !== path) return
@@ -1145,6 +1170,24 @@ export function attachController(options: {
     }
   }
 
+  /**
+   * Аудиомодель усомнилась (ambiguous/unintelligible), но сама услышала эталон дословно.
+   * Засчитываем, только если независимая расшифровка тоже дала ровно эталон и это не фантом подсказки:
+   * два источника вместо одного, угадать слова по эталону модели не даём.
+   */
+  async function confirmAudioEtalon(run: NonNullable<typeof judgeRun>, call: ToolCall): Promise<ToolCall> {
+    const args = asRecord(call.arguments)
+    if (args.status !== 'ambiguous' && args.status !== 'unintelligible') return call
+    const answers = questionById(run.context.questions, run.context.activeQuestionId)?.answers ?? []
+    if (!run.itemId || typeof args.heard !== 'string' || !exactAnswer(args.heard, answers)) return call
+    const wait = Math.min(audioEtalonTranscriptMs, run.clock.remaining())
+    const asr = await run.clock.within(() => client.waitForTranscript(run.itemId, wait), wait).catch(() => null)
+    if (!asr?.arrived || !exactAnswer(asr.text, answers)) return call
+    if (phantomListedAnswer(asr.text, answerPromptFor(run.context), answerDurationMs, asr.confidence)) return call
+    pushTrace('note', `аудио и расшифровка обе дали эталон, засчитываю вместо ${String(args.status)}: ${asr.text}`)
+    return { ...call, arguments: { ...args, status: 'correct', reason: 'Реплика совпадает с эталоном: это слышат и аудиооценка, и расшифровка.' } }
+  }
+
   /** Оценка по аудио: 'done' — вердикт отдан, 'dead' — попытка уже неактуальна, 'fallback' — переходить к тексту. */
   async function tryAudioJudgment(run: NonNullable<typeof judgeRun>): Promise<'done' | 'dead' | 'fallback'> {
     const { context } = run
@@ -1164,10 +1207,12 @@ export function attachController(options: {
       await run.clock.active()
       if (!judgeLive(run)) return 'dead'
       validateAudioCall(call, context)
+      const confirmed = await confirmAudioEtalon(run, call)
+      if (!judgeLive(run)) return 'dead'
       answerSource = 'audio'
       expectingToolTurn = request.turn
       pushTrace('note', 'audio judgment result', { ...request, elapsedMs: Math.round(run.clock.elapsed()), heard: asRecord(call.arguments).heard })
-      handleJudgment(call, request.turn)
+      handleJudgment(confirmed, request.turn)
       return 'done'
     } catch (error) {
       if (!judgeLive(run)) return 'dead'
@@ -1228,6 +1273,14 @@ export function attachController(options: {
     if (!heard.arrived) pushPlayerLine('речь не распознана')
     toolTurn += 1
     expectingToolTurn = toolTurn
+    const question = questionById(context.questions, context.activeQuestionId)
+    if (exactAnswer(heard.text, question?.answers ?? [])) {
+      // Расшифровка — сам эталон: модель не спрашиваем, она может усомниться без нужды.
+      pushTrace('note', `расшифровка совпала с эталоном, засчитываю без модели: ${heard.text}`)
+      handleJudgment({ name: 'submitAnswerJudgment', callId: localJudgmentCallId,
+        arguments: { status: 'correct', heard: heard.text, reason: 'Реплика совпадает с эталоном.' } }, toolTurn)
+      return
+    }
     client.requestTool('judge', toolTurn, 'submitAnswerJudgment', judgmentInstructions(context, answerTranscript), true)
   }
 
@@ -1324,15 +1377,19 @@ export function attachController(options: {
       ? `${picked.themeName}${kind === 'final' ? '' : ` ${picked.value}`}`
       : `${themeId || '—'} ${value || ''}`.trim()
     pushJudgeLine(selectionChatText(transcript, Boolean(picked), cellLabel))
+    const themeOnly = call && !picked && !(confident && knownQuestion) ? themeOnlyReason(snapshotNow.context, themeId, kind) : null
     if (!call || !picked) {
       const reason =
         confident && knownQuestion
           ? 'Этот вопрос недоступен. Назовите другую тему и стоимость.'
-          : 'Я не уверена, какую ячейку вы назвали. Повторите тему и стоимость.'
+          : themeOnly
+            ?? 'Я не уверена, какую ячейку вы назвали. Повторите тему и стоимость.'
+      choiceTheme = themeOnly ? themeId : null
       if (call) client.sendToolOutput(call.callId, { accepted: false, reason })
       actor.send({ type: 'QUESTION_UNCLEAR', reason })
       return
     }
+    choiceTheme = null
     client.sendToolOutput(call.callId, {
       accepted: true,
       theme: picked.themeName,
@@ -1386,7 +1443,7 @@ export function attachController(options: {
         ? { ...settled, status: 'incorrect' as const, reason: phoneticRetryReason }
         : settled
     if (answerSource === 'audio') client.publishAudioPlayerChat(answerItemId, judgment.heard)
-    else if (call) client.sendToolOutput(call.callId, { accepted: true, status: judgment.status })
+    else if (call && call.callId !== localJudgmentCallId) client.sendToolOutput(call.callId, { accepted: true, status: judgment.status })
     if (shadowRun?.context.attemptId === context.attemptId) { shadowRun.text = judgment; compareShadow(shadowRun) }
     pushJudgeLine(judgmentChatText(judgment.status, judgment.heard))
     actor.send({ type: 'ANSWER_JUDGED', judgment })
@@ -1524,13 +1581,25 @@ function asRecord(value: unknown): Record<string, unknown> {
   return value && typeof value === 'object' ? (value as Record<string, unknown>) : {}
 }
 
-function availableLines(context: GameContext): string {
-  const lines: string[] = []
+/** Тема понятна, номинал нет: переспросить только стоимость. */
+export function themeOnlyReason(context: GameContext, themeId: string, kind: 'normal' | 'final'): string | null {
+  if (kind === 'final' || !themeId) return null
+  const open = context.questions.filter((question) => question.roundIndex === context.roundIndex
+    && question.themeId === themeId && !context.playedIds.includes(question.id))
+  const name = open[0]?.themeName
+  return name ? `Тема «${name}» понятна, стоимость не расслышала. Назовите стоимость.` : null
+}
+
+/** Свободные ячейки по темам: «id — тема: номиналы». */
+export function availableLines(context: GameContext): string {
+  const themes = new Map<string, { name: string; values: number[] }>()
   for (const question of context.questions) {
     if (question.roundIndex !== context.roundIndex || context.playedIds.includes(question.id)) continue
-    lines.push(`${question.themeId} — ${question.themeName} — ${question.value}`)
+    const entry = themes.get(question.themeId) ?? { name: question.themeName, values: [] }
+    entry.values.push(question.value)
+    themes.set(question.themeId, entry)
   }
-  return lines.join('\n')
+  return [...themes].map(([id, theme]) => `${id} — ${theme.name}: ${theme.values.join(', ')}`).join('\n')
 }
 
 function listeningPrompt(context: GameContext, offer: ChoosingOffer | null = null): string {
@@ -1746,7 +1815,21 @@ function turnInstructions(context: GameContext): string {
   })
 }
 
-function selectionInstructions(context: GameContext, heard: string, offer: ChoosingOffer | null = null): string {
+const localJudgmentCallId = 'local-exact-answer'
+
+/** Объяснение для модели, почему ответ не засчитан и не провален: она сама подбирает слова. */
+export function unclearSituation(context: GameContext): string {
+  const name = playerName(context.players, context.activePlayerId) || 'игрок'
+  const why = context.judgmentStatus === 'unintelligible'
+    ? 'ответ не удалось расслышать'
+    : 'ответ спорный: его нельзя уверенно засчитать, но и неверным он не признан'
+  return `Отвечал ${name}; ${why}. Очки ${name} за этот вопрос не меняются, ячейка ещё открыта для перехвата.`
+}
+
+/** Модель не видит картинку/звук вопроса: это не повод сомневаться в ответе, совпавшем с эталоном. */
+export const judgmentMediaNote = 'Картинку, звук или ролик вопроса видят и слышат только игроки; ты их не видишь, и это не причина для ambiguous. Ответ, совпадающий с эталоном или его другой записью (транслитерация, латиница/кириллица, другое написание того же названия), — correct.'
+
+export function selectionInstructions(context: GameContext, heard: string, offer: ChoosingOffer | null = null, themeHint: string | null = null): string {
   const round = currentRound(context, context.roundIndex)
   if (round?.kind === 'final') {
     const themes = roundThemes(context.questions, context.roundIndex)
@@ -1764,16 +1847,25 @@ confident=true только если названа одна тема из сп�
   }
   return `
 Оцени только последнюю реплику. Распознанный текст: «${heard || 'пусто'}».
-Это может быть шум, кашель или обрывок. Не считай, что ячейку уже назвали.
-Доступны только эти вопросы:
+Свободные ячейки по темам (id — тема: номиналы):
 ${availableLines(context)}
-Вызови selectQuestion. themeId — id темы, первое поле строки; value — номинал.
-confident=true и value равен номиналу, только если в реплике ясно названы и тема, и номинал.
-Во всех остальных случаях — кашель, междометие, только тема или только номинал — confident=false и value=0.
-Не угадывай ячейку. heard — дословно, что сказал игрок.
+Вызови selectQuestion. themeId — id темы, первое поле строки; value — номинал из её списка.
+Тема: та же тема, если она сказана в другом падеже или числе, с опечаткой распознавания или с лишней буквой у числа («Я900» — это 900). Достаточно одного слова из длинного названия, если оно подходит только к одной теме. Если слово подходит к нескольким темам — confident=false.
+Номинал, когда тема понятна: назван номинал из её списка — бери его; в теме осталась одна свободная ячейка — бери её; номинал звучит похоже на один из свободных — бери ближайший. Только если номинал совсем неясен — confident=false, themeId этой темы и value=0.
+confident=true, когда тема и номинал определены по этим правилам.
+Если в реплике нет ни темы, ни номинала (шум, кашель, междометие, обрывок) — confident=false и value=0.
+heard — дословно, что сказал игрок.
 Если в названии темы стоят точки или многоточие, это та же тема, сказанная без точек.
 ${offer ? offerSelectionNote(offer) : ''}
+${themeHintNote(context, themeHint)}
 `.trim()
+}
+
+function themeHintNote(context: GameContext, themeHint: string | null): string {
+  const theme = themeHint ? context.questions.find((question) => question.roundIndex === context.roundIndex && question.themeId === themeHint) : undefined
+  return theme
+    ? `Прошлая реплика уже назвала тему ${theme.themeId} — ${theme.themeName}, но не номинал. Если эта реплика называет только номинал, это та же тема.`
+    : ''
 }
 
 /** Ведущая предложила ячейку: любое согласие по смыслу берёт её. */
@@ -1804,12 +1896,13 @@ ${source === 'audio' ? 'Оцени только приложенную ауди�
 ${source === 'audio' ? '' : `Реплика игрока: «${heard || 'речь не распознана'}»`}
 Вопрос: ${question ? questionSpeech(question) : ''}
 Эталонные ответы пакета (список может быть неполным): ${(question?.answers ?? []).join('; ')}${question?.choices?.length ? '\nБуква варианта и текст этого варианта — один и тот же ответ. Текст другого варианта — неправильный ответ.' : ''}
+${judgmentMediaNote}
 correct — реплика верно отвечает именно на данный вопрос: совпадает с эталоном по смыслу или является другим фактически верным ответом, удовлетворяющим всем ограничениям вопроса, даже если его нет в списке. Не отвергай только из-за отсутствия в эталонах. Не додумывай условия и не принимай просто похожее/связанное слово. Если не можешь уверенно подтвердить альтернативу, верни ambiguous. Повтор самого эталона — то же имя, та же фраза или та же буква — тоже correct. Не требуй объяснять код, загадку или условие вопроса, если эталон уже назван. Слово эталона, сказанное по слогам или с паузами внутри, — это то же слово: correct, не needs_clarification и не другой ответ.
 Если эталон — число с пояснением, реплика верна, когда игрок называет это число словами или цифрой либо передаёт ту же мысль другими словами; повторять пояснение из пакета не нужно, и объяснение вместо числа — тоже correct.
 incorrect — смысл другой или реплика отвечает на другой вопрос. Другое слово/имя — incorrect, если оно не удовлетворяет условиям данного вопроса; само отличие от эталона не доказывает ошибку.
 unintelligible — реплику не разобрать.
 ambiguous — нельзя уверенно решить.
-needs_clarification — реплика созвучна эталону и могла быть тем же ответом, который распознавание исказило. Это не correct и не incorrect. Сюда относятся: один звук или одна буква не туда; то же имя в другой записи или транслитерации; короткая фраза эталона, расслышанная одним похожим словом.
+needs_clarification — реплика созвучна эталону и могла быть тем же ответом, который распознавание исказило. Это не correct и не incorrect. Сюда относятся: один звук или одна буква не туда; короткая фраза эталона, расслышанная одним похожим словом.
 ${source === 'audio' ? 'heard — короткая дословная запись того, что слышно в аудио, без исправления под эталон. Если слов не разобрать, heard пустой.' : 'heard — короткая запись реплики выше.'}
 reason — одна фраза, почему выбран статус. При альтернативном верном ответе объясни, почему реплика удовлетворяет условиям данного вопроса. Не ссылайся на посторонний вопрос.
 `.trim()
@@ -2339,8 +2432,9 @@ export function announceInstructions(context: GameContext): string {
     })
   }
   if (kind === 'unclear' && !finalRound && hidden) {
-    return hostCue({ situation: 'Ответ не удалось уверенно засчитать. Итог за вопрос нулевой, другим доступен перехват.',
-      goal: 'Коротко скажи, что ответ не разобран или спорный, итог нулевой.', constraints: ['Эталон не называй и не намекай. Не зови выбирать следующий вопрос.'] })
+    return hostCue({ situation: unclearSituation(context),
+      goal: 'Живо и коротко объясни это отвечавшему по имени, как ведущая за столом, а не как протокол. Другие ещё могут нажать кнопку.',
+      constraints: ['Эталон не называй и не намекай. Не зови выбирать следующий вопрос.', 'Без канцелярита вроде «итог нулевой», «ответ не разобран».'] })
   }
   if (context.judgmentStatus === 'needs_clarification') {
     return hostCue({

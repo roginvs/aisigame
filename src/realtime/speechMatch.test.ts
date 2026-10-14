@@ -43,8 +43,17 @@ describe('isolatedToolResponse', () => {
     })
     expect(response.conversation).toBe('none')
     expect(response.tool_choice.name).toBe('submitAnswerJudgment')
-    expect(response.input[0]?.content[0]?.text).toContain('Бетховен')
-    expect(response.input[0]?.content[0]?.text).toContain('Времена года')
+    expect(response.instructions).toContain('Бетховен')
+    expect(response.instructions).toContain('Времена года')
+  })
+  it('инструкция хода не дублируется в input, схема — только вызываемой функции', () => {
+    const response = isolatedToolResponse({
+      name: 'selectQuestion', instructions: 'Распознанный текст: «Приложения 900»', purpose: 'select', turn: 1, mode: 'text',
+      tools: [{ name: 'selectQuestion' }, { name: 'submitAnswerJudgment' }],
+    })
+    expect(response.input[0]?.content[0]?.text).not.toContain('Приложения 900')
+    expect(response.input[0]?.content[0]?.text).toContain('selectQuestion')
+    expect(response.tools).toEqual([{ name: 'selectQuestion' }])
   })
 })
 
@@ -222,5 +231,14 @@ describe('защита дословного чтения от общих пра�
     expect(hostInstructions).toContain('В обычных репликах формулируй сама')
     expect(hostInstructions).toContain('Ты их не видишь и не должна')
     expect(hostInstructions).toContain('Свой вопрос и свой ответ вместо них не придумывай')
+  })
+})
+
+describe('правила ведущей: без «системы» и без вступлений (живая игра 14.10)', () => {
+  it('общие правила запрещают «систему/распознавание» и вступления вроде «секунду»', () => {
+    expect(hostInstructions).toContain('«систему», распознавание')
+    expect(hostInstructions).toContain('«не расслышала»')
+    expect(hostInstructions).toContain('«секунду»')
+    expect(hostInstructions).toContain('«давайте уточним»')
   })
 })

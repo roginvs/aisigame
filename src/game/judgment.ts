@@ -391,3 +391,13 @@ function oneEditApart(left: string, right: string): boolean {
   if (i < left.length || j < right.length) edits += 1
   return edits === 1
 }
+
+function foldAnswer(text: string): string {
+  return text.toLowerCase().replace(/ё/g, 'е').replace(/[^\p{L}\p{N}]+/gu, '')
+}
+
+/** Реплика буквально равна одному из эталонов (без учёта регистра, ё, пробелов и знаков). */
+export function exactAnswer(heard: string, answers: readonly string[]): boolean {
+  const said = foldAnswer(heard)
+  return said.length > 0 && answers.some((answer) => foldAnswer(answer) === said)
+}

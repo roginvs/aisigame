@@ -17,16 +17,20 @@ const hundredWords: Record<string, number> = {
   девятьсот: 900,
 }
 
-/** Одна открытая ячейка, если в реплике ровно одна тема и одна цена. Иначе null. */
+/** Одна открытая ячейка, если в реплике ровно одна тема и одна цена. Иначе null. themeHint — тема, уже понятая из прошлой реплики. */
 export function matchSpokenCell(
   transcript: string,
   cells: ChoiceCell[],
   kind: 'normal' | 'final',
+  themeHint: string | null = null,
 ): ChoiceCell | null {
   const spoken = words(transcript)
   if (!spoken || !cells.length) return null
   const themes = uniqueThemes(cells)
-  const mentioned = themesMentioned(spoken, themes)
+  const named = themesMentioned(spoken, themes)
+  // После «тема понятна, назовите стоимость» реплика из одного номинала — та же тема.
+  const hinted = themes.find((theme) => theme.themeId === themeHint)
+  const mentioned = named.length === 0 && hinted ? [hinted] : named
   if (mentioned.length !== 1) return null
   const theme = mentioned[0]
   if (!theme) return null
