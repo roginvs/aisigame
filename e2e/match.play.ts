@@ -239,3 +239,12 @@ test('демо-хук звуков игры: без Jitsi эффекты игр�
   await expect.poll(() => page.evaluate(() => window.__aisigame?.playGameSound?.('beep'))).toBe('local')
   await expect.poll(() => page.evaluate(() => window.__aisigame?.playGameSound?.('cat'))).toBe('local')
 })
+
+test('табло кликается, пока ведущая уточняет выбор ячейки', async ({ page }) => {
+  await startDemo(page)
+  await page.evaluate(() => (window as unknown as { __aisigame: { setSpeechMs: (ms: number) => void } }).__aisigame.setSpeechMs(15_000))
+  await hear(page, 'ну давай что-нибудь интересное')
+  await expect(page.getByRole('status').filter({ hasText: /выбери|уточн|ячейк|тему/i })).toBeVisible()
+  await page.getByRole('button', { name: 'Текст, 100', exact: true }).click({ timeout: 3000 })
+  await expect(page.getByRole('button', { name: 'Текст, 100', exact: true })).toHaveCount(0, { timeout: 3000 })
+})

@@ -50,7 +50,7 @@ export function SpecialPanel(props: {
             <h2>Кот в мешке</h2>
             {before ? <p className="eyebrow">{theme} · {special.stakeOptions.join(' или ')}</p> : null}
             <p className="special-status">{name(special.giverId)} отдаёт вопрос</p>
-            {giverActs && !path.endsWith('announcing') ? (
+            {giverActs ? (
               <div className="special-options" role="group" aria-label="Кому отдать">
                 {context.players.filter((player) => player.id !== special.giverId).map((player) => (
                   <button key={player.id} type="button" className="primary special-option" onClick={() => onPick({ target: 'player', playerId: player.id })}>{player.name}</button>

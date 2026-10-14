@@ -4,7 +4,7 @@ import { gameConfig } from '../config.ts'
 import { answerMediaMaxMs, answerMediaMinMs } from '../options.ts'
 import { announceInstructions } from './controller.ts'
 import { earlyBuzzerRoll } from './earlyBuzzer.ts'
-import { closeGuessCoin, earlyPickOpen, falseStartCoin, gameMachine, phoneticRetryReason, statePath } from './machine.ts'
+import { closeGuessCoin, earlyPickOpen, falseStartCoin, gameMachine, phoneticRetryReason, pickOpen, statePath } from './machine.ts'
 import { answerChatLine } from './controller.ts'
 import { nextInCell } from './pack.ts'
 import { playersFromNames } from './players.ts'
@@ -784,6 +784,36 @@ describe('game machine', () => {
     actor.send({ type: 'RESUME' })
     actor.send({ type: 'PAUSE', path: 'buzzing' })
     expect(statePath(actor.getSnapshot().value)).toBe('stopped')
+  })
+
+  it('клик по табло во время уточнения и передачи хода открывает ячейку', () => {
+    const start = () => {
+      const actor = createActor(gameMachine)
+      actor.start()
+      actor.send({ type: 'START_GAME', pack: demoPack })
+      actor.send({ type: 'CONNECTED' })
+      actor.send({ type: 'HOST_AUDIO_FINISHED', purpose: 'welcome' })
+      return actor
+    }
+    const first = demoPack.questions.find((q) => q.roundIndex === 0 && !q.cat && !q.auction)!
+    const clarify = start()
+    clarify.send({ type: 'QUESTION_UNCLEAR', reason: 'x' })
+    expect(statePath(clarify.getSnapshot().value)).toBe('choosing.clarifying')
+    expect(pickOpen('choosing.clarifying', clarify.getSnapshot().context)).toBe(true)
+    clarify.send({ type: 'QUESTION_SELECTED', themeId: first.themeId, value: first.value })
+    expect(statePath(clarify.getSnapshot().value)).toBe('flashing')
+    const handoff = createActor(gameMachine)
+    handoff.start()
+    handoff.send({ type: 'START_GAME', pack: demoPack, players: [{ id: 1, name: 'Маша', score: 0, clientId: 'm' }, { id: 2, name: 'Вася', score: 0, clientId: 'g' }] })
+    handoff.send({ type: 'CONNECTED' })
+    handoff.send({ type: 'HOST_AUDIO_FINISHED', purpose: 'welcome' })
+    handoff.send({ type: 'CHOOSER_OFFLINE', fromPlayerId: 2, toPlayerId: 1 })
+    expect(statePath(handoff.getSnapshot().value)).toBe('chooserHandoff')
+    expect(pickOpen('chooserHandoff', handoff.getSnapshot().context)).toBe(true)
+    handoff.send({ type: 'QUESTION_SELECTED', themeId: first.themeId, value: first.value })
+    expect(statePath(handoff.getSnapshot().value)).toBe('flashing')
+    expect(pickOpen('choosing.resolving', clarify.getSnapshot().context)).toBe(true)
+    expect(pickOpen('reading.sealed', clarify.getSnapshot().context)).toBe(false)
   })
 
   it('обрыв связи на уточнении уводит из партии, а не обратно к глухому выбору', () => {

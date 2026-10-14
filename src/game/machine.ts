@@ -307,7 +307,8 @@ export function earlyPickOpen(path: string, context: GameContext): boolean {
 
 /** Можно ли сейчас выбрать ячейку (голос/клик выбирающего). */
 export function pickOpen(path: string, context: GameContext): boolean {
-  return path === 'choosing.listening' || earlyPickOpen(path, context)
+  // Ранний слух на выборе: пока ведущая уточняет, напоминает или передаёт ход — табло тоже кликабельно.
+  return path === 'choosing.listening' || path === 'choosing.clarifying' || path === 'choosing.resolving' || path === 'chooserHandoff' || earlyPickOpen(path, context)
 }
 
 export function isAnnouncingPath(path: string): boolean {
@@ -1443,6 +1444,14 @@ export const gameMachine = setup({
               actions: 'setChoosingStatus',
             },
             PLAYER_SPEECH_STARTED: { target: 'listening', actions: 'setChoosingStatus' },
+            // Табло кликабельно и во время уточнения ведущей.
+            QUESTION_SELECTED: [
+              { guard: 'finalWithoutPlayers', target: '#game.finished' },
+              { guard: 'finalQuestion', target: '#game.finalBets', actions: ['openQuestion', 'prepareFinalists'] },
+              { guard: 'selectedCat', target: '#game.cat', actions: ['openQuestion', 'startCat'] },
+              { guard: 'selectedAuction', target: '#game.auction', actions: ['openQuestion', 'startAuction'] },
+              { guard: 'questionAvailable', target: '#game.flashing', actions: 'openQuestion' },
+            ],
           },
         },
       },
@@ -1452,6 +1461,14 @@ export const gameMachine = setup({
         HOST_AUDIO_FINISHED: { guard: 'purposeChooserHandoff', target: 'choosing' },
         // Новый выбирающий может говорить, пока ведущая ещё объявляет передачу хода.
         PLAYER_SPEECH_STARTED: 'choosing',
+        // …и кликнуть ячейку.
+        QUESTION_SELECTED: [
+          { guard: 'finalWithoutPlayers', target: '#game.finished' },
+          { guard: 'finalQuestion', target: '#game.finalBets', actions: ['openQuestion', 'prepareFinalists'] },
+          { guard: 'selectedCat', target: '#game.cat', actions: ['openQuestion', 'startCat'] },
+          { guard: 'selectedAuction', target: '#game.auction', actions: ['openQuestion', 'startAuction'] },
+          { guard: 'questionAvailable', target: '#game.flashing', actions: 'openQuestion' },
+        ],
       },
     },
     cat: {

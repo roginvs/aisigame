@@ -32,6 +32,11 @@ describe('SpecialPanel', () => {
     expect(html).toContain('>Вера<')
     expect(html).not.toContain('>Аня</button>')
   })
+  it('кнопки «кому отдать» видны уже во время вступления ведущей (ранний слух)', () => {
+    const html = render('cat.announcing', context)
+    expect(html).toContain('aria-label="Кому отдать"')
+    expect(html).toContain('>Борис<')
+  })
   it('чужой экран кнопок не видит', () => {
     expect(render('cat.picking', context, () => false)).not.toContain('<button')
   })
