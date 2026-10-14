@@ -1,4 +1,5 @@
 import type { LinkStatus } from '../realtime/client.ts'
+import type { HostEar } from '../game/hostEar.ts'
 import { hostCaption, hostCopy, hostMood, type HostMood } from './hostMood.ts'
 
 const publicFile = (path: string) => `${import.meta.env.BASE_URL}${path.replace(/^\//, '')}`
@@ -8,6 +9,8 @@ const portrait: Record<HostMood, string> = {
   speak: publicFile('/host/speak.jpg?v=3'),
   buzz: publicFile('/host/buzz.jpg'),
   think: publicFile('/host/think.jpg'),
+  hear: publicFile('/host/listen.jpg'),
+  process: publicFile('/host/think.jpg'),
 }
 
 export function HostPresence(props: {
@@ -21,6 +24,8 @@ export function HostPresence(props: {
   /** Лобби конференции: вместо «Не говорите» приглашаем поболтать. */
   lobbyInvite?: boolean
   error?: string | null
+  /** Что модель слышит: speech_started → hearing, speech_stopped → processing. */
+  ear?: HostEar
   /** В онлайн-режиме: речь бота «Ведущая» по уровню Jitsi — золотая пульсация рамки. */
   conferenceSpeaking?: boolean
   /** Только мастер: вне хода модель глуха, на выборе/ответе — один игрок. */
@@ -32,13 +37,16 @@ export function HostPresence(props: {
 }) {
   const paused = props.path === 'paused'
   const stopped = props.path === 'stopped'
-  const mood = paused || stopped ? 'think' : hostMood(props.path, props.link)
+  const mood = paused || stopped ? 'think' : hostMood(props.path, props.link, props.ear ?? 'idle')
   const listenHint = props.titleHint?.trim() || ''
   // Joiner шлёт phase «lobby»; у мастера машина ещё в startMenu — нужен lobbyInvite.
   const lobbyInvite = Boolean(props.lobbyInvite) || props.path === 'lobby'
   // titleHint из конференции важнее шаблонного hint настроения («Слышу вас…» на buzz),
   // иначе при «Меньше слышать» в окне кнопки врёт «засчитаю только после кнопки».
-  const copy = props.title
+  const earMood = mood === 'hear' || mood === 'process'
+  const copy = earMood && !paused && !stopped
+    ? { title: hostCopy[mood].title, hint: props.title?.trim() || hostCopy[mood].hint }
+    : props.title
     ? { title: props.title, hint: listenHint }
     : stopped
       ? { title: 'Остановлена', hint: listenHint || 'Сессия закрыта, ведущая не ждёт' }
@@ -61,7 +69,18 @@ export function HostPresence(props: {
     .join(' ')
   return (
     <figure className={classes} role="status" aria-live="polite">
-      <img src={portrait[mood]} alt="" />
+      <div className="host-portrait">
+        <img src={portrait[mood]} alt="" />
+        {mood === 'hear' ? (
+          <span className="host-badge host-badge-hear" data-testid="host-ear" data-ear="hearing" aria-hidden="true">
+            <i /><i /><i /><i /><i />
+          </span>
+        ) : mood === 'process' ? (
+          <span className="host-badge host-badge-process" data-testid="host-ear" data-ear="processing" aria-hidden="true">
+            <i />
+          </span>
+        ) : null}
+      </div>
       <figcaption>
         <strong>{caption.title}</strong>
         {caption.lines.map((line) => (

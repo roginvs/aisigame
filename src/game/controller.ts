@@ -1,4 +1,5 @@
 import type { Actor, SnapshotFrom } from 'xstate'
+import { clearHostEar, hostEarHearing, hostEarMicClosed, hostEarProcessing, hostEarSurvives } from './hostEar.ts'
 import { playTimeoutBeep } from '../audio/beep.ts'
 import { auctionDingMs, audioJudgmentTimings, catMeowMs } from '../options.ts'
 import { matchAuctionSpeech, optionLabel } from './auction.ts'
@@ -197,6 +198,9 @@ export function attachController(options: {
 
   client.onLink = (patch) => {
     noteLink(patch)
+    // Связь упала/закрыта — speech_stopped уже не придёт; закрытый мик — новой речи не будет.
+    if (patch.connection && patch.connection !== 'connected') clearHostEar()
+    else if (patch.mic && patch.mic !== 'live') hostEarMicClosed()
     setLink((current) => ({ ...current, ...patch }))
   }
   client.onFailure = (message) => {
@@ -219,6 +223,7 @@ export function attachController(options: {
   client.onSpeechStarted = (info) => {
     const path = statePath(actor.getSnapshot().value)
     if (path === 'stopped' || path === 'paused') return
+    hostEarHearing()
     const itemId = info?.itemId ?? null
     if (itemId) {
       openSpeechItemId = itemId
@@ -250,6 +255,7 @@ export function attachController(options: {
   client.onSpeechStopped = ({ durationMs, itemId }) => {
     const path = statePath(actor.getSnapshot().value)
     if (path === 'stopped' || path === 'paused') return
+    hostEarProcessing()
     // VAD-длительность может быть длиннее wall-clock с момента started — для окна попытки
     // берём фактический старт utterance, иначе короткий фантом-гард ломает нормальные ответы.
     const speechStartedAt =
@@ -330,6 +336,7 @@ export function attachController(options: {
     previousPath = path
     previousRound = round
     pushTrace('state', path, machineView(snapshot.context))
+    if (!hostEarSurvives(path, from)) clearHostEar()
     enter(path, snapshot, from, fromRound)
   })
 
@@ -1213,6 +1220,7 @@ export function attachController(options: {
   })
 
   return () => {
+    clearHostEar()
     onActions?.(null)
     connectToken += 1
     subscription.unsubscribe()

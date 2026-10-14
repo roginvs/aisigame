@@ -1,4 +1,5 @@
 /** Сообщения конференции — plain JSON, без классов. */
+import { readHostEar, type HostEar } from '../game/hostEar.ts'
 import { readAppeal, readOutcomes } from '../game/appeals.ts'
 import { readSpecialState } from '../game/specialState.ts'
 import type { AppealFields, AppealRequest, AnnounceKind, JudgmentStatus, SpecialState } from '../game/types.ts'
@@ -99,6 +100,8 @@ export type ConferenceSnapshot = AppealFields & {
   special?: SpecialState | null
   /** Черновик речи игрока (delta), только для показа; старые мастера не шлют. */
   liveSpeech?: { text: string; at: string } | null
+  /** Что ведущая слышит (speech_started/stopped), только для показа; старые мастера не шлют. */
+  hostEar?: HostEar
 } & ConferenceMessageRing
 
 /** Единая история состояния, сохранения и экрана — сообщения в отдельных слотах. */
@@ -483,6 +486,7 @@ const stateValidators = {
   phaseDurationMs: nullableFinite,
   timerRemainingMs: nullableFinite,
   special: (value: unknown) => value === undefined || value === null || readSpecialState(value) !== null,
+  hostEar: (value: unknown) => value === undefined || readHostEar(value) !== null,
   liveSpeech: (value: unknown) => value === undefined || value === null ||
     (isRecord(value) && typeof value.text === 'string' && value.text.length <= 2000 && typeof value.at === 'string' && value.at.length <= 64),
 } satisfies Record<keyof StateFields, (value: unknown) => boolean>

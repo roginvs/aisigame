@@ -1,6 +1,7 @@
 import type { LinkStatus } from '../realtime/client.ts'
+import type { HostEar } from '../game/hostEar.ts'
 
-export type HostMood = 'listen' | 'speak' | 'buzz' | 'think'
+export type HostMood = 'listen' | 'speak' | 'buzz' | 'think' | 'hear' | 'process'
 
 const speechPaths = new Set([
   'welcoming',
@@ -15,10 +16,20 @@ const speechPaths = new Set([
   'falseStartCue',
 ])
 
-export function hostMood(path: string, link: Pick<LinkStatus, 'host' | 'mic'>): HostMood {
+/**
+ * Приоритет: окно кнопки > речь ведущей > то, что модель слышит (hear/process) > listen/think.
+ * На чтении вопроса до разрешения жать ведущая говорит — показываем «speak».
+ */
+export function hostMood(path: string, link: Pick<LinkStatus, 'host' | 'mic'>, ear: HostEar = 'idle'): HostMood {
   if (path === 'reading.armed') return 'buzz'
   if (link.host === 'speaking') return 'speak'
   if (path.startsWith('buzzing')) return 'buzz'
+  const base = baseMood(path, link)
+  if (base === 'speak' || ear === 'idle') return base
+  return ear === 'hearing' ? 'hear' : 'process'
+}
+
+function baseMood(path: string, link: Pick<LinkStatus, 'host' | 'mic'>): HostMood {
   if (
     link.mic === 'live' &&
     (path === 'choosing.listening' ||
@@ -39,6 +50,8 @@ export const hostCopy: Record<HostMood, { title: string; hint: string }> = {
   speak: { title: 'Не говорите', hint: 'Сейчас говорит ведущая' },
   buzz: { title: 'Жмите кнопку', hint: 'Слышу вас, засчитаю только после кнопки' },
   think: { title: 'Не говорите', hint: 'Ведущая думает' },
+  hear: { title: 'Слышу…', hint: 'Ведущая слышит речь' },
+  process: { title: 'Поняла, думаю…', hint: 'Фраза закончена, разбираю' },
 }
 
 const genericHints = new Set(['ведущая думает', 'сейчас говорит ведущая', 'ведущая слушает'])

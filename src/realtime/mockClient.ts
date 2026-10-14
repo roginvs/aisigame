@@ -22,6 +22,8 @@ export type MockControls = {
   hear: (text: string, durationMs?: number) => void
   /** Демо: текст растёт в чате по словам (как delta), затем обычный hear. */
   hearLive?: (text: string, stepMs?: number) => void
+  /** Демо плашки ведущей: «Слышу…» hearMs, потом «Поняла, думаю…» thinkMs, потом итоговый текст. */
+  hearSlow?: (text: string, hearMs?: number, thinkMs?: number) => void
   setSpeechMs: (ms: number) => void
   /** Только конференция на заглушке: портит байт пакета у joiner. */
   flipPackByte?: () => void
@@ -273,6 +275,29 @@ export class MockRealtimeClient implements GameVoice {
       window.setTimeout(() => this.offerLivePlayerChat(itemId, words.slice(0, index + 1).join(' ')), stepMs * index)
     })
     window.setTimeout(() => this.hearAudio(text, text, durationMs, null, itemId), stepMs * Math.max(1, words.length))
+    return itemId
+  }
+
+  /** Как живой OpenAI: speech_started → (речь hearMs) → speech_stopped → (распознавание thinkMs) → completed. */
+  hearSlow(text: string, hearMs = 2500, thinkMs = 1500): string {
+    const itemId = `mock-item-${++this.itemSeq}`
+    this.audioTexts.set(itemId, text)
+    this.audioItems.observe({ type: 'input_audio_buffer.speech_started', item_id: itemId })
+    this.onSpeechStarted({ itemId })
+    const words = text.trim().split(/\s+/).filter(Boolean)
+    const stepMs = hearMs / Math.max(1, words.length)
+    words.forEach((_, index) => {
+      window.setTimeout(() => this.offerLivePlayerChat(itemId, words.slice(0, index + 1).join(' ')), stepMs * index)
+    })
+    window.setTimeout(() => {
+      this.audioItems.observe({ type: 'input_audio_buffer.speech_stopped', item_id: itemId })
+      this.audioItems.observe({ type: 'input_audio_buffer.committed', item_id: itemId })
+      this.onSpeechStopped({ durationMs: hearMs, itemId })
+      window.setTimeout(() => {
+        clearLivePlayerLine(itemId)
+        this.deliverTranscript(itemId, text)
+      }, thinkMs)
+    }, hearMs)
     return itemId
   }
 

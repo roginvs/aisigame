@@ -18,6 +18,18 @@ function publisher() {
 }
 
 describe('conference state protocol', () => {
+  it('hostEar: по умолчанию idle, едет дифом к joiner, мусор отвергается', () => {
+    const { state, snapshot } = publisher()
+    expect(snapshot.hostEar).toBe('idle')
+    const hearing = state.update({ ...snapshot, hostEar: 'hearing' })
+    expect(hearing.changes).toEqual({ hostEar: 'hearing' })
+    expect(isConferenceMessage(hearing)).toBe(true)
+    expect(isConferenceMessage({ ...hearing, changes: { hostEar: 'loud' } })).toBe(false)
+    const legacy: Record<string, unknown> = { ...state.full() }
+    delete legacy.hostEar
+    expect(isConferenceMessage(legacy)).toBe(true)
+  })
+
   it('отдаёт полный статус с 200 слотами и диф только изменённых полей, включая null и пустой массив', () => {
     const { state, snapshot } = publisher()
     expect(isConferenceMessage(state.full())).toBe(true)

@@ -269,6 +269,7 @@ export default function App() {
         hearAudio: (audioText, asrText, durationMs) => client.hearAudio(audioText, asrText, durationMs),
         hear: (text, durationMs) => client.hear(text, durationMs),
         hearLive: (text, stepMs) => { client.hearLive(text, stepMs) },
+        hearSlow: (text, hearMs, thinkMs) => { client.hearSlow(text, hearMs, thinkMs) },
         setSpeechMs: (ms) => client.setSpeechMs(ms),
         flipPackByte: () => joinerFlipPackRef.current?.(),
       }

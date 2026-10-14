@@ -4,6 +4,27 @@ import { describe, expect, it } from 'vitest'
 import { HostPresence } from './HostPresence.tsx'
 
 describe('HostPresence', () => {
+  it('показывает «Слышу…» и «Поняла, думаю…» со значком; ход игрока уходит в подсказку', () => {
+    const hear = renderToStaticMarkup(createElement(HostPresence, {
+      path: 'choosing.listening', link: { host: 'idle', mic: 'live' }, status: '', ear: 'hearing', title: 'Вася выбирает вопрос',
+    }))
+    expect(hear).toContain('host host-hear')
+    expect(hear).toContain('Слышу…')
+    expect(hear).toContain('Вася выбирает вопрос')
+    expect(hear).toContain('data-ear="hearing"')
+    const process = renderToStaticMarkup(createElement(HostPresence, {
+      path: 'judging', link: { host: 'idle', mic: 'muted' }, status: '', ear: 'processing',
+    }))
+    expect(process).toContain('host host-process')
+    expect(process).toContain('Поняла, думаю…')
+    expect(process).toContain('data-ear="processing"')
+    const quiet = renderToStaticMarkup(createElement(HostPresence, {
+      path: 'choosing.listening', link: { host: 'idle', mic: 'live' }, status: '',
+    }))
+    expect(quiet).toContain('host host-listen')
+    expect(quiet).not.toContain('data-ear')
+  })
+
   it('adds speaking class when conference audio level is active', () => {
     const quiet = renderToStaticMarkup(
       createElement(HostPresence, {

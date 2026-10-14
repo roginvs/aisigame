@@ -6,6 +6,20 @@ const open = { host: 'idle' as const, mic: 'live' as const }
 const talking = { host: 'speaking' as const, mic: 'muted' as const }
 
 describe('hostMood', () => {
+  it('hear/process выше listen/think, ниже речи ведущей и окна кнопки', () => {
+    expect(hostMood('choosing.listening', open, 'hearing')).toBe('hear')
+    expect(hostMood('choosing.resolving', quiet, 'processing')).toBe('process')
+    expect(hostMood('judging', quiet, 'processing')).toBe('process')
+    expect(hostMood('cat.picking', open, 'hearing')).toBe('hear')
+    expect(hostMood('choosing.listening', talking, 'hearing')).toBe('speak')
+    expect(hostMood('reading.sealed', open, 'hearing')).toBe('speak')
+    expect(hostMood('reading.armed', open, 'hearing')).toBe('buzz')
+    expect(hostMood('buzzing.open', open, 'hearing')).toBe('buzz')
+    expect(hostMood('choosing.listening', open, 'idle')).toBe('listen')
+    expect(hostCopy.hear.title).toBe('Слышу…')
+    expect(hostCopy.process.title).toBe('Поняла, думаю…')
+  })
+
   it('lets players talk only while she is listening for a choice or an answer', () => {
     expect(hostMood('choosing.listening', open)).toBe('listen')
     expect(hostMood('choosing.clarifying', open)).toBe('listen')

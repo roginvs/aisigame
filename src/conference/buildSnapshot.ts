@@ -1,3 +1,4 @@
+import type { HostEar } from '../game/hostEar.ts'
 import { buildCommit } from '../buildInfo.ts'
 import type { GameContext } from '../game/types.ts'
 import {
@@ -18,6 +19,7 @@ export function buildConferenceSnapshot(input: {
   timerRemainingMs: number | null
   falseStartIds: number[]
   liveSpeech?: { text: string; at: string } | null
+  hostEar?: HostEar
 }): ConferenceSnapshot {
   const bets: Record<string, number> = {}
   for (const bet of input.context.bets) bets[String(bet.playerId)] = bet.amount
@@ -84,6 +86,7 @@ export function buildConferenceSnapshot(input: {
     phaseDurationMs: input.context.phaseDurationMs,
     timerRemainingMs: input.timerRemainingMs,
     liveSpeech: input.liveSpeech ?? null,
+    hostEar: input.hostEar ?? 'idle',
     ...(input.messageRing ?? emptyMessageRing()),
   }
 }

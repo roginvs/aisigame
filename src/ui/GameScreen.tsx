@@ -29,6 +29,7 @@ import { packProgressLabel } from '../conference/packProgress.ts'
 import { canBuzzPlayer, canPickCell, conferenceSoloListenHint, conferenceTurnTitle } from './conferenceTurn.ts'
 import { PackAwaitPanel, type PackAwaitProgress } from './PackAwaitPanel.tsx'
 import { HostPresence } from './HostPresence.tsx'
+import { getHostEar, subscribeHostEar } from '../game/hostEar.ts'
 import { tapPressProps } from './tapPress.ts'
 import { InviteDialog } from './InviteDialog.tsx'
 import { QuestionClip, QuestionMedia } from './QuestionMedia.tsx'
@@ -261,6 +262,7 @@ export function GameScreen(props: {
     return () => window.removeEventListener('aisigame-beep', onBeep)
   }, [])
   const usage = useSyncExternalStore(subscribeUsage, getUsageSnapshot)
+  const localEar = useSyncExternalStore(subscribeHostEar, getHostEar, getHostEar)
   useEffect(() => {
     void preloadPublicSound(catMeowSound)
     void preloadPublicSound(auctionDingSound)
@@ -733,6 +735,7 @@ export function GameScreen(props: {
           <HostPresence
             path={path}
             link={link}
+            ear={conference && !conference.isMaster && conference.remoteSnapshot ? conference.remoteSnapshot.hostEar ?? 'idle' : localEar}
             title={turnTitle}
             titleHint={soloListenHint}
             lobbyInvite={Boolean(conference?.lobby)}

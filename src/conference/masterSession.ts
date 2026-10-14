@@ -1,3 +1,4 @@
+import { getHostEar, subscribeHostEar } from '../game/hostEar.ts'
 import { appealRequestError } from '../game/appeals.ts'
 import type { Actor, SnapshotFrom } from 'xstate'
 import type { GameVoice } from '../realtime/client.ts'
@@ -110,6 +111,7 @@ export class MasterSession {
   private traceCursor = 0
   private traceUnsub: () => void
   private liveUnsub: () => void = () => {}
+  private earUnsub: () => void = () => {}
   private liveThrottle = throttleLatest<null>(LIVE_SPEECH_THROTTLE_MS, () => {
     if (this.statePublisher) this.broadcastCurrentSnapshot()
   })
@@ -209,6 +211,7 @@ export class MasterSession {
       this.maybeOpenLobbySpeech()
     }
     this.traceCursor = getTrace().at(-1)?.id ?? 0
+    this.earUnsub = subscribeHostEar(() => this.broadcastCurrentSnapshot())
     this.liveUnsub = subscribeLivePlayerLine(() => this.liveThrottle.push(null, getLivePlayerLine() === null))
     this.traceUnsub = subscribeTrace(() => {
       const entries = getTrace().filter((entry) => entry.id > this.traceCursor)
@@ -296,6 +299,7 @@ export class MasterSession {
     this.machineSub?.unsubscribe()
     this.traceUnsub()
     this.liveUnsub()
+    this.earUnsub()
     this.liveThrottle.stop()
     this.unsub()
     this.packPipe?.dispose()
@@ -569,6 +573,7 @@ export class MasterSession {
       roster: this.roster.allIncludingHidden(now),
       messageRing: this.statePublisher?.history() ?? this.initialHistory,
       liveSpeech: liveSpeechOf(getLivePlayerLine()),
+      hostEar: getHostEar(),
       timerRemainingMs: this.gameStarted ? timerRemainingMs(context, now) : null,
       falseStartIds: this.gameStarted
         ? Object.entries(this.actor.getSnapshot().context.falseStarts)
