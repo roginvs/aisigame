@@ -117,6 +117,18 @@ test('созвучие просит повторить', async ({ page }) => {
   await expect(page.getByRole('article')).not.toContainText('Правильный ответ')
 })
 
+test('просьбу повторить ответ можно перебить: слушаем сразу', async ({ page }) => {
+  await startDemo(page)
+  await pick(page, 'Космос, 100')
+  await buzz(page, 'Игрок 1')
+  await page.evaluate(() => (window as unknown as { __aisigame: { setSpeechMs: (ms: number) => void } }).__aisigame.setSpeechMs(15_000))
+  await hear(page, 'Читов')
+  await expect(page.getByRole('status').filter({ hasText: 'Повторите, пожалуйста' })).toBeVisible()
+  // Ведущая ещё говорит (15 с), игрок отвечает поверх неё.
+  await page.evaluate(() => (window as unknown as { __aisigame: { hearSlow: (t: string, h: number, k: number) => void } }).__aisigame.hearSlow('Герман Титов', 1500, 200))
+  await expect(page.getByRole('group', { name: 'Игрок 1: 100' })).toBeVisible({ timeout: 8_000 })
+})
+
 test('картинка, звук, ролик, выбор, вопрос без текста, стопка и показ ответа', async ({ page }) => {
   await startDemo(page)
   await pick(page, 'Выбор, 100')

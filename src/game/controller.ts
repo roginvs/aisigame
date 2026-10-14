@@ -250,6 +250,13 @@ export function attachController(options: {
       return
     }
     if (path.startsWith('choosing')) lastChooserSpeechAt = Date.now()
+    if (earlyAnswerCue(path) && hostTalking) {
+      armBargeIn(itemId, () => statePath(actor.getSnapshot().value) === path, 'ответ', () => {
+        earlyAnswer = true
+        actor.send({ type: 'PLAYER_SPEECH_STARTED' })
+      })
+      return
+    }
     if (path === 'choosing.listening' && hostTalking && hostPurpose === 'idleNudge') armBargeIn(itemId, () => statePath(actor.getSnapshot().value) === 'choosing.listening')
     if (path.startsWith('answering')) lastAnswerSpeechAt = Date.now()
     if (isReadingPath(path) || path === 'falseStartCue') {
@@ -372,6 +379,14 @@ export function attachController(options: {
     if (purpose === 'catPick' || purpose === 'specialBid') handleSpecialTool(call, turn)
   }
 
+  /** Ответ начат поверх просьбы ведущей (повтор, ход финалиста, апелляция): попытка подхватывает ту же речь. */
+  let earlyAnswer = false
+  /** Ведущая просит ответа у одного игрока — слушаем сразу, речь перебивает. */
+  function earlyAnswerCue(path: string): boolean {
+    if (path === 'turnCue' || path === 'appealCue') return true
+    const context = actor.getSnapshot().context
+    return isAnnounceSpeakingPath(path) && context.announceKind === 'repeat' && !context.appeal?.activePlayerId
+  }
   /** Назначение последней реплики ведущей (для перебивания напоминаний). */
   let hostPurpose = ''
   /** Предложенная в напоминании ячейка; сгорает на следующем напоминании, ответе или выходе из выбора. */
@@ -386,7 +401,7 @@ export function attachController(options: {
     armBargeIn(itemId, () => statePath(actor.getSnapshot().value) === 'startMenu' && Boolean(keepVoiceSession?.()), 'лобби')
   }
   /** Игрок говорит дольше порога поверх ведущей — обрываем её (лобби, напоминания выбора). */
-  function armBargeIn(itemId: string | null, still: () => boolean, where = 'выбор'): void {
+  function armBargeIn(itemId: string | null, still: () => boolean, where = 'выбор', onCut?: () => void): void {
     clearLobbyBargeIn()
     lobbyBargeTimer = window.setTimeout(() => {
       lobbyBargeTimer = 0
@@ -399,6 +414,7 @@ export function attachController(options: {
       }
       pushTrace('note', `${where}: игрок перебил ведущую — замолкаем и слушаем`)
       client.interruptSpeech()
+      onCut?.()
     }, LOBBY_BARGE_IN_MIN_MS)
   }
 
@@ -529,11 +545,13 @@ export function attachController(options: {
       expectingToolTurn = null
       dropAnswerAttempt()
       client.interruptSpeech()
-      speak('appeal', hostCue({
+      client.setTranscriptionPrompt(answerPromptFor(context))
+      client.setMicEnabled(true)
+      speakWhileListening('appeal', hostCue({
         situation: `Ручная апелляция. Сейчас повторяет ответ ${context.players.find((p) => p.id === context.activePlayerId)?.name ?? 'игрок'}; итог за этот вопрос сейчас ${amountWords(context.outcomes?.[context.activeQuestionId ?? '']?.[context.activePlayerId ?? 0]?.amount ?? 0)}. Новый ответ заменит этот итог, а не добавится к нему.`,
         goal: 'Обратись по имени и коротко попроси повторить ответ.',
         constraints: ['Не перечитывай вопрос. Эталон не называй.'],
-      }), undefined, true)
+      }))
     }
     if (path === 'appealWindow') {
       client.setMicEnabled(false)
@@ -660,6 +678,11 @@ export function attachController(options: {
       armAnswerAttempt(context.attemptId)
       client.setTranscriptionPrompt(answerPromptFor(context))
       client.setMicEnabled(true)
+      if (earlyAnswer) {
+        earlyAnswer = false
+        liveSpeechItemId = openSpeechItemId ?? liveSpeechItemId
+        actor.send({ type: 'PLAYER_SPEECH_STARTED' })
+      }
     }
     if (path === 'answering.hearing') {
       client.setTranscriptionPrompt(answerPromptFor(context))
@@ -680,13 +703,22 @@ export function attachController(options: {
       client.setTranscriptionPrompt(finalBetPrompt(context))
       client.setMicEnabled(true)
     }
-    if (path === 'turnCue') speak('turn', turnInstructions(context))
+    if (path === 'turnCue') {
+      client.setTranscriptionPrompt(answerPromptFor(context))
+      client.setMicEnabled(true)
+      speakWhileListening('turn', turnInstructions(context))
+    }
     if (isAnnounceSpeakingPath(path) && !isAnnouncingPath(from)) {
       // Эталон в чат — сразу и гарантированно, не дожидаясь (и не завися от) речи ведущей.
       publishAnswerLine(context)
       const say = () => {
         const exact = verbatimAnnouncement(context)
-        speak('announce', announceInstructions(context), exact ?? undefined, true)
+        if (context.announceKind === 'repeat' && !context.appeal?.activePlayerId) {
+          // Просьба повторить — сразу слушаем того же игрока.
+          client.setTranscriptionPrompt(answerPromptFor(context))
+          client.setMicEnabled(true)
+          speakWhileListening('announce', announceInstructions(context))
+        } else speak('announce', announceInstructions(context), exact ?? undefined, true)
       }
       if (context.announceKind === 'silence') scheduleAnnounce(say)
       else {
@@ -716,7 +748,7 @@ export function attachController(options: {
     attemptJudgmentMode = modeFor(actor.getSnapshot().context)
     client.gatePlayerChat(true)
     // Кнопка посреди длинной реплики: ту же utterance несём в попытку.
-    if (!actor.getSnapshot().context.appeal?.activePlayerId && openSpeechItemId && openSpeechStartedAt > 0) {
+    if ((earlyAnswer || !actor.getSnapshot().context.appeal?.activePlayerId) && openSpeechItemId && openSpeechStartedAt > 0) {
       answerCarryItemId = openSpeechItemId
       liveSpeechItemId = openSpeechItemId
       pushTrace('note', 'речь ответа подхвачена с кнопки / buzz')

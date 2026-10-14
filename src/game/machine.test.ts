@@ -259,6 +259,27 @@ describe('game machine', () => {
     expect(statePath(actor.getSnapshot().value)).toBe('buzzing.open')
   })
 
+  it('ранний слух: просьбу повторить можно перебить — сразу новая попытка того же игрока', () => {
+    const actor = reachBuzzing()
+    actor.send({ type: 'BUZZER_PRESSED', playerId: 1 })
+    actor.send({ type: 'PLAYER_SPEECH_FINISHED' })
+    actor.send({ type: 'ANSWER_JUDGED', judgment: { questionId: 'history-100', playerId: 1, attemptId: 1, status: 'near_miss', heard: 'Читов', reason: 'созвучно' } })
+    expect(statePath(actor.getSnapshot().value)).toBe('announcing.speaking')
+    actor.send({ type: 'PLAYER_SPEECH_STARTED' })
+    expect(statePath(actor.getSnapshot().value)).toBe('answering.waiting')
+    expect(actor.getSnapshot().context.activePlayerId).toBe(1)
+    expect(actor.getSnapshot().context.attemptId).toBe(2)
+  })
+
+  it('обычное объявление речью игрока не перебивается', () => {
+    const actor = reachBuzzing()
+    actor.send({ type: 'BUZZER_PRESSED', playerId: 1 })
+    actor.send({ type: 'PLAYER_SPEECH_FINISHED' })
+    actor.send({ type: 'ANSWER_JUDGED', judgment: { questionId: 'history-100', playerId: 1, attemptId: 1, status: 'incorrect', heard: 'x', reason: 'нет' } })
+    actor.send({ type: 'PLAYER_SPEECH_STARTED' })
+    expect(statePath(actor.getSnapshot().value)).toBe('announcing.speaking')
+  })
+
   it('называет ответ только когда ошиблись все', () => {
     const actor = reachBuzzing()
     const wrong = (playerId: 1 | 2 | 3, attemptId: number) => {
@@ -879,7 +900,9 @@ describe('game machine', () => {
     actor.send({ type: 'HOST_AUDIO_FINISHED', purpose: 'read' })
     expect(statePath(actor.getSnapshot().value)).toBe('turnCue')
     expect(actor.getSnapshot().context.activeStake).toBe(40)
-    actor.send({ type: 'HOST_AUDIO_FINISHED', purpose: 'turn' })
+    // Ранний слух: финалист заговорил, пока ведущая называет его ход.
+    actor.send({ type: 'PLAYER_SPEECH_STARTED' })
+    expect(statePath(actor.getSnapshot().value)).toBe('answering.waiting')
     actor.send({ type: 'PLAYER_SPEECH_FINISHED' })
     actor.send({
       type: 'ANSWER_JUDGED',

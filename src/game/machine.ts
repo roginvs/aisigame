@@ -1738,7 +1738,11 @@ export const gameMachine = setup({
       after: { 1: { target: 'announcing' } },
     },
     appealCue: {
-      on: { HOST_AUDIO_FINISHED: { guard: ({ event }) => event.type === 'HOST_AUDIO_FINISHED' && event.purpose === 'appeal', target: 'answering' } },
+      // Ранний слух: игрок начал повторять ответ, пока ведущая ещё просит.
+      on: {
+        HOST_AUDIO_FINISHED: { guard: ({ event }) => event.type === 'HOST_AUDIO_FINISHED' && event.purpose === 'appeal', target: 'answering' },
+        PLAYER_SPEECH_STARTED: 'answering',
+      },
     },
     appealNext: {
       always: [
@@ -1799,6 +1803,7 @@ export const gameMachine = setup({
       entry: 'assignFinalAnswerer',
       on: {
         HOST_AUDIO_FINISHED: { guard: 'purposeTurn', target: 'answering' },
+        PLAYER_SPEECH_STARTED: 'answering',
       },
     },
     buzzing: {
@@ -1854,6 +1859,8 @@ export const gameMachine = setup({
               { guard: and([({ context }) => earlyPickOpen('announcing.speaking', context), 'selectedAuction']), target: '#game.auction', actions: ['openQuestion', 'startAuction'] },
               { guard: and([({ context }) => earlyPickOpen('announcing.speaking', context), 'questionAvailable']), target: '#game.flashing', actions: 'openQuestion' },
             ],
+            // Просьба повторить ответ: игрок может заговорить, не дожидаясь конца фразы.
+            PLAYER_SPEECH_STARTED: { guard: ({ context }) => context.announceKind === 'repeat' && !context.appeal?.activePlayerId, target: '#game.answering', actions: 'rearmAnswer' },
             HOST_AUDIO_FINISHED: [
               { guard: 'samePlayerRepeats', target: '#game.answering', actions: 'rearmAnswer' },
               { guard: 'moreFinalists', target: '#game.turnCue', actions: 'nextFinalist' },
