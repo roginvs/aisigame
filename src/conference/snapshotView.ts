@@ -1,5 +1,27 @@
 import type { GameContext, QuestionPack } from '../game/types.ts'
 import type { ConferenceSnapshot } from './messages.ts'
+import { TIMER_RESYNC_THRESHOLD_MS } from '../options.ts'
+
+/** Якорь полоски таймера у гостя: держим, пока таймер тот же и дрейф мал (сетевой джиттер). */
+let timerAnchor: { key: string; startedAt: number } | null = null
+
+export function resetTimerAnchor(): void {
+  timerAnchor = null
+}
+
+export function anchoredPhaseStart(snapshot: ConferenceSnapshot, now = Date.now()): number | null {
+  if (snapshot.timerRemainingMs === null || snapshot.phaseDurationMs === null || snapshot.phase === 'paused') {
+    timerAnchor = null
+    return null
+  }
+  const derived = now - (snapshot.phaseDurationMs - snapshot.timerRemainingMs)
+  const key = `${snapshot.phase}|${snapshot.phaseDurationMs}|${snapshot.activeQuestionId ?? ''}|${snapshot.attemptId}`
+  if (timerAnchor && timerAnchor.key === key && Math.abs(derived - timerAnchor.startedAt) <= TIMER_RESYNC_THRESHOLD_MS) {
+    return timerAnchor.startedAt
+  }
+  timerAnchor = { key, startedAt: derived }
+  return derived
+}
 
 export function contextFromSnapshot(snapshot: ConferenceSnapshot, pack: QuestionPack): GameContext {
   const bets = Object.entries(snapshot.bets).map(([playerId, amount]) => ({
@@ -47,10 +69,7 @@ export function contextFromSnapshot(snapshot: ConferenceSnapshot, pack: Question
     announceKind: snapshot.announceKind,
     judgmentStatus: snapshot.judgmentStatus,
     clarifyReason: snapshot.clarifyReason,
-    phaseStartedAt:
-      snapshot.timerRemainingMs !== null && snapshot.phaseDurationMs !== null
-        ? Date.now() - (snapshot.phaseDurationMs - snapshot.timerRemainingMs)
-        : null,
+    phaseStartedAt: anchoredPhaseStart(snapshot),
     phaseDurationMs: snapshot.phaseDurationMs,
     earlyLeftMs: null,
     earlyStartedAt: null,
