@@ -143,10 +143,12 @@ it('places the audio switch beside the hear-less switch and disables unsupported
 
 import { readFileSync } from 'node:fs'
 describe('стиль «Слышу…»', () => {
-  it('без рамки и свечения, значок волны остаётся', () => {
+  it('плашка без рамки и свечения; значок — тонкая окружность, у «слушает» плоские полоски', () => {
     const css = readFileSync(new URL('../styles.css', import.meta.url), 'utf8')
     expect(css).toMatch(/\.host-hear \{ border-color: transparent; box-shadow: none; \}/)
-    expect(css).toMatch(/\.host-badge \{[^}]*border: none;/)
+    expect(css).toMatch(/\.host-badge \{[^}]*border: 2px solid currentColor;/)
+    expect(css).toMatch(/\.host-badge-listen i \{[^}]*height: 2px;/)
+    expect(css).not.toMatch(/\.host-badge-listen i \{[^}]*animation/)
     expect(css).not.toMatch(/\.host-hear img \{/)
     expect(css).toContain('.host-badge-hear i')
   })
@@ -155,7 +157,8 @@ describe('стиль «Слышу…»', () => {
 describe('значок в углу: слушает / слышит / думает', () => {
   const render = (path: string, mic: 'live' | 'muted', ear: 'idle' | 'hearing' | 'processing', host: 'idle' | 'speaking' = 'idle') =>
     renderToStaticMarkup(createElement(HostPresence, { path, link: { host, mic }, status: '', ear }))
-  it('мик открыт, речи нет — статичный зелёный кружок', () => {
+  it('мик открыт, речи нет — окружность с почти плоскими полосками', () => {
+    expect(render('choosing.listening', 'live', 'idle').match(/<i><\/i>/g)).toHaveLength(5)
     expect(render('choosing.listening', 'live', 'idle')).toContain('data-ear="listening"')
   })
   it('после speech_started — волна', () => {
