@@ -7,7 +7,7 @@ import { outputCut, outputFlushWaitMs, timersAfterPlaybackStarted, timersAfterRe
 import type { HostAudioTimers, OutputCutState } from './playback.ts'
 import { freeReplyMaxOutputTokens } from '../options.ts'
 import { speechDurationMs } from './utterance.ts'
-import { isolatedCue, isolatedToolResponse, speechMatches, speechOverruns, verbatimResponse } from './speechMatch.ts'
+import { isolatedCue, isolatedToolResponse, revealedAnswer, saysAnswer, speechMatches, speechOverruns, verbatimResponse } from './speechMatch.ts'
 import { AudioItems, type AudioReference, type AudioItemReady } from './audioItems.ts'
 import { audioJudgmentCapable, type JudgmentCapabilities, type JudgeRequestContext } from './judgmentRequest.ts'
 import { sessionTools, toolPurposes } from './tools.ts'
@@ -40,6 +40,8 @@ type SpeechTurn = {
   ignoreResponseId: string | null
   itemId: string | null
   chatNote?: (spoken: string) => string
+  /** Свободная реплика с эталоном: если ответа в ней нет, переспрашиваем его дословно. */
+  mustSay?: string
   /** Накопленная расшифровка дословной фразы — чтобы оборвать «довесок» (ответ после вопроса). */
   liveTranscript?: string
 }
@@ -626,6 +628,7 @@ export class RealtimeClient {
       ignoreResponseId,
       itemId: null,
       chatNote,
+      mustSay: expect ? undefined : revealedAnswer(instructions),
     }
     if (expect) pushHostLine(expect)
     this.armHardLimit()
@@ -1098,10 +1101,36 @@ export class RealtimeClient {
 
   private publishHostLine(line: string, purpose: string): void {
     const speech = this.speech
+    if (speech?.mustSay && purpose === speech.purpose && !saysAnswer(line, speech.mustSay)) {
+      this.missedReveal(line)
+      return
+    }
     const ownAnnounce = speech?.purpose === 'announce' && purpose === 'announce'
     const caption = ownAnnounce ? (speech?.chatNote?.(line).trim() ?? '') : ''
     const stored = pushHostLine(line, caption)
     if (stored && ownAnnounce && speech) speech.chatNote = undefined
+  }
+
+  /** Реплика раскрытия без самого эталона (часто — пересказ указания): в чат не идёт, эталон — дословно. */
+  private missedReveal(said: string): void {
+    const speech = this.speech
+    if (!speech?.mustSay) return
+    const answer = speech.mustSay
+    speech.mustSay = undefined
+    pushTrace('note', `в реплике раскрытия нет эталона, говорю его дословно: ${said}`)
+    speech.expect = answer
+    speech.started = false
+    speech.done = false
+    speech.ended = false
+    speech.ignoreResponseId = speech.liveResponseId
+    this.clearSpeechTimers()
+    this.cancelActiveResponse()
+    pushHostLine(answer)
+    if (!this.canSend()) {
+      this.dropLink('Связь с ведущей прервалась. Начните игру ещё раз.')
+      return
+    }
+    this.holdSpeech('')
   }
 
   private rejectSpokenLine(responseId: string, said: string): void {

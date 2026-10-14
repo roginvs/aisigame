@@ -13,6 +13,7 @@ import { gameMachine, statePath } from '../game/machine.ts'
 import { demoPack } from '../game/questions.ts'
 import { outputFlushWaitMs } from './playback.ts'
 import { RealtimeClient } from './client.ts'
+import { conversationLineFromTrace } from '../conference/traceConversation.ts'
 
 class FakeAudio {
   muted = false
@@ -95,6 +96,19 @@ describe('host audio completion', () => {
     }
     return { finished, sent, ask, done, started, stopped, feed, client }
   }
+
+  it('раскрытие без самого эталона не идёт в чат как реплика: эталон переспрашивается дословно', async () => {
+    const { feed, client: opened } = open()
+    const trace = await import('../debug/trace.ts')
+    const instructions = 'Самые первые слова… В этом ходе игра уже приняла решение и просит назвать эталон вслух. Начни с правильного ответа дословно: «тирамисуслик». Затем коротко.'
+    opened.requestSpeech('announce', 7, instructions, undefined, true)
+    feed({ type: 'response.created', response: { id: 'r1' } })
+    feed({ type: 'response.output_audio_transcript.done', response_id: 'r1', transcript: 'Скажи слово тирамису максимально чётко.' })
+    const hostLines = () => trace.getTrace().map((entry) => conversationLineFromTrace(entry)).filter((line) => line?.role === 'host').map((line) => line!.text)
+    expect(hostLines().some((line) => line.includes('максимально чётко'))).toBe(false)
+    expect(hostLines().at(-1)).toBe('тирамисуслик')
+    vi.advanceTimersByTime(outputFlushWaitMs + 10)
+  })
 
   it('after a failed retry continues once without invoking browser speech', () => {
     const { finished, ask, feed } = open()

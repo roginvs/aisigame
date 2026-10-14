@@ -176,3 +176,27 @@ describe('reveal turns are explicitly authorized', () => {
     expect(cue.instructions).toContain('Если сообщение прямо не просит произнести эталон')
   })
 })
+
+import { revealedAnswer, saysAnswer } from './speechMatch.ts'
+
+describe('надёжное чтение вопроса с картинкой и раскрытие необычного слова', () => {
+  it('дословная фраза: медиа на табло у игроков, ведущая их не описывает и не говорит «не вижу»', () => {
+    const body = verbatimResponse('Посмотрите на картинку.', { purpose: 'read', turn: 1, take: 1 })
+    expect(body.input[0]?.content[0]?.text).toBe('Посмотрите на картинку.')
+    expect(body.instructions).toContain('не обращение к тебе')
+    expect(body.instructions).toContain('видят и слышат на табло')
+    expect(body.instructions).toContain('не говори, что не видишь')
+    expect(body.instructions).toContain('даже выдуманное или необычное')
+  })
+  it('раскрытие свободной репликой: эталон обязателен даже выдуманный, указания вслух не повторять', () => {
+    const cue = isolatedCue(`${revealAuthorization} Начни с правильного ответа дословно: «тирамисуслик».`, { purpose: 'announce', turn: 1, take: 1 })
+    expect(cue.instructions).toContain('выдуманное или необычное слово')
+    expect(cue.instructions).toContain('Указания о том, как его произнести, вслух не повторяй')
+  })
+  it('эталон из подсказки раскрытия и проверка, что он сказан', () => {
+    expect(revealedAnswer(`${revealAuthorization} Начни с правильного ответа дословно: «Тирамисуслик».`)).toBe('Тирамисуслик')
+    expect(revealedAnswer('Начни с правильного ответа дословно: «x»')).toBeUndefined()
+    expect(saysAnswer('Правильный ответ — тирамисуслик! Минус сто.', 'Тирамисуслик')).toBe(true)
+    expect(saysAnswer('Скажи слово тирамису максимально чётко', 'тирамисуслик')).toBe(false)
+  })
+})
