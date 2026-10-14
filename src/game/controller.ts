@@ -21,10 +21,10 @@ import { withCommentary } from './commentary.ts'
 import { parseBet } from './bet.ts'
 import { amountWords } from './appealSpeech.ts'
 import { questionSpeech, spokenChoiceForms } from './choices.ts'
-import { matchSpokenCell, mentionsValue, selectionChatText } from './choiceMatch.ts'
+import { matchSpokenCell, selectionChatText } from './choiceMatch.ts'
 import { answerListeningPrompt, echoesAnswerPrompt, phantomListedAnswer } from './answerPrompt.ts'
 import { choicePrompt, echoesChoicePrompt, optionsPrompt, playersPrompt } from './choicePrompt.ts'
-import { blurtGate, choiceGate, isChoiceUtterance, isFiller, repeatsQuestion } from './heard.ts'
+import { blurtGate, choiceGate, isChoiceUtterance, repeatsQuestion } from './heard.ts'
 import { exactAnswer, judgmentChatText, settleJudgment } from './judgment.ts'
 import { currentRound, findQuestion, nextPlayableRound, questionById, roundThemes } from './pack.ts'
 import { answerIsPublic } from './reveal.ts'
@@ -107,8 +107,6 @@ export function attachController(options: {
   /** Инвалидирует talkover после нового чтения. */
   let readEpoch = 0
   let choiceHeard = ''
-  /** Предложение ведущей, с которым ушёл текущий запрос выбора. */
-  let selectionOffer: ChoosingOffer | null = null
   /** Тема, понятая из прошлой реплики без номинала (до открытия ячейки). */
   let choiceTheme: string | null = null
   /** Попытка, для которой сейчас принимаем речь ответа. */
@@ -859,7 +857,6 @@ export function attachController(options: {
     const cells = openChoiceCells(context)
     const offer = choosingOffer
     choosingOffer = null
-    selectionOffer = offer
     client.requestTool('select', toolTurn, 'selectQuestion', selectionInstructions(context, choiceHeard, offer, choiceTheme), true,
       selectQuestionToolFor(cells.map((cell) => cell.themeId), cells.map((cell) => cell.value)))
   }
@@ -896,10 +893,6 @@ export function attachController(options: {
     }
     if (echoesHost(heard.text)) {
       pushTrace('note', 'речь совпала с репликой ведущей, это эхо, не выбор')
-      return
-    }
-    if (isFiller(heard.text, Boolean(choosingOffer))) {
-      pushTrace('note', `междометие, ячейку не открываю: ${heard.text}`)
       return
     }
     if (!heard.arrived) pushPlayerLine('речь не распознана')
@@ -1382,13 +1375,7 @@ export function attachController(options: {
       kind,
       played,
     )
-    const offerTaken = Boolean(selectionOffer && modelQuestion && selectionOffer.themeId === modelQuestion.themeId && selectionOffer.value === modelQuestion.value)
-    // Страховка от шума: без названного числа модель может открыть ячейку только по принятому предложению,
-    // в финале (там нет номиналов), после «тема понятна, назовите стоимость» или когда в теме одна свободная ячейка.
-    const backed = kind === 'final' || offerTaken || mentionsValue(transcript) ||
-      openChoiceCells(snapshotNow.context).filter((cell) => cell.themeId === themeId).length === 1
-    if (modelQuestion && confident && !backed) pushTrace('note', `модель выбрала ${themeId} ${value} без числа в реплике — не открываю: ${transcript}`)
-    const modelOk = Boolean(modelQuestion && confident && backed && !played.includes(modelQuestion.id))
+    const modelOk = Boolean(modelQuestion && confident && !played.includes(modelQuestion.id))
     const picked = local
       ? findQuestion(
           snapshotNow.context.questions,
@@ -1876,7 +1863,7 @@ confident=true только если названа одна тема из сп�
   }
   return `
 Оцени только последнюю реплику. Распознанный текст: «${heard || 'пусто'}».
-Часто это не выбор: шум, кашель, междометие, эхо ведущей, обрывок или разговор игроков между собой. Тогда confident=false и value=0. Не угадывай ячейку.
+Часто это не выбор: шум, кашель, междометие («мм», «э-э», «ну», «ага» без предложения ячейки), эхо ведущей, обрывок или разговор игроков между собой. Тогда confident=false и value=0. Не угадывай ячейку.
 Свободные ячейки по темам (id — тема: номиналы):
 ${availableLines(context)}
 Вызови selectQuestion. themeId — id темы, первое поле строки; value — номинал из её списка.

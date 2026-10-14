@@ -715,7 +715,7 @@ describe('выбор ячейки голосом: тема в любой фор�
     expect(text).toContain('Номинал — только после того, как тема ясно названа')
     expect(text).toContain('бери ближайший')
     expect(text).toContain('Без ясно названной темы — confident=false')
-    expect(text).toContain('Часто это не выбор: шум, кашель, междометие, эхо ведущей')
+    expect(text).toContain('Часто это не выбор: шум, кашель, междометие')
     expect(text).toContain('Не угадывай ячейку')
     stop(); actor.stop()
   })
@@ -828,55 +828,56 @@ describe('оценка ждёт расшифровку по общей форм�
   })
 })
 
-describe('выбор голосом: шум и посторонняя речь не открывают ячейку (регрессия b3d454d)', () => {
+describe('выбор голосом: шум и посторонняя речь решает модель по правилам промпта (регрессия b3d454d)', () => {
   afterEach(() => { vi.useRealTimers(); vi.unstubAllGlobals() })
   const twoCells: QuestionPack = { ...pack, questions: [
     cell('a-300', 'a', 'Приложения', 300), cell('a-900', 'a', 'Приложения', 900), cell('m-300', 'm', 'Мультфильмы', 300),
   ] }
-  /** «Модель», которая всегда уверенно выбирает: проверяем, что игра сама не верит ей без оснований. */
-  class EagerModel extends MockRealtimeClient {
-    selects = 0
+  /** Модель отвечает заданным вердиктом; запоминаем её промпт. */
+  class ScriptedModel extends MockRealtimeClient {
+    prompts: string[] = []
+    private readonly verdict: Record<string, unknown>
+    constructor(verdict: Record<string, unknown>) { super(); this.verdict = verdict }
     override requestTool(purpose: string, turn: number, name: string, instructions: string, isolated = false, tool?: { name: string }): void {
       if (name !== 'selectQuestion') { super.requestTool(purpose, turn, name, instructions, isolated, tool); return }
-      this.selects += 1
-      window.setTimeout(() => this.onToolCall({ name, callId: `e${this.selects}`, arguments: { themeId: 'a', value: 900, confident: true, heard: 'x' } }, purpose, turn), 10)
+      this.prompts.push(instructions)
+      window.setTimeout(() => this.onToolCall({ name, callId: `s${this.prompts.length}`, arguments: { heard: 'x', ...this.verdict } }, purpose, turn), 10)
     }
   }
-  async function hearIn(text: string) {
-    const client = new EagerModel()
+  async function hearIn(text: string, verdict: Record<string, unknown>) {
+    const client = new ScriptedModel(verdict)
     const { actor, stop } = await boot(client, twoCells)
     await toChoosing(actor)
     client.hear(text, 1500)
     await vi.advanceTimersByTimeAsync(400)
     const opened = actor.getSnapshot().context.activeQuestionId
     stop(); actor.stop()
-    return { opened, selects: client.selects }
+    return { opened, prompts: client.prompts }
   }
+  const noChoice = { themeId: 'a', value: 0, confident: false }
 
-  it('«мм» — междометие: ни запроса к модели, ни ячейки', async () => {
-    expect(await hearIn('мм')).toEqual({ opened: null, selects: 0 })
+  it('промпт: шум, междометия, эхо и разговор — не выбор; тема только по слову из названия', async () => {
+    const { prompts } = await hearIn('слушай, а что у нас сегодня на ужин будет', noChoice)
+    const prompt = prompts[0] ?? ''
+    expect(prompt).toContain('Часто это не выбор: шум, кашель, междометие')
+    expect(prompt).toContain('«мм»')
+    expect(prompt).toContain('эхо ведущей')
+    expect(prompt).toContain('разговор игроков между собой')
+    expect(prompt).toContain('Тема названа, только если в реплике есть слово из названия темы')
+    expect(prompt).toContain('Без ясно названной темы — confident=false')
   })
-  it('«ага» без предложения ведущей — не выбор', async () => {
-    expect((await hearIn('ага')).opened).toBeNull()
+  it('посторонний разговор: модель не выбрала — ячейка не открыта', async () => {
+    expect((await hearIn('слушай, а что у нас сегодня на ужин будет', noChoice)).opened).toBeNull()
   })
-  it('посторонний разговор без числа: даже уверенная модель не открывает ячейку', async () => {
-    expect((await hearIn('слушай, а что у нас сегодня на ужин будет')).opened).toBeNull()
+  it('«что-то сто» с темой: решает модель, без проверки числа в коде', async () => {
+    expect((await hearIn('Приложения что-то сто', { themeId: 'a', value: 300, confident: true })).opened).toBe('a-300')
   })
-  it('эхо реплики ведущей — не выбор', async () => {
-    expect((await hearIn('Здравствуйте. Выбирайте вопрос.')).opened).toBeNull()
+  it('эхо реплики ведущей отсекается до модели', async () => {
+    const result = await hearIn('Здравствуйте. Выбирайте вопрос.', { themeId: 'a', value: 900, confident: true })
+    expect(result.opened).toBeNull()
+    expect(result.prompts).toHaveLength(0)
   })
   it('«Приложение 900» по-прежнему открывает ячейку', async () => {
-    expect((await hearIn('Приложение 900')).opened).toBe('a-900')
-  })
-})
-
-import { isFiller } from './heard.ts'
-describe('isFiller', () => {
-  it('междометия — да, слова — нет; «ага» при предложении решает модель', () => {
-    expect(isFiller('мм')).toBe(true)
-    expect(isFiller('э-э, ну')).toBe(true)
-    expect(isFiller('ага')).toBe(true)
-    expect(isFiller('ага', true)).toBe(false)
-    expect(isFiller('Приложения')).toBe(false)
+    expect((await hearIn('Приложение 900', { themeId: 'a', value: 900, confident: true })).opened).toBe('a-900')
   })
 })
