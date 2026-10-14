@@ -1,3 +1,4 @@
+import { AppealConfirm } from './AppealConfirm.tsx'
 import { packProgressLabel } from '../conference/packProgress.ts'
 import { tapPressProps } from './tapPress.ts'
 import type { ConferenceTile } from '../conference/media.ts'
@@ -41,6 +42,10 @@ export function ConferencePlayersRow(props: {
   canFalseStart: boolean
   earlyLive: boolean
   appealStates?: Record<number, { label: string; enabled: boolean } | null>
+  /** Чья широкая кнопка апелляции сейчас заменена на «Да / Нет». */
+  confirmingId?: number | null
+  onConfirmYes?: () => void
+  onConfirmNo?: () => void
   onBuzz: (playerId: PlayerId) => void
   layout: boolean
 }) {
@@ -163,6 +168,9 @@ export function ConferencePlayersRow(props: {
                 <strong>{label}</strong>
                 <span>{hasMatchData ? player.score : '—'}</span>
               </div>
+              {props.confirmingId === playerId && props.onConfirmYes && props.onConfirmNo ? (
+                <AppealConfirm onYes={props.onConfirmYes} onNo={props.onConfirmNo} />
+              ) : (
               <button
                 type="button"
                 key={cooling ? 'penalty' : 'ready'}
@@ -189,6 +197,7 @@ export function ConferencePlayersRow(props: {
                       : '\u00a0'}
                 {earlyLive ? <span className="visually-hidden">, вопрос ещё читается</span> : null}
               </button>
+              )}
               {key || isSelf ? (
                 <p className="key-hint">{key ? (earlyLive ? `${key} · уже можно` : key) : 'Пробел'}</p>
               ) : null}

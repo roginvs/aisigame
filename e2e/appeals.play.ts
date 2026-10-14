@@ -48,6 +48,7 @@ test('стол: повтор минуса, замена на плюс и про�
 })
 
 test('стол: после объявления ответа — подтверждение без переответа, отмена ничего не меняет', async ({ page }) => {
+  if (process.env.APPEAL_MOBILE) await page.setViewportSize({ width: 390, height: 844 })
   await startTable(page)
   await answer(page, 'Игрок 1', 'Наполеон')
   // Минус — кнопка апелляции доступна сразу.
@@ -58,8 +59,19 @@ test('стол: после объявления ответа — подтвер�
   await board(page)
   await expect(page.getByText(/Правильный ответ:/).first()).toBeVisible()
   // Отмена: ничего не отправляется, счёт прежний.
-  await page.getByRole('group', { name: 'Игрок 2: -100' }).getByRole('button', { name: 'Апелляция' }).click()
-  await page.getByRole('button', { name: 'Нет, не надо апелляцию' }).click()
+  const tile2 = page.getByRole('group', { name: 'Игрок 2: -100' })
+  const wide = await tile2.getByRole('button', { name: 'Апелляция' }).boundingBox()
+  await tile2.getByRole('button', { name: 'Апелляция' }).click()
+  // Да/Нет — на месте широкой кнопки, в той же плитке, той же общей ширины.
+  const yes = await tile2.getByRole('button', { name: 'Да, я ответил правильно' }).boundingBox()
+  const no = await tile2.getByRole('button', { name: 'Нет, не надо апелляцию' }).boundingBox()
+  await expect(tile2.getByRole('button', { name: 'Апелляция' })).toHaveCount(0)
+  expect(Math.abs(yes!.x - wide!.x)).toBeLessThan(2)
+  expect(Math.abs(no!.x + no!.width - (wide!.x + wide!.width))).toBeLessThan(2)
+  expect(Math.abs(yes!.y - no!.y)).toBeLessThan(2)
+  if (process.env.APPEAL_SHOT) await page.screenshot({ path: process.env.APPEAL_SHOT })
+  await tile2.getByRole('button', { name: 'Нет, не надо апелляцию' }).click()
+  await expect(tile2.getByRole('button', { name: 'Апелляция' })).toBeVisible()
   await expect(page.getByRole('button', { name: 'Да, я ответил правильно' })).toHaveCount(0)
   await expect(page.getByRole('group', { name: 'Игрок 2: -100' })).toBeVisible()
   // Подтверждение: поправка счёта без повторного ответа.

@@ -6,6 +6,7 @@ import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from '
 import { flushSync } from 'react-dom'
 import type { SnapshotFrom } from 'xstate'
 import { appealButton } from '../game/appeals.ts'
+import { AppealConfirm } from './AppealConfirm.tsx'
 import { buttonsLive, earlyPickOpen, falseStartCooling, falseStartOpen, gameMachine, statePath } from '../game/machine.ts'
 import { falseStartMs } from '../options.ts'
 import { currentRound, nextInCell, questionById, roundPrices, roundThemes } from '../game/pack.ts'
@@ -228,6 +229,9 @@ export function GameScreen(props: {
   // Подтверждение живёт только в своём окне апелляции.
   const confirmAppeal = confirmRequest && confirmRequest.windowId === context.appeal?.windowId ? confirmRequest.playerId : null
   const confirmState = confirmAppeal === null ? null : appealButton(context, path, confirmAppeal)
+  const confirmingId = confirmAppeal !== null && confirmState?.enabled ? confirmAppeal : null
+  const confirmYes = () => { if (confirmingId === null) return; setConfirmAppeal(null); sendAppeal(confirmingId) }
+  const confirmNo = () => setConfirmAppeal(null)
 
   async function copyDebug() {
     const result = await copyDebugDump({ path, context })
@@ -653,12 +657,6 @@ export function GameScreen(props: {
         <p className="status-line" role="status">Апелляции: {[context.appeal.activePlayerId, ...context.appeal.queue].map((id) => context.players.find((p) => p.id === id)?.name).join(' → ')}</p>
       ) : null}
       {appealError ? <p role="status" className="status-line">{appealError}</p> : null}
-      {confirmAppeal !== null && confirmState?.enabled ? (
-        <div className="appeal-confirm" role="group" aria-label="Апелляция">
-          <button type="button" onClick={() => { const id = confirmAppeal; setConfirmAppeal(null); sendAppeal(id) }}>Да, я ответил правильно</button>
-          <button type="button" onClick={() => setConfirmAppeal(null)}>Нет, не надо апелляцию</button>
-        </div>
-      ) : null}
       {conference?.layout ? (
         <ConferencePlayersRow
           mode={conference.lobby || conference.awaitingPack ? 'lobby' : 'match'}
@@ -679,6 +677,9 @@ export function GameScreen(props: {
           canFalseStart={canFalseStart}
           earlyLive={earlyLive}
           appealStates={appealStates}
+          confirmingId={confirmingId}
+          onConfirmYes={confirmYes}
+          onConfirmNo={confirmNo}
           onBuzz={onPlayerAction}
           layout
         />
@@ -704,6 +705,7 @@ export function GameScreen(props: {
                   <strong>{player.name}</strong>
                   <span>{player.score}</span>
                 </div>
+                {confirmingId === playerId ? <AppealConfirm onYes={confirmYes} onNo={confirmNo} /> : (
                 <button
                   type="button"
                   key={cooling ? 'penalty' : 'ready'}
@@ -724,6 +726,7 @@ export function GameScreen(props: {
                   {appealState?.label ?? (chooses ? 'выбирайте вопрос' : missed ? 'Уже отвечал' : player.name)}
                   {earlyLive ? <span className="visually-hidden">, вопрос ещё читается</span> : null}
                 </button>
+                )}
                 <p className="key-hint">{key ? (earlyLive ? `${key} · уже можно` : key) : ''}</p>
               </div>
             )

@@ -2033,10 +2033,14 @@ button.buzzer.chooser:disabled {
 
 .appeal-confirm {
   display: flex;
-  gap: 8px;
-  justify-content: center;
-  flex-wrap: wrap;
-  margin: 8px 0;
+  gap: 6px;
+  width: 100%;
+}
+
+.appeal-confirm > .buzzer {
+  flex: 1 1 0;
+  min-width: 0;
+  width: auto;
 }
 
 /* RTT до мастера: крошечный белый текст с тёмной обводкой в углу кадра. */
