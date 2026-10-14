@@ -268,3 +268,19 @@ describe('аудиооценка усомнилась, но услышала э�
     expect(lines('Оценка').join('\n')).toContain('ambiguous')
   })
 })
+
+describe('подтверждение эталона ждёт расшифровку по transcriptWaitMs', () => {
+  it('расшифровка через 2 с (больше прежних 1,5 с) ещё подтверждает эталон', async () => {
+    const client = new DeferredJudge()
+    const { score, notes } = await boot(client, 'audio')
+    client.hearAudio('пылесосел', '', 3000, 0.95, 'late-item')
+    ;(client as unknown as { transcripts: Map<string, unknown> }).transcripts.delete('late-item')
+    await vi.advanceTimersByTimeAsync(200)
+    client.finish({ status: 'ambiguous', heard: 'пылесосел', reason: 'не уверена' })
+    await vi.advanceTimersByTimeAsync(2000)
+    client.deliverTranscript('late-item', 'пылесосел', 0.95)
+    await vi.advanceTimersByTimeAsync(200)
+    expect(notes().some((e) => e.title.startsWith('аудио и расшифровка обе дали эталон'))).toBe(true)
+    expect(score()).toBe(100)
+  })
+})

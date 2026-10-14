@@ -2,7 +2,7 @@ import { auctionBidToolFor, finalBetToolFor, selectQuestionToolFor } from '../re
 import type { Actor, SnapshotFrom } from 'xstate'
 import { clearHostEar, getHostEar, subscribeHostEar, hostEarHearing, hostEarHostSpoke, hostEarMicClosed, hostEarProcessing, hostEarShown, hostEarSurvives, settleHostEar } from './hostEar.ts'
 import { playTimeoutBeep } from '../audio/beep.ts'
-import { audioEtalonTranscriptMs, auctionDingMs, audioJudgmentTimings, catMeowMs, lateTranscriptMs, transcriptWaitMs } from '../options.ts'
+import { auctionDingMs, audioJudgmentTimings, catMeowMs, lateTranscriptMs, transcriptWaitMs } from '../options.ts'
 import { matchAuctionSpeech, optionLabel } from './auction.ts'
 import { matchCatStake, nextInCircle } from './cat.ts'
 import { idleThresholds } from './idle.ts'
@@ -1180,7 +1180,7 @@ export function attachController(options: {
     if (args.status !== 'ambiguous' && args.status !== 'unintelligible') return call
     const answers = questionById(run.context.questions, run.context.activeQuestionId)?.answers ?? []
     if (!run.itemId || typeof args.heard !== 'string' || !exactAnswer(args.heard, answers)) return call
-    const wait = Math.min(audioEtalonTranscriptMs, run.clock.remaining())
+    const wait = Math.min(transcriptWaitMs(answerDurationMs), run.clock.remaining())
     const asr = await run.clock.within(() => client.waitForTranscript(run.itemId, wait), wait).catch(() => null)
     if (!asr?.arrived || !exactAnswer(asr.text, answers)) return call
     if (phantomListedAnswer(asr.text, answerPromptFor(run.context), answerDurationMs, asr.confidence)) return call

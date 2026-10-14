@@ -138,5 +138,3 @@ export function transcriptWaitMs(durationMs: number): number {
   return Math.min(transcriptWait.maxMs, Math.round(transcriptWait.baseMs + transcriptWait.perSpeechMs * spoken))
 }
 
-/** Сколько ждём расшифровку, чтобы подтвердить эталон, услышанный аудиооценкой. */
-export const audioEtalonTranscriptMs = 1_500
