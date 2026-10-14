@@ -304,9 +304,13 @@ export class GeminiWire implements VoiceWire {
     if (typeof input === 'string' && input.trim()) {
       this.heard = absorbTranscript(this.heard, input)
       if (!this.hearing && this.heardId) this.emitCompleted()
+      else this.emitPartial()
     }
     const interim = asRecord(content.interimInputTranscription).text
-    if (typeof interim === 'string' && interim.trim()) this.heard = absorbTranscript(this.heard, interim)
+    if (typeof interim === 'string' && interim.trim()) {
+      this.heard = absorbTranscript(this.heard, interim)
+      this.emitPartial()
+    }
     const output = asRecord(content.outputTranscription).text
     if (typeof output === 'string' && output.trim()) {
       this.said = absorbTranscript(this.said, output)
@@ -351,6 +355,11 @@ export class GeminiWire implements VoiceWire {
     })
     this.usage = null
     this.player.finish()
+  }
+
+  private emitPartial(): void {
+    if (!this.heardId || !this.heard) return
+    this.emit({ type: 'conversation.item.input_audio_transcription.delta', item_id: this.heardId, transcript: this.heard })
   }
 
   private emitCompleted(): void {

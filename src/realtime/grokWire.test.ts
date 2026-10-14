@@ -38,7 +38,8 @@ describe('grok wire', () => {
       turn,
     )
     turn = updated.turn
-    expect(updated.events).toEqual([])
+    // Промежуточный текст — черновик для чата (delta с полным transcript).
+    expect(updated.events).toEqual([{ type: 'conversation.item.input_audio_transcription.delta', item_id: 'u1', transcript: 'Август' }])
     const stopped = grokInbound({ type: 'input_audio_buffer.speech_stopped', item_id: 'u1' }, turn)
     expect(stopped.events[1]).toMatchObject({
       type: 'conversation.item.input_audio_transcription.completed',

@@ -53,7 +53,11 @@ export function grokInbound(event: object, turn: GrokTurn): { turn: GrokTurn; ev
   if (type === 'conversation.item.input_audio_transcription.updated') {
     next.pendingTranscript = text(record.transcript)
     next.pendingItemId = text(record.item_id) || next.pendingItemId
-    return { turn: next, events: [], audio: null }
+    // Grok шлёт полный промежуточный текст — отдаём как delta с полным transcript.
+    const events = next.pendingTranscript && !next.transcriptDone
+      ? [{ type: 'conversation.item.input_audio_transcription.delta', item_id: next.pendingItemId, transcript: next.pendingTranscript }]
+      : []
+    return { turn: next, events, audio: null }
   }
   if (type === 'input_audio_buffer.speech_started') {
     next.pendingTranscript = ''

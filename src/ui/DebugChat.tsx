@@ -1,5 +1,5 @@
 import { useEffect, useLayoutEffect, useRef, useState, useSyncExternalStore, type ReactNode } from 'react'
-import { getTrace, subscribeTrace, type ChatRole, type TraceEntry } from '../debug/trace.ts'
+import { getLivePlayerLine, getTrace, subscribeLivePlayerLine, subscribeTrace, type ChatRole, type TraceEntry } from '../debug/trace.ts'
 import type { ConferenceMessageRing } from '../conference/messages.ts'
 import { chatPinKey, isAtTail, pinColumn } from './chatScroll.ts'
 import { formatChatTime } from './chatTime.ts'
@@ -11,8 +11,12 @@ export function ConversationChat(props?: {
   composerLabel?: string
   /** Над медиа-рядом и compose — например «Начать игру». */
   aboveComposer?: ReactNode
+  /** Joiner: черновик речи из снимка мастера. undefined — берём локальный. */
+  liveSpeech?: { text: string; at: string } | null
 }) {
   const entries = useSyncExternalStore(subscribeTrace, getTrace, getTrace)
+  const localLive = useSyncExternalStore(subscribeLivePlayerLine, getLivePlayerLine, getLivePlayerLine)
+  const live = props?.liveSpeech !== undefined ? props.liveSpeech : localLive
   const voiceLines: VoiceStreamLine[] = entries
     .filter((entry) => entry.kind === 'chat')
     .map((entry) => ({
@@ -23,7 +27,7 @@ export function ConversationChat(props?: {
     }))
   const stream = props?.messageRing ? conversationStreamFromRing(props.messageRing) : mergeConversationStream(voiceLines, [])
   const [draft, setDraft] = useState('')
-  const [scrollerRef, logRef] = usePinColumn(chatPinKey(stream))
+  const [scrollerRef, logRef] = usePinColumn(`${chatPinKey(stream)}|${live?.text ?? ''}`)
   return (
     <aside className="chat-column" aria-label="Разговор">
       <div className="chat-head">
@@ -58,6 +62,12 @@ export function ConversationChat(props?: {
               />
             ),
           )}
+          {live ? (
+            <p className="bubble from-player bubble-live" aria-live="polite" data-testid="live-speech">
+              <BubbleHead label="Игрок · говорит…" at={live.at} />
+              {live.text}
+            </p>
+          ) : null}
         </div>
       </div>
       {props?.aboveComposer || props?.onSendChat ? (

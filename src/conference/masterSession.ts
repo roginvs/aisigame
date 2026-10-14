@@ -26,12 +26,16 @@ import { paceAfterAck, type TransferPace } from './packProgress.ts'
 import { ConferenceRoster } from './roster.ts'
 import type { ConferenceTransport } from './transport.ts'
 import { PING_INTERVAL_MS, PRESENCE_HEARTBEAT_MS, PRESENCE_STALE_MS } from './presence.ts'
-import { appendRemoteDebug, clearRemoteDebug, getTrace, subscribeTrace } from '../debug/trace.ts'
+import { appendRemoteDebug, clearRemoteDebug, getLivePlayerLine, getTrace, subscribeLivePlayerLine, subscribeTrace } from '../debug/trace.ts'
 import { messageRingEntries } from './messageRing.ts'
 import { commentaryContext } from '../game/commentary.ts'
 import { emptyMessageRing } from './messageRing.ts'
 import { ConferenceStatePublisher } from './stateProtocol.ts'
 import { conversationLineFromTrace } from './traceConversation.ts'
+import { throttleLatest } from '../realtime/liveSpeech.ts'
+
+/** Черновик речи joiner-ам не чаще ~4 раз в секунду. */
+const LIVE_SPEECH_THROTTLE_MS = 250
 
 type GameActor = Actor<typeof gameMachine>
 
@@ -105,6 +109,10 @@ export class MasterSession {
   private statePublisher: ConferenceStatePublisher | null = null
   private traceCursor = 0
   private traceUnsub: () => void
+  private liveUnsub: () => void = () => {}
+  private liveThrottle = throttleLatest<null>(LIVE_SPEECH_THROTTLE_MS, () => {
+    if (this.statePublisher) this.broadcastCurrentSnapshot()
+  })
 
   constructor(options: MasterSessionOptions) {
     clearRemoteDebug()
@@ -201,6 +209,7 @@ export class MasterSession {
       this.maybeOpenLobbySpeech()
     }
     this.traceCursor = getTrace().at(-1)?.id ?? 0
+    this.liveUnsub = subscribeLivePlayerLine(() => this.liveThrottle.push(null, getLivePlayerLine() === null))
     this.traceUnsub = subscribeTrace(() => {
       const entries = getTrace().filter((entry) => entry.id > this.traceCursor)
       this.traceCursor = entries.at(-1)?.id ?? this.traceCursor
@@ -286,6 +295,8 @@ export class MasterSession {
     this.clearLobbySpeechTimer()
     this.machineSub?.unsubscribe()
     this.traceUnsub()
+    this.liveUnsub()
+    this.liveThrottle.stop()
     this.unsub()
     this.packPipe?.dispose()
     this.disposedFallback = true
@@ -557,6 +568,7 @@ export class MasterSession {
       context,
       roster: this.roster.allIncludingHidden(now),
       messageRing: this.statePublisher?.history() ?? this.initialHistory,
+      liveSpeech: liveSpeechOf(getLivePlayerLine()),
       timerRemainingMs: this.gameStarted ? timerRemainingMs(context, now) : null,
       falseStartIds: this.gameStarted
         ? Object.entries(this.actor.getSnapshot().context.falseStarts)
@@ -814,3 +826,7 @@ function lobbyContext(pack: QuestionPack, masterName: string): GameContext {
 }
 
 export type { SnapshotFrom }
+
+function liveSpeechOf(line: { text: string; at: string } | null): { text: string; at: string } | null {
+  return line ? { text: line.text.slice(0, 2000), at: line.at } : null
+}

@@ -89,6 +89,38 @@ export function pushPlayerLine(text: string): void {
   pushTrace('chat', 'Игрок', { role: 'player' satisfies ChatRole, text: clean })
 }
 
+export type LivePlayerLine = { itemId: string; text: string; at: string }
+let livePlayerLine: LivePlayerLine | null = null
+const liveListeners = new Set<() => void>()
+
+/**
+ * Черновик реплики игрока, пока он говорит (input_audio_transcription.delta).
+ * Не попадает в trace/историю и не влияет на игру: итог даёт только `.completed`.
+ */
+export function setLivePlayerLine(itemId: string, text: string): void {
+  const clean = text.trim()
+  if (!clean) return clearLivePlayerLine(itemId)
+  if (livePlayerLine?.itemId === itemId && livePlayerLine.text === clean) return
+  livePlayerLine = { itemId, text: clean, at: livePlayerLine?.itemId === itemId ? livePlayerLine.at : new Date().toISOString() }
+  for (const listener of liveListeners) listener()
+}
+
+/** Без itemId — убрать любой черновик. */
+export function clearLivePlayerLine(itemId?: string | null): void {
+  if (!livePlayerLine || (itemId && livePlayerLine.itemId !== itemId)) return
+  livePlayerLine = null
+  for (const listener of liveListeners) listener()
+}
+
+export function getLivePlayerLine(): LivePlayerLine | null {
+  return livePlayerLine
+}
+
+export function subscribeLivePlayerLine(listener: () => void): () => void {
+  liveListeners.add(listener)
+  return () => liveListeners.delete(listener)
+}
+
 export function pushJudgeLine(text: string): void {
   const clean = text.trim()
   if (!clean) return

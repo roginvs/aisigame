@@ -1671,6 +1671,7 @@ button.buzzer.chooser:disabled {
 
 .bubble.from-host { background: #243140; }
 .bubble.from-player { background: #1d3a32; }
+.bubble.bubble-live { opacity: 0.7; font-style: italic; border: 1px dashed rgba(255, 255, 255, 0.25); }
 .bubble.from-judge { background: #3a3224; }
 
 @media (max-height: 860px) {

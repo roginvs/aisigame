@@ -97,6 +97,8 @@ export type ConferenceSnapshot = AppealFields & {
   timerRemainingMs: number | null
   /** Кот в мешке / аукцион; старые мастера не шлют. */
   special?: SpecialState | null
+  /** Черновик речи игрока (delta), только для показа; старые мастера не шлют. */
+  liveSpeech?: { text: string; at: string } | null
 } & ConferenceMessageRing
 
 /** Единая история состояния, сохранения и экрана — сообщения в отдельных слотах. */
@@ -481,6 +483,8 @@ const stateValidators = {
   phaseDurationMs: nullableFinite,
   timerRemainingMs: nullableFinite,
   special: (value: unknown) => value === undefined || value === null || readSpecialState(value) !== null,
+  liveSpeech: (value: unknown) => value === undefined || value === null ||
+    (isRecord(value) && typeof value.text === 'string' && value.text.length <= 2000 && typeof value.at === 'string' && value.at.length <= 64),
 } satisfies Record<keyof StateFields, (value: unknown) => boolean>
 
 function validPackManifest(value: unknown): boolean {

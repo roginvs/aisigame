@@ -268,6 +268,7 @@ export default function App() {
       window.__aisigame = {
         hearAudio: (audioText, asrText, durationMs) => client.hearAudio(audioText, asrText, durationMs),
         hear: (text, durationMs) => client.hear(text, durationMs),
+        hearLive: (text, stepMs) => { client.hearLive(text, stepMs) },
         setSpeechMs: (ms) => client.setSpeechMs(ms),
         flipPackByte: () => joinerFlipPackRef.current?.(),
       }

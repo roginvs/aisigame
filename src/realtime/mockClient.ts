@@ -1,6 +1,7 @@
 import { AudioItems, type AudioReference, type AudioItemReady } from './audioItems.ts'
 import type { JudgeRequestContext, JudgmentCapabilities } from './judgmentRequest.ts'
-import { pushHostLine, pushPlayerLine } from '../debug/trace.ts'
+import { livePlayerChatVisible } from './liveSpeech.ts'
+import { clearLivePlayerLine, pushHostLine, pushPlayerLine, setLivePlayerLine } from '../debug/trace.ts'
 import { echoesAnswerPrompt } from '../game/answerPrompt.ts'
 import { echoesChoicePrompt } from '../game/choicePrompt.ts'
 import { echoesTranscriptionPrompt } from '../game/promptEcho.ts'
@@ -19,6 +20,8 @@ const longSpeechMs = 10_000
 export type MockControls = {
   hearAudio?: (audioText: string, asrText: string, durationMs?: number) => void
   hear: (text: string, durationMs?: number) => void
+  /** Демо: текст растёт в чате по словам (как delta), затем обычный hear. */
+  hearLive?: (text: string, stepMs?: number) => void
   setSpeechMs: (ms: number) => void
   /** Только конференция на заглушке: портит байт пакета у joiner. */
   flipPackByte?: () => void
@@ -147,6 +150,7 @@ export class MockRealtimeClient implements GameVoice {
 
   suppressPlayerChat(itemId: string | null): void {
     if (!itemId) return
+    clearLivePlayerLine(itemId)
     this.playerChatSuppressed.add(itemId)
     this.playerChatPending.delete(itemId)
     this.playerChatAllowed.delete(itemId)
@@ -241,6 +245,7 @@ export class MockRealtimeClient implements GameVoice {
   sendToolOutput(_callId: string, _output: unknown): void {}
 
   stopSession(): void {
+    clearLivePlayerLine()
     this.speechToken += 1
     this.audioItems.reset()
     this.audioTexts.clear()
@@ -260,8 +265,33 @@ export class MockRealtimeClient implements GameVoice {
     this.hearAudio(text, text, durationMs, confidence)
   }
 
-  hearAudio(audioText: string, text: string, durationMs = 1000, confidence: number | null = null): void {
+  /** Как delta у OpenAI: черновик растёт по словам; игра видит только итоговый hear. */
+  hearLive(text: string, stepMs = 180, durationMs = 1000): string {
     const itemId = `mock-item-${++this.itemSeq}`
+    const words = text.trim().split(/\s+/).filter(Boolean)
+    words.forEach((_, index) => {
+      window.setTimeout(() => this.offerLivePlayerChat(itemId, words.slice(0, index + 1).join(' ')), stepMs * index)
+    })
+    window.setTimeout(() => this.hearAudio(text, text, durationMs, null, itemId), stepMs * Math.max(1, words.length))
+    return itemId
+  }
+
+  private offerLivePlayerChat(itemId: string, text: string): void {
+    if (this.transcripts.has(itemId)) return
+    if (!livePlayerChatVisible({
+      suppressed: this.playerChatSuppressed.has(itemId) || this.playerChatPublished.has(itemId),
+      gated: this.playerChatGated && !this.playerChatAllowed.has(itemId),
+      echo: this.isPromptEcho(text),
+    })) {
+      clearLivePlayerLine(itemId)
+      return
+    }
+    setLivePlayerLine(itemId, text)
+  }
+
+  hearAudio(audioText: string, text: string, durationMs = 1000, confidence: number | null = null, reservedId?: string): void {
+    const itemId = reservedId ?? `mock-item-${++this.itemSeq}`
+    clearLivePlayerLine(itemId)
     this.audioTexts.set(itemId, audioText)
     this.audioItems.observe({ type: 'input_audio_buffer.speech_started', item_id: itemId })
     this.transcripts.set(itemId, { text, confidence })

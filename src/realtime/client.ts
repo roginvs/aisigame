@@ -1,7 +1,8 @@
 import { unlockAudio } from '../audio/beep.ts'
 import { gameConfig, hostInstructions } from '../config.ts'
 import { recordResponseUsage, resetUsage } from './usage.ts'
-import { logTrace, pushHostLine, pushPlayerLine, pushTrace } from '../debug/trace.ts'
+import { livePlayerChatVisible } from './liveSpeech.ts'
+import { clearLivePlayerLine, logTrace, pushHostLine, pushPlayerLine, pushTrace, setLivePlayerLine } from '../debug/trace.ts'
 import { outputCut, outputFlushWaitMs, timersAfterPlaybackStarted, timersAfterResponseDone } from './playback.ts'
 import type { HostAudioTimers, OutputCutState } from './playback.ts'
 import { isolatedCue, isolatedToolResponse, speechMatches, speechOverruns, verbatimResponse } from './speechMatch.ts'
@@ -141,6 +142,7 @@ export class RealtimeClient {
   private playerChatSuppressed = new Set<string>()
   private playerChatPending = new Map<string, string>()
   private playerChatPublished = new Set<string>()
+  private livePartials = new Map<string, string>()
   private dropped = false
   private hostOutputHandler: ((stream: MediaStream) => void) | null = null
   private usingExternalInput = false
@@ -475,6 +477,7 @@ export class RealtimeClient {
 
   suppressPlayerChat(itemId: string | null): void {
     if (!itemId) return
+    clearLivePlayerLine(itemId)
     this.playerChatSuppressed.add(itemId)
     this.playerChatPending.delete(itemId)
     this.playerChatAllowed.delete(itemId)
@@ -509,6 +512,8 @@ export class RealtimeClient {
   private rememberTranscript(itemId: string, text: string, confidence: number | null = null): void {
     if (this.transcripts.has(itemId)) return
     this.transcripts.set(itemId, { text, confidence })
+    this.livePartials.delete(itemId)
+    clearLivePlayerLine(itemId)
     this.offerPlayerChat(itemId, text)
     const matched = this.transcriptWaiters.get(itemId) ?? []
     this.transcriptWaiters.delete(itemId)
@@ -516,6 +521,25 @@ export class RealtimeClient {
     const loose = this.looseTranscriptWaiters
     this.looseTranscriptWaiters = []
     for (const waiter of loose) waiter(text)
+  }
+
+  /** Черновик в чате: только показ, игра его не читает. */
+  private offerLivePlayerChat(itemId: string, event: LooseEvent): void {
+    if (this.transcripts.has(itemId)) return
+    const full = typeof event.transcript === 'string' ? event.transcript : null
+    const delta = typeof event.delta === 'string' ? event.delta : ''
+    const text = full ?? (this.livePartials.get(itemId) ?? '') + delta
+    this.livePartials.set(itemId, text)
+    if (this.livePartials.size > 16) this.livePartials.delete(this.livePartials.keys().next().value!)
+    if (!livePlayerChatVisible({
+      suppressed: this.playerChatSuppressed.has(itemId) || this.playerChatPublished.has(itemId),
+      gated: this.playerChatGated && !this.playerChatAllowed.has(itemId),
+      echo: this.isPromptEcho(text),
+    })) {
+      clearLivePlayerLine(itemId)
+      return
+    }
+    setLivePlayerLine(itemId, text)
   }
 
   private offerPlayerChat(itemId: string, text: string): void {
@@ -637,6 +661,8 @@ export class RealtimeClient {
   }
 
   stopSession(): void {
+    clearLivePlayerLine()
+    this.livePartials.clear()
     this.sessionToken += 1
     this.resetAudioJudgments()
     this.sessionUpdatedWaiter = null
@@ -911,6 +937,10 @@ export class RealtimeClient {
       const text = typeof event.text === 'string' ? event.text : ''
       const line = (transcript || text).trim()
       if (line) this.noteHostLine(event, line)
+    }
+    if (type === 'conversation.item.input_audio_transcription.delta') {
+      const itemId = readItemId(event) ?? this.inputItemId
+      if (itemId) this.offerLivePlayerChat(itemId, event)
     }
     if (
       type === 'conversation.item.input_audio_transcription.completed' ||
@@ -1431,3 +1461,4 @@ function readToolCall(response: Record<string, unknown>): ToolCall | null {
   }
   return null
 }
+
