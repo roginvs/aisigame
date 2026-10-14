@@ -714,13 +714,14 @@ describe('выбор ячейки голосом: тема в любой фор�
     const { actor, stop } = await boot(new MockRealtimeClient())
     const text = selectionInstructions(actor.getSnapshot().context, 'Волге 200')
     expect(text).toContain('v — ВОЛГА: 200')
-    expect(text).toContain('в другом падеже или числе')
+    expect(text).toContain('в любом падеже или числе')
     expect(text).toContain('лишней буквой у числа')
-    expect(text).toContain('одного слова из длинного названия, если оно подходит только к одной теме')
-    expect(text).toContain('осталась одна свободная ячейка — бери её')
+    expect(text).toContain('хватает одного его слова, если оно есть только в одной теме')
+    expect(text).toContain('Номинал — только после того, как тема ясно названа')
     expect(text).toContain('бери ближайший')
-    expect(text).toContain('нет ни темы, ни номинала')
-    expect(text).not.toContain('Не считай, что ячейку уже назвали')
+    expect(text).toContain('Без ясно названной темы — confident=false')
+    expect(text).toContain('Часто это не выбор: шум, кашель, междометие, эхо ведущей')
+    expect(text).toContain('Не угадывай ячейку')
     stop(); actor.stop()
   })
 
@@ -829,5 +830,58 @@ describe('оценка ждёт расшифровку по общей форм�
     const judge = tool.mock.calls.find((call) => call[0] === 'judge')
     expect(judge?.[3]).toContain('Реплика игрока: «мой ответ»')
     stop(); actor.stop()
+  })
+})
+
+describe('выбор голосом: шум и посторонняя речь не открывают ячейку (регрессия b3d454d)', () => {
+  afterEach(() => { vi.useRealTimers(); vi.unstubAllGlobals() })
+  const twoCells: QuestionPack = { ...pack, questions: [
+    cell('a-300', 'a', 'Приложения', 300), cell('a-900', 'a', 'Приложения', 900), cell('m-300', 'm', 'Мультфильмы', 300),
+  ] }
+  /** «Модель», которая всегда уверенно выбирает: проверяем, что игра сама не верит ей без оснований. */
+  class EagerModel extends MockRealtimeClient {
+    selects = 0
+    override requestTool(purpose: string, turn: number, name: string, instructions: string, isolated = false, tool?: { name: string }): void {
+      if (name !== 'selectQuestion') { super.requestTool(purpose, turn, name, instructions, isolated, tool); return }
+      this.selects += 1
+      window.setTimeout(() => this.onToolCall({ name, callId: `e${this.selects}`, arguments: { themeId: 'a', value: 900, confident: true, heard: 'x' } }, purpose, turn), 10)
+    }
+  }
+  async function hearIn(text: string) {
+    const client = new EagerModel()
+    const { actor, stop } = await boot(client, twoCells)
+    await toChoosing(actor)
+    client.hear(text, 1500)
+    await vi.advanceTimersByTimeAsync(400)
+    const opened = actor.getSnapshot().context.activeQuestionId
+    stop(); actor.stop()
+    return { opened, selects: client.selects }
+  }
+
+  it('«мм» — междометие: ни запроса к модели, ни ячейки', async () => {
+    expect(await hearIn('мм')).toEqual({ opened: null, selects: 0 })
+  })
+  it('«ага» без предложения ведущей — не выбор', async () => {
+    expect((await hearIn('ага')).opened).toBeNull()
+  })
+  it('посторонний разговор без числа: даже уверенная модель не открывает ячейку', async () => {
+    expect((await hearIn('слушай, а что у нас сегодня на ужин будет')).opened).toBeNull()
+  })
+  it('эхо реплики ведущей — не выбор', async () => {
+    expect((await hearIn('Здравствуйте. Выбирайте вопрос.')).opened).toBeNull()
+  })
+  it('«Приложение 900» по-прежнему открывает ячейку', async () => {
+    expect((await hearIn('Приложение 900')).opened).toBe('a-900')
+  })
+})
+
+import { isFiller } from './heard.ts'
+describe('isFiller', () => {
+  it('междометия — да, слова — нет; «ага» при предложении решает модель', () => {
+    expect(isFiller('мм')).toBe(true)
+    expect(isFiller('э-э, ну')).toBe(true)
+    expect(isFiller('ага')).toBe(true)
+    expect(isFiller('ага', true)).toBe(false)
+    expect(isFiller('Приложения')).toBe(false)
   })
 })

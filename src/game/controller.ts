@@ -21,10 +21,10 @@ import { withCommentary } from './commentary.ts'
 import { parseBet } from './bet.ts'
 import { amountWords } from './appealSpeech.ts'
 import { questionSpeech, spokenChoiceForms } from './choices.ts'
-import { matchSpokenCell, selectionChatText } from './choiceMatch.ts'
+import { matchSpokenCell, mentionsValue, selectionChatText } from './choiceMatch.ts'
 import { answerListeningPrompt, echoesAnswerPrompt, phantomListedAnswer } from './answerPrompt.ts'
 import { choicePrompt, echoesChoicePrompt, optionsPrompt, playersPrompt } from './choicePrompt.ts'
-import { blurtGate, choiceGate, repeatsQuestion } from './heard.ts'
+import { blurtGate, choiceGate, isChoiceUtterance, isFiller, repeatsQuestion } from './heard.ts'
 import { exactAnswer, judgmentChatText, settleJudgment } from './judgment.ts'
 import { currentRound, findQuestion, nextPlayableRound, questionById, roundThemes } from './pack.ts'
 import { answerIsPublic } from './reveal.ts'
@@ -106,6 +106,8 @@ export function attachController(options: {
   /** Инвалидирует talkover после нового чтения. */
   let readEpoch = 0
   let choiceHeard = ''
+  /** Предложение ведущей, с которым ушёл текущий запрос выбора. */
+  let selectionOffer: ChoosingOffer | null = null
   /** Тема, понятая из прошлой реплики без номинала (до открытия ячейки). */
   let choiceTheme: string | null = null
   /** Попытка, для которой сейчас принимаем речь ответа. */
@@ -848,6 +850,7 @@ export function attachController(options: {
     const cells = openChoiceCells(context)
     const offer = choosingOffer
     choosingOffer = null
+    selectionOffer = offer
     client.requestTool('select', toolTurn, 'selectQuestion', selectionInstructions(context, choiceHeard, offer, choiceTheme), true,
       selectQuestionToolFor(cells.map((cell) => cell.themeId), cells.map((cell) => cell.value)))
   }
@@ -882,10 +885,18 @@ export function attachController(options: {
       pushTrace('note', 'распознавание повторило подсказку тем, это не выбор')
       return
     }
+    if (echoesHost(heard.text)) {
+      pushTrace('note', 'речь совпала с репликой ведущей, это эхо, не выбор')
+      return
+    }
+    if (isFiller(heard.text, Boolean(choosingOffer))) {
+      pushTrace('note', `междометие, ячейку не открываю: ${heard.text}`)
+      return
+    }
     if (!heard.arrived) pushPlayerLine('речь не распознана')
     const round = currentRound(actor.getSnapshot().context, actor.getSnapshot().context.roundIndex)
     // После предложения ячейки короткое «да», «го», «ок» — тоже ответ: решает модель.
-    const gate = choosingOffer && heard.text.trim() ? 'select' : choiceGate(heard.text, durationMs, round?.kind === 'final' ? 2 : 4)
+    const gate = choosingOffer && isChoiceUtterance(heard.text, 2) ? 'select' : choiceGate(heard.text, durationMs, round?.kind === 'final' ? 2 : 4)
     const shown = heard.text || 'речь не распознана'
     if (gate === 'ignore') {
       pushTrace('note', `короткий звук ${durationMs} мс, ячейку не открываю: ${shown}`)
@@ -1362,7 +1373,13 @@ export function attachController(options: {
       kind,
       played,
     )
-    const modelOk = Boolean(modelQuestion && confident && !played.includes(modelQuestion.id))
+    const offerTaken = Boolean(selectionOffer && modelQuestion && selectionOffer.themeId === modelQuestion.themeId && selectionOffer.value === modelQuestion.value)
+    // Страховка от шума: без названного числа модель может открыть ячейку только по принятому предложению,
+    // в финале (там нет номиналов), после «тема понятна, назовите стоимость» или когда в теме одна свободная ячейка.
+    const backed = kind === 'final' || offerTaken || mentionsValue(transcript) ||
+      openChoiceCells(snapshotNow.context).filter((cell) => cell.themeId === themeId).length === 1
+    if (modelQuestion && confident && !backed) pushTrace('note', `модель выбрала ${themeId} ${value} без числа в реплике — не открываю: ${transcript}`)
+    const modelOk = Boolean(modelQuestion && confident && backed && !played.includes(modelQuestion.id))
     const picked = local
       ? findQuestion(
           snapshotNow.context.questions,
@@ -1849,13 +1866,14 @@ confident=true только если названа одна тема из сп�
   }
   return `
 Оцени только последнюю реплику. Распознанный текст: «${heard || 'пусто'}».
+Часто это не выбор: шум, кашель, междометие, эхо ведущей, обрывок или разговор игроков между собой. Тогда confident=false и value=0. Не угадывай ячейку.
 Свободные ячейки по темам (id — тема: номиналы):
 ${availableLines(context)}
 Вызови selectQuestion. themeId — id темы, первое поле строки; value — номинал из её списка.
-Тема: та же тема, если она сказана в другом падеже или числе, с опечаткой распознавания или с лишней буквой у числа («Я900» — это 900). Достаточно одного слова из длинного названия, если оно подходит только к одной теме. Если слово подходит к нескольким темам — confident=false.
-Номинал, когда тема понятна: назван номинал из её списка — бери его; в теме осталась одна свободная ячейка — бери её; номинал звучит похоже на один из свободных — бери ближайший. Только если номинал совсем неясен — confident=false, themeId этой темы и value=0.
-confident=true, когда тема и номинал определены по этим правилам.
-Если в реплике нет ни темы, ни номинала (шум, кашель, междометие, обрывок) — confident=false и value=0.
+Тема названа, только если в реплике есть слово из названия темы: в любом падеже или числе, с опечаткой распознавания или с лишней буквой у числа («Я900» — это 900). Для длинного названия хватает одного его слова, если оно есть только в одной теме. Похожее по смыслу или по звучанию другое слово — не тема. Если слово подходит к нескольким темам — confident=false.
+Номинал — только после того, как тема ясно названа: прозвучал номинал из её списка — бери его; прозвучало число, похожее на один из свободных номиналов этой темы, — бери ближайший; в реплике только название темы, а в теме одна свободная ячейка — бери её. Тема названа, а номинала нет или он совсем неясен — confident=false, themeId этой темы и value=0.
+Без ясно названной темы — confident=false и value=0, даже если прозвучало число.
+confident=true, только когда тема названа и номинал определён по этим правилам.
 heard — дословно, что сказал игрок.
 Если в названии темы стоят точки или многоточие, это та же тема, сказанная без точек.
 ${offer ? offerSelectionNote(offer) : ''}
@@ -1874,7 +1892,7 @@ function themeHintNote(context: GameContext, themeHint: string | null): string {
 export function offerSelectionNote(offer: ChoosingOffer): string {
   return `Перед этой репликой ведущая предложила ячейку: ${offer.themeId} — ${offer.themeName}, ${offer.value}.
 Если реплика по смыслу — согласие на это предложение (любое: ${OFFER_YES_EXAMPLES.join(', ')} и т.п.), вызови selectQuestion с themeId=${offer.themeId}, value=${offer.value}, confident=true.
-Отказ («нет», «не хочу», «другое») — confident=false и value=0. Названа другая ячейка — оцени её по общим правилам.`
+Отказ («нет», «не хочу», «другое»), а также шум, кашель, «мм», эхо ведущей и разговор не о предложении — confident=false и value=0. Названа другая ячейка — оцени её по общим правилам.`
 }
 
 function clarifyInstructions(context: GameContext): string {

@@ -33,3 +33,16 @@ function foldSpeech(value: string): string {
     .replace(/\s+/g, ' ')
     .trim()
 }
+
+const fillerWord = /^(?:м+|мм+|хм+|э+м*|а+|о+|у+|ну|ой|ох|ах|ага|угу|ммм|эх|так|вот|ээ+)$/
+
+const agreeWord = /^(?:ага|угу|так)$/
+
+/**
+ * Реплика из одних междометий («мм», «э-э», «ну», «ага»): это не выбор и не ответ.
+ * offerOpen — ведущая предложила ячейку: «ага», «угу» тогда могут быть согласием, их решает модель.
+ */
+export function isFiller(text: string, offerOpen = false): boolean {
+  const words = text.toLowerCase().replaceAll('ё', 'е').replace(/[^a-zа-я0-9]+/gi, ' ').trim().split(' ').filter(Boolean)
+  return words.length > 0 && words.every((word) => fillerWord.test(word) && !(offerOpen && agreeWord.test(word)))
+}

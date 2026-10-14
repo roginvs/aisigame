@@ -136,3 +136,8 @@ function words(text: string): string {
     .replace(/\s+/g, ' ')
     .trim()
 }
+
+/** В реплике прозвучало число (цифрами или словами): без него модель не открывает ячейку по одной теме. */
+export function mentionsValue(transcript: string): boolean {
+  return spokenPrices(words(transcript)).length > 0
+}
