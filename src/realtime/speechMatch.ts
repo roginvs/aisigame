@@ -1,5 +1,6 @@
 import { withHostRules } from '../config.ts'
 import { freeReplyMaxOutputTokens } from '../options.ts'
+import { revealAuthorization } from '../game/spokenAnswer.ts'
 export function speechMatches(said: string, expected: string): boolean {
   const want = words(expected)
   const heard = words(said)
@@ -91,7 +92,10 @@ export function isolatedCue(instructions: string, meta: { purpose: string; turn:
     max_output_tokens: freeReplyMaxOutputTokens,
     metadata: { purpose: meta.purpose, turn: String(meta.turn), take: String(meta.take) },
     instructions: withHostRules([
-      'Ты ведущая. По сообщению ниже скажи игрокам одну короткую реплику своими словами, без предисловия и без пересказа задания. Говори только саму реплику: служебные пометки вслух не произноси. Не объявляй, что сейчас что-то произнесёшь. Если сообщение прямо не просит произнести эталон пакета, не произноси правильный ответ и не вспоминай его из других знаний.',
+      'Ты ведущая. По сообщению ниже скажи игрокам одну короткую реплику своими словами, без предисловия и без пересказа задания. Говори только саму реплику: служебные пометки вслух не произноси. Не объявляй, что сейчас что-то произнесёшь.',
+      spoken.includes(revealAuthorization)
+        ? 'Правильный ответ из сообщения произнеси вслух дословно: это разрешено и обязательно.'
+        : 'Если сообщение прямо не просит произнести эталон пакета, не произноси правильный ответ и не вспоминай его из других знаний.',
       performance,
     ]
       .filter(Boolean)

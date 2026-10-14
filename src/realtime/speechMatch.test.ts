@@ -160,3 +160,19 @@ describe('speechDurationMs', () => {
     expect(speechDurationMs(null, null, null, 700)).toBe(10_000)
   })
 })
+
+import { spokenAnswerCue, revealAuthorization } from '../game/spokenAnswer.ts'
+
+describe('reveal turns are explicitly authorized', () => {
+  it('drops the no-reveal sentence when the turn asks for the reference answer', () => {
+    const cue = isolatedCue(`${spokenAnswerCue(['Октавиан Август', 'Август'])} Назови минус 100.`, { purpose: 'announce', turn: 1, take: 1 })
+    expect(cue.input[0]!.content[0]!.text).toContain(revealAuthorization)
+    expect(cue.input[0]!.content[0]!.text).toContain('дословно: «Октавиан Август»')
+    expect(cue.instructions).not.toContain('Если сообщение прямо не просит произнести эталон')
+    expect(cue.instructions).toContain('это разрешено и обязательно')
+  })
+  it('keeps the no-reveal sentence elsewhere', () => {
+    const cue = isolatedCue('Позови Машу выбрать вопрос', { purpose: 'x', turn: 1, take: 1 })
+    expect(cue.instructions).toContain('Если сообщение прямо не просит произнести эталон')
+  })
+})

@@ -362,7 +362,7 @@ describe('host audio completion', () => {
     expect(finished).toEqual(['announce'])
   })
 
-  it('ошибка API сразу проваливает ждущий tool, отмена — нет', () => {
+  it('ошибка API сразу проваливает ждущий tool, отмена — нет (response_cancel_not_active молча игнорируется)', () => {
     const { feed } = open()
     const tools: Array<{ call: unknown; purpose: string; turn: number }> = []
     client!.onToolCall = (call, purpose, turn) => {

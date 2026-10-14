@@ -136,6 +136,8 @@ export class RealtimeClient {
   private inputStartedAt: number | null = null
   /** `audio_start_ms` из speech_started — длительность по аудиобуферу, а не по времени прихода событий. */
   private inputAudioStartMs: number | null = null
+  /** Идущие ответы модели: unscoped `response.cancel` шлём только при них (иначе `response_cancel_not_active`). */
+  private activeResponses = new Set<string>()
   private inputItemId: string | null = null
   private transcriptionPrompt = ''
   private transcripts = new Map<string, StoredTranscript>()
@@ -588,7 +590,7 @@ export class RealtimeClient {
     this.pendingSpeak = null
     this.clearFlushTimer()
     this.clearSpeechTimers()
-    this.send({ type: 'response.cancel' })
+    this.cancelActiveResponse()
     if (this.outputFlush !== 'inflight') this.sendOutputClear()
     this.playbackResponseId = null
     this.onLink({ host: 'idle' })
@@ -627,7 +629,7 @@ export class RealtimeClient {
     }
     if (expect) pushHostLine(expect)
     this.armHardLimit()
-    this.send({ type: 'response.cancel' })
+    this.cancelActiveResponse()
     if (flushFirst) {
       if (!this.canSend()) {
         this.dropLink('Связь с ведущей прервалась. Начните игру ещё раз.')
@@ -681,6 +683,7 @@ export class RealtimeClient {
     this.pendingTool = null
     this.wireOpen = false
     this.inputAudioStartMs = null
+    this.activeResponses.clear()
     this.micLive = false
     this.wire?.close()
     this.inputStartedAt = null
@@ -739,6 +742,11 @@ export class RealtimeClient {
     this.onFailure(message)
   }
 
+  private cancelActiveResponse(): void {
+    if (this.activeResponses.size === 0) return
+    this.send({ type: 'response.cancel' })
+  }
+
   private send(event: object): boolean {
     const type = eventType(event)
     if (this.wire) {
@@ -766,7 +774,7 @@ export class RealtimeClient {
   private sendToolRequest(mode: 'text' | 'audio'): void {
     const pending = this.pendingTool
     if (!pending) return
-    this.send({ type: 'response.cancel' })
+    this.cancelActiveResponse()
     const response = pending.isolated
       ? isolatedToolResponse({
           name: pending.name,
@@ -863,11 +871,20 @@ export class RealtimeClient {
     this.audioItems.observe(event)
     this.sessionUpdatedWaiter?.(event)
     if (type === 'session.updated') this.sessionUpdatedWaiter = null
+    if (type === 'response.created' || type === 'response.done') {
+      const id = asRecord(event.response).id
+      if (typeof id === 'string') {
+        if (type === 'response.created') this.activeResponses.add(id)
+        else this.activeResponses.delete(id)
+      }
+    }
 
     if (type === 'error' || type === 'invalid_request_error') {
+      const error = asRecord(event.error)
+      // Гонка: ответ закончился раньше нашей отмены. Не ошибка и не повод проваливать tool.
+      if (error.code === 'response_cancel_not_active') return
       const message = readErrorMessage(event)
       pushTrace('note', `Ошибка API: ${message}`)
-      const error = asRecord(event.error)
       const errorId = typeof error.event_id === 'string' ? error.event_id : ''
       const responseId = typeof error.response_id === 'string' ? error.response_id : ''
       const judge = this.judgeRequests.get(errorId || this.judgeResponseIds.get(responseId) || '')
@@ -937,7 +954,7 @@ export class RealtimeClient {
         if (speechOverruns(this.speech.liveTranscript, this.speech.expect)) {
           // Фраза уже сказана; продолжение (часто — ответ на вопрос) игрокам не играем.
           pushTrace('note', 'ведущая продолжила после дословной фразы — обрываем', { said: this.speech.liveTranscript })
-          this.send({ type: 'response.cancel' })
+          this.cancelActiveResponse()
           this.sendOutputClear()
           this.finishSpeech('overrun')
           return
@@ -1098,7 +1115,7 @@ export class RealtimeClient {
     speech.done = false
     speech.ended = false
     this.clearSpeechTimers()
-    this.send({ type: 'response.cancel' })
+    this.cancelActiveResponse()
     if (!this.canSend()) {
       this.dropLink('Связь с ведущей прервалась. Начните игру ещё раз.')
       return
