@@ -94,14 +94,39 @@ describe('announceInstructions', () => {
     expect(line).not.toContain('никто не нажал')
   })
 
-  it('когда ошиблись все, сначала дословный эталон, потом что неверно', () => {
-    const line = announceInstructions(context({ announceKind: 'incorrect' }))
+  it('когда ошиблись все: сначала вердикт и имя, потом эталон, потом что неверно', () => {
+    const line = announceInstructions(context({ announceKind: 'incorrect', activePlayerId: 1, players: [{ id: 1, name: 'Вася', score: 0 }] }))
+    expect(line).toContain('Самые первые слова реплики — короткий вердикт')
+    expect(line).toContain('имя игрока в именительном падеже: Вася')
     expect(line).toContain('Начни с правильного ответа дословно: «Боевой Буратино»')
     expect(line).toContain('свой ответ не придумывай')
     expect(line).toContain('что неверно')
     expect(line).toContain('минус 100')
+    expect(line.indexOf('вердикт')).toBeLessThan(line.indexOf('«Боевой Буратино»'))
     expect(line.indexOf('«Боевой Буратино»')).toBeLessThan(line.indexOf('неверно'))
     expect(line).not.toContain('без тем и номиналов')
+  })
+
+  it('уверенный верный: первые слова — вердикт и имя', () => {
+    const line = announceInstructions(context({ announceKind: 'correct', activePlayerId: 1, players: [{ id: 1, name: 'Вася', score: 100 }] }))
+    expect(line).toContain('Самые первые слова реплики — короткий вердикт')
+    expect(line).toContain('имя игрока в именительном падеже: Вася')
+    expect(line).toContain('«Верно, Вася…»')
+    expect(line.indexOf('вердикт')).toBeLessThan(line.indexOf('плюс'))
+  })
+
+  it('уверенный неверный без эталона: первые слова — вердикт и имя', () => {
+    const base = context()
+    const line = announceInstructions(context({
+      announceKind: 'incorrect',
+      activePlayerId: 1,
+      playedIds: [],
+      players: [{ id: 1, name: 'Вася', score: 0 }],
+      questions: base.questions,
+    }))
+    expect(line).toContain('Самые первые слова реплики — короткий вердикт')
+    expect(line).toContain('имя игрока в именительном падеже: Вася')
+    expect(line).toContain('«Нет, Вася…»')
   })
 
   it('когда у последнего вышло время, сначала дословный эталон, потом что не услышала', () => {
@@ -316,6 +341,7 @@ describe('announceInstructions', () => {
         questions: [{ ...base.questions[0], answers: ['Властелин колец'] }],
       }),
     )
+    expect(line.indexOf('вердикт')).toBeLessThan(line.indexOf('«Братство кольца»'))
     expect(line.indexOf('«Братство кольца»')).toBeLessThan(line.indexOf('«Властелин колец»'))
     expect(line.indexOf('«Властелин колец»')).toBeLessThan(line.indexOf('что неверно'))
     expect(line).toContain('минус 100')

@@ -497,6 +497,7 @@ describe('game machine', () => {
     expect(playerScore(actor, 3)).toBe(-100)
     const line = announceInstructions(actor.getSnapshot().context)
     expect(line).toContain('самой близкой')
+    expect(line.indexOf('вердикт')).toBeLessThan(line.indexOf('Братство кольца'))
     expect(line.indexOf('Братство кольца')).toBeLessThan(line.indexOf('что неверно'))
   })
 

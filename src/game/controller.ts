@@ -16,7 +16,7 @@ import { spokenPayload, verbatimSpeech, withPlayNote } from '../realtime/speechM
 import { echoesTranscriptionPrompt } from './promptEcho.ts'
 import type { ConferenceHistoryMessage } from '../conference/messages.ts'
 import { conversationLineFromTrace } from '../conference/traceConversation.ts'
-import { getTrace } from '../debug/trace.ts'
+import { getLivePlayerLine, getTrace } from '../debug/trace.ts'
 import { withCommentary } from './commentary.ts'
 import { parseBet } from './bet.ts'
 import { amountWords } from './appealSpeech.ts'
@@ -57,6 +57,9 @@ const judgmentStatuses: JudgmentStatus[] = [
   'unintelligible',
   'ambiguous',
 ]
+
+/** Лобби: столько речи игрока подряд, прежде чем оборвать ведущую (отсекает щелчки, кашель, хвост эха). */
+export const LOBBY_BARGE_IN_MIN_MS = 600
 
 export function attachController(options: {
   actor: GameActor
@@ -242,6 +245,10 @@ export function attachController(options: {
       openSpeechItemId = itemId
       openSpeechStartedAt = Date.now()
     }
+    if (path === 'startMenu') {
+      if (keepVoiceSession?.() && hostTalking) armLobbyBargeIn(itemId)
+      return
+    }
     if (path.startsWith('choosing')) lastChooserSpeechAt = Date.now()
     if (path.startsWith('answering')) lastAnswerSpeechAt = Date.now()
     if (isReadingPath(path) || path === 'falseStartCue') {
@@ -291,6 +298,12 @@ export function attachController(options: {
     if (itemId && openSpeechItemId === itemId) {
       openSpeechItemId = null
       openSpeechStartedAt = 0
+    }
+    if (path === 'startMenu') {
+      // Короче порога — кашель/шум: ведущую не обрываем, обычный поток лобби идёт дальше.
+      clearLobbyBargeIn()
+      settle()
+      return
     }
     const startedOverRead = overRead
     overRead = false
@@ -356,6 +369,28 @@ export function attachController(options: {
     if (purpose === 'select') handleSelection(call, turn)
     if (purpose === 'judge') handleJudgment(call, turn)
     if (purpose === 'catPick' || purpose === 'specialBid') handleSpecialTool(call, turn)
+  }
+
+  // Лобби: игрок заговорил поверх ведущей — после короткого порога обрываем её и слушаем.
+  let lobbyBargeTimer = 0
+  function clearLobbyBargeIn(): void {
+    window.clearTimeout(lobbyBargeTimer)
+    lobbyBargeTimer = 0
+  }
+  function armLobbyBargeIn(itemId: string | null): void {
+    clearLobbyBargeIn()
+    lobbyBargeTimer = window.setTimeout(() => {
+      lobbyBargeTimer = 0
+      if (statePath(actor.getSnapshot().value) !== 'startMenu' || !keepVoiceSession?.() || !hostTalking) return
+      if (itemId && openSpeechItemId !== itemId) return
+      const live = getLivePlayerLine()?.text ?? ''
+      if (live && echoesHost(live)) {
+        pushTrace('note', 'лобби: эхо ведущей, не перебиваем')
+        return
+      }
+      pushTrace('note', 'лобби: игрок перебил ведущую — замолкаем и слушаем')
+      client.interruptSpeech()
+    }, LOBBY_BARGE_IN_MIN_MS)
   }
 
   // Отсчёт тишины в машине стоит, пока игрок говорит (ухо ведущей) или говорит ведущая.
@@ -1316,6 +1351,7 @@ export function attachController(options: {
 
   return () => {
     earUnsub()
+    clearLobbyBargeIn()
     clearHostEar()
     onActions?.(null)
     connectToken += 1
@@ -1690,6 +1726,13 @@ export function answerChatLine(context: GameContext): string {
   const answers = question.answers.map((item) => item.trim()).filter(Boolean)
   if (!answers.length) return ''
   return `Правильный ответ: ${answers.join(', ')}`
+}
+
+/** Уверенный вердикт: первые слова — короткий вердикт, сразу за ним имя в именительном падеже. */
+export function verdictOpener(kind: 'correct' | 'incorrect', name: string): string {
+  const examples = kind === 'correct' ? '«Верно, Вася…», «Отлично, Вася…», «Точно, Вася…»' : '«Нет, Вася…», «Мимо, Вася…», «Увы, Вася…»'
+  const who = name ? `имя игрока в именительном падеже: ${name}` : 'обращение к игроку'
+  return `Самые первые слова реплики — короткий вердикт, одно слово, сразу за ним ${who}, например ${examples}; слово выбери сама, каждый раз разное. Дальше — остальное.`
 }
 
 function mayName(name: string): string {
@@ -2093,7 +2136,7 @@ export function announceInstructions(context: GameContext): string {
     return withPlayNote(
       hostCue({
         situation: `Исход: верно. Отвечал ${playerNameLine || 'игрок'}; эталон пакета вслух не называют.`,
-        goal: `Коротко подтверди, что ответ верный, и сразу назови плюс очков. ${plus} ${named} Формулировку выбери сама.`,
+        goal: `${verdictOpener('correct', playerNameLine)} Затем сразу назови плюс очков. ${plus} Формулировку выбери сама.`,
         constraints: [
           'Правильный ответ пакета не произноси и не намекай.',
           finalNote,
@@ -2106,7 +2149,7 @@ export function announceInstructions(context: GameContext): string {
     return withPlayNote(
       hostCue({
         situation: `Исход: верно. Отвечал ${playerNameLine || 'игрок'}; эталон пакета вслух не называют.`,
-        goal: `Коротко подтверди, что ответ верный, и сразу назови плюс очков. Дальше не зови: табло уже на экране. ${plus} ${named}`,
+        goal: `${verdictOpener('correct', playerNameLine)} Затем сразу назови плюс очков. Дальше не зови: табло уже на экране. ${plus}`,
         constraints: [
           'Правильный ответ пакета не произноси. Вопрос не повторяй.',
           finalNote,
@@ -2119,7 +2162,7 @@ export function announceInstructions(context: GameContext): string {
     return withPlayNote(
       hostCue({
         situation: `Исход: неверно. Отвечал ${playerNameLine || 'игрок'}; ячейку ещё можно перехватить.`,
-        goal: `Коротко отметь, что ответ неверный, и сразу назови минус очков. ${minus} ${named}`,
+        goal: `${verdictOpener('incorrect', playerNameLine)} Затем сразу назови минус очков. ${minus}`,
         constraints: [
           'Правильный ответ не называй и не намекай. Не зови нажимать кнопку.',
           finalNote,
@@ -2130,8 +2173,10 @@ export function announceInstructions(context: GameContext): string {
     )
   }
   if (kind === 'incorrect') {
-    const rest = [named, minus, finalNote].filter(Boolean).join(' ')
-    return `${withCloseGuess(cue, context)} Только после эталона коротко скажи, что неверно.${rest ? ` ${rest}` : ''}`
+    // Неверно + эталон: вердикт и имя → эталон → коротко что неверно и очки.
+    const rest = [minus, finalNote].filter(Boolean).join(' ')
+    const reveal = withCloseGuess(cue, context)
+    return `${verdictOpener('incorrect', playerNameLine)} ${reveal} Только после эталона коротко скажи, что неверно.${rest ? ` ${rest}` : ''}`
   }
   if (kind === 'silence' && !publish) {
     // Не «неверно»: реплики не было / не расслышали. Неверный ответ идёт через incorrect.
