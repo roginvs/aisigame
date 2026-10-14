@@ -12,6 +12,18 @@ export type ConferenceTile = {
   mirror?: boolean
 }
 
+/**
+ * Скрытый участник мастера: в его дорожку идут все звуковые эффекты игры,
+ * чтобы у всех (и у мастера) они звучали тем же путём и громкостью, что и ведущая.
+ * Не плитка, не игрок, не в миксе модели.
+ */
+export const SOUNDS_JITSI_NAME = 'Звуки игры'
+
+export function isSoundsJitsiParticipant(id: string, name: string, soundsParticipantId: string | null): boolean {
+  if (soundsParticipantId && id === soundsParticipantId) return true
+  return name === SOUNDS_JITSI_NAME
+}
+
 export function isHostJitsiParticipant(id: string, name: string, botParticipantId: string | null): boolean {
   if (botParticipantId && id === botParticipantId) return true
   return name === HOST_JITSI_NAME
@@ -19,6 +31,8 @@ export function isHostJitsiParticipant(id: string, name: string, botParticipantI
 
 export type ConferenceMedia = {
   publishHostStream: (stream: MediaStream) => Promise<void>
+  /** Только мастер Jitsi: опубликовать поток эффектов скрытым участником «Звуки игры». */
+  publishSoundsStream?: (stream: MediaStream) => Promise<void>
   setMicLive: (live: boolean) => Promise<void>
   setCameraOn: (on: boolean) => Promise<void>
   cycleCamera: () => Promise<void>

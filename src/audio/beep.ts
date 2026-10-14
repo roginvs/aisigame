@@ -3,6 +3,40 @@ import { buzzerBeepMs } from '../options.ts'
 
 let audioContext: AudioContext | null = null
 
+/**
+ * Куда идут звуковые эффекты игры.
+ * - `local` — в динамик (одиночная игра, broadcast-конференция);
+ * - `stream` — мастер Jitsi: в MediaStream скрытого участника «Звуки игры», слышно всем из конференции;
+ * - `remote` — joiner Jitsi: локально не играем, эффект придёт из конференции.
+ * Тайминги игры от этого не зависят: длительности заданы константами, а не событием `ended`.
+ */
+export type GameSoundRoute = 'local' | 'stream' | 'remote'
+let soundRoute: GameSoundRoute = 'local'
+let soundSink: MediaStreamAudioDestinationNode | null = null
+
+export function gameSoundRoute(): GameSoundRoute {
+  return soundRoute
+}
+
+/** Поток для участника «Звуки игры»; маршрут переключается в `stream`. */
+export function gameSoundStream(): MediaStream {
+  const ctx = ensureContext()
+  if (!soundSink || soundSink.context !== ctx) soundSink = ctx.createMediaStreamDestination()
+  soundRoute = 'stream'
+  return soundSink.stream
+}
+
+export function setGameSoundRoute(route: 'local' | 'remote'): void {
+  soundRoute = route
+}
+
+/** Выход эффекта; `null` — локально не играть. */
+function soundOutput(ctx: AudioContext): AudioNode | null {
+  if (soundRoute === 'remote') return null
+  if (soundRoute === 'stream' && soundSink && soundSink.context === ctx) return soundSink
+  return ctx.destination
+}
+
 const pipCount = 3
 const pipSeconds = 0.085
 const pipGapSeconds = 0.07
@@ -25,13 +59,14 @@ export function gameAudioContext(): AudioContext {
 export function playTimeoutBeep(): void {
   const ctx = ensureContext()
   void ctx.resume()
+  const output = soundOutput(ctx)
   const duration = buzzerBeepMs / 1000
   const origin = ctx.currentTime
-  for (let index = 0; index < pipCount; index += 1) {
+  for (let index = 0; output && index < pipCount; index += 1) {
     const at = origin + index * (pipSeconds + pipGapSeconds)
     const until = at + pipSeconds
     if (until > origin + duration + 0.0001) break
-    pip(ctx, at, until)
+    pip(ctx, at, until, output)
   }
   if (typeof window !== 'undefined' && typeof window.dispatchEvent === 'function') {
     window.dispatchEvent(new CustomEvent('aisigame-beep'))
@@ -43,13 +78,13 @@ function ensureContext(): AudioContext {
   return audioContext
 }
 
-function pip(ctx: AudioContext, at: number, until: number): void {
+function pip(ctx: AudioContext, at: number, until: number, output: AudioNode): void {
   const oscillator = ctx.createOscillator()
   const gain = ctx.createGain()
   oscillator.type = 'square'
   oscillator.frequency.value = 1400
   oscillator.connect(gain)
-  gain.connect(ctx.destination)
+  gain.connect(output)
   gain.gain.setValueAtTime(0.08, at)
   gain.gain.linearRampToValueAtTime(0.0001, until)
   oscillator.start(at)
@@ -82,14 +117,17 @@ export function preloadPublicSound(path: string): Promise<AudioBuffer | null> {
 
 /** Короткий звук из public/ через Web Audio (тот же контекст, что и пи-пи-пи). */
 export async function playPublicSound(path: string): Promise<boolean> {
-  const buffer = await preloadPublicSound(path)
-  if (!buffer) return false
   const ctx = ensureContext()
-  void ctx.resume()
-  const source = ctx.createBufferSource()
-  source.buffer = buffer
-  source.connect(ctx.destination)
-  source.start()
+  const output = soundOutput(ctx)
+  if (output) {
+    const buffer = await preloadPublicSound(path)
+    if (!buffer) return false
+    void ctx.resume()
+    const source = ctx.createBufferSource()
+    source.buffer = buffer
+    source.connect(output)
+    source.start()
+  }
   if (typeof window !== 'undefined' && typeof window.dispatchEvent === 'function') {
     window.dispatchEvent(new CustomEvent('aisigame-special-sound', { detail: path }))
   }
@@ -109,4 +147,6 @@ export function playAuctionDing(): Promise<boolean> {
 
 export function resetPublicSoundsForTest(): void {
   publicBuffers.clear()
+  soundRoute = 'local'
+  soundSink = null
 }

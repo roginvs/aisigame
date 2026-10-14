@@ -218,3 +218,10 @@ async function hear(page: Page, text: string): Promise<void> {
     controls.hear(line, 1400)
   }, text)
 }
+
+test('демо-хук звуков игры: без Jitsi эффекты играют локально', async ({ page }) => {
+  await page.goto('/')
+  await page.getByLabel('Модель').selectOption('mock')
+  await expect.poll(() => page.evaluate(() => window.__aisigame?.playGameSound?.('beep'))).toBe('local')
+  await expect.poll(() => page.evaluate(() => window.__aisigame?.playGameSound?.('cat'))).toBe('local')
+})

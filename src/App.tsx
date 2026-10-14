@@ -2,7 +2,8 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import { setIdleScale } from './game/idle.ts'
 import { setAppealScale } from './game/appeals.ts'
 import { useMachine } from '@xstate/react'
-import { unlockAudio } from './audio/beep.ts'
+import { gameSoundRoute, gameSoundStream, playAuctionDing, playCatMeow, playTimeoutBeep, setGameSoundRoute, unlockAudio } from './audio/beep.ts'
+import { pushTrace } from './debug/trace.ts'
 import { buildInviteUrl, parseInvite } from './conference/invite.ts'
 import { JoinerSession } from './conference/joinerSession.ts'
 import { MasterSession } from './conference/masterSession.ts'
@@ -277,6 +278,11 @@ export default function App() {
         setIdleScale: (scale) => setIdleScale(scale),
         setAppealScale: (scale) => setAppealScale(scale),
         flipPackByte: () => joinerFlipPackRef.current?.(),
+        playGameSound: (kind) => {
+          if (kind === 'beep') playTimeoutBeep()
+          else void (kind === 'cat' ? playCatMeow() : playAuctionDing())
+          return gameSoundRoute()
+        },
       }
     }
     const stop = attachController({
@@ -653,6 +659,7 @@ export default function App() {
       unsubscribeTiles?.()
       unsubscribeHostSpeaking?.()
       disposeTransport?.()
+      setGameSoundRoute('local')
       voiceClientRef.current?.stopSession()
       voiceConnectedRef.current = false
       setConferenceTiles([])
@@ -781,6 +788,13 @@ export default function App() {
         onError: conferenceConnectionFailed,
       })
       attachConferenceHandle(handle)
+      if (!useBroadcast && handle.publishSoundsStream) {
+        // Эффекты игры — через скрытого участника «Звуки игры»: у всех тот же путь и громкость, что у ведущей.
+        handle.publishSoundsStream(gameSoundStream()).catch((error: unknown) => {
+          pushTrace('note', 'Звуки игры не опубликованы, играем локально', { error: String(error) })
+          setGameSoundRoute('local')
+        })
+      }
       setJoiningStatus('Подключаем ведущую…')
       await connectVoice({ captureMic: false })
       voiceClientRef.current?.setInputStream(handle.modelInputStream())
@@ -952,6 +966,8 @@ export default function App() {
         onError: conferenceConnectionFailed,
       })
       attachConferenceHandle(handle)
+      // Jitsi: эффекты придут от участника «Звуки игры» мастера; локально не дублируем.
+      if (!useBroadcast) setGameSoundRoute('remote')
       setConferenceRole('joiner')
       setConferenceRoomId(roomId)
       const joiner = new JoinerSession({

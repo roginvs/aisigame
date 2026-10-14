@@ -15,3 +15,14 @@ describe('isHostJitsiParticipant', () => {
     expect(isHostJitsiParticipant('p1', 'Вася', 'bot-1')).toBe(false)
   })
 })
+
+import { SOUNDS_JITSI_NAME, isSoundsJitsiParticipant, isHostJitsiParticipant as isHostForSounds } from './media.ts'
+
+describe('участник «Звуки игры»', () => {
+  it('узнаётся по id своего бота и по имени у остальных, и это не ведущая', () => {
+    expect(isSoundsJitsiParticipant('abc', 'Маша', 'abc')).toBe(true)
+    expect(isSoundsJitsiParticipant('x', SOUNDS_JITSI_NAME, null)).toBe(true)
+    expect(isSoundsJitsiParticipant('x', 'Маша', null)).toBe(false)
+    expect(isHostForSounds('x', SOUNDS_JITSI_NAME, null)).toBe(false)
+  })
+})

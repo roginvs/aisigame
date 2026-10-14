@@ -1,5 +1,7 @@
 import {
   HOST_JITSI_NAME,
+  SOUNDS_JITSI_NAME,
+  isSoundsJitsiParticipant,
   isHostJitsiParticipant,
   type ConferenceHandle,
   type ConferenceTile,
@@ -459,6 +461,7 @@ export async function connectJitsiConference(input: {
   let lastHostSpeaking = false
   const localId = () => conference.myUserId() || 'local'
   let botHandle: ConferenceHandle | null = null
+  let soundsHandle: ConferenceHandle | null = null
   const speakerActivity = createSpeakerActivity(() => emitTiles())
 
   function botParticipantId(): string | null {
@@ -467,6 +470,15 @@ export async function connectJitsiConference(input: {
 
   function isHostRemote(id: string, name?: string): boolean {
     return isHostJitsiParticipant(id, name ?? remoteNames.get(id) ?? '', botParticipantId())
+  }
+
+  function isSoundsRemote(id: string, name?: string): boolean {
+    return isSoundsJitsiParticipant(id, name ?? remoteNames.get(id) ?? '', soundsHandle?.localParticipantId() ?? null)
+  }
+
+  /** Служебные участники: не плитки, не «кто-то говорит». */
+  function isServiceRemote(id: string, name?: string): boolean {
+    return isHostRemote(id, name) || isSoundsRemote(id, name)
   }
 
   function hostSpeakingNow(): boolean {
@@ -481,7 +493,7 @@ export async function connectJitsiConference(input: {
   function anyoneSpeaking(): boolean {
     if (speakerActivity.has(localId())) return true
     for (const [id, name] of remoteNames) {
-      if (isHostRemote(id, name)) continue
+      if (isServiceRemote(id, name)) continue
       if (speakerActivity.has(id)) return true
     }
     return false
@@ -508,7 +520,7 @@ export async function connectJitsiConference(input: {
     ]
     for (const [id, name] of remoteNames) {
       if (id === localId()) continue
-      if (isHostRemote(id, name)) continue
+      if (isServiceRemote(id, name)) continue
       tiles.push({
         id,
         name,
@@ -616,6 +628,8 @@ export async function connectJitsiConference(input: {
     for (const [track, entry] of remoteAudioTracks) {
       const owner = trackOwner(track)
       if (!owner || (botId && owner === botId)) continue
+      // Эффекты игры модель не слышит.
+      if (isSoundsRemote(owner)) continue
       const stream = conferenceAudioStream(track)
       if (!stream) continue
       const muted = Boolean(track.isMuted?.())
@@ -807,6 +821,12 @@ export async function connectJitsiConference(input: {
 
   const handle: ConferenceHandle = {
     transport,
+    ...(input.createHostParticipant ? {
+      async publishSoundsStream(stream: MediaStream) {
+        if (!soundsHandle) throw new Error('Участник «Звуки игры» не подключён')
+        await soundsHandle.publishHostStream(stream)
+      },
+    } : {}),
     async publishHostStream(stream: MediaStream) {
       if (input.createHostParticipant) {
         if (!botHandle) throw new Error('Подключение ведущей к Jitsi ещё не готово')
@@ -1013,6 +1033,8 @@ export async function connectJitsiConference(input: {
       stopWatchingLocalMic()
       botHandle?.dispose()
       botHandle = null
+      soundsHandle?.dispose()
+      soundsHandle = null
       transport.close()
       modelMixer?.dispose()
       modelMixer = null
@@ -1057,6 +1079,24 @@ export async function connectJitsiConference(input: {
     } catch (error) {
       handle.dispose()
       throw error
+    }
+  }
+
+  if (input.createHostParticipant) {
+    // Не обязателен: без него мастер играет эффекты локально, как в одиночной игре.
+    try {
+      soundsHandle = await connectJitsiConference({
+        jitsiBase: input.jitsiBase,
+        roomName: input.roomName,
+        displayName: SOUNDS_JITSI_NAME,
+        bot: true,
+        // Обрыв служебного участника не роняет комнату: эффекты вернутся в динамик (App).
+        onError: (message) => pushTrace('note', `«Звуки игры»: ${message}`),
+      })
+      emitTiles()
+    } catch (error) {
+      pushTrace('note', 'Участник «Звуки игры» не подключился, эффекты играем локально', { error: String(error) })
+      soundsHandle = null
     }
   }
 
