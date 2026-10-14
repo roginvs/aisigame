@@ -33,6 +33,8 @@ test('кот в мешке голосом: имя получателя и ста
   await expect(panel).toHaveAttribute('data-listening', 'true')
   await hear(page, `отдаю игроку ${target.slice(-1)}`)
   await expect(panel.getByRole('group', { name: 'Ставка' })).toBeVisible()
+  await expect(panel.getByRole('group', { name: 'Ставка' }).getByRole('button').first()).toHaveClass(/primary special-option/)
+  await shot(page, 'cat-stake')
   await expect(panel).toHaveAttribute('data-listening', 'true')
   await hear(page, 'минимум')
   await expect(page.getByRole('heading', { name: 'Какой город называют Северной столицей России?' })).toBeVisible()
@@ -78,6 +80,8 @@ test('аукцион: торг кнопками, перекуп и пас', asyn
   const panel = page.getByRole('article', { name: 'Аукцион' })
   const bids = panel.getByRole('group', { name: 'Ставка аукциона' })
   await expect(panel).toContainText('Игрок 1 делает ставку')
+  await expect(bids.getByRole('button', { name: '200', exact: true })).toHaveClass(/special-option/)
+  await shot(page, 'auction')
   await bids.getByRole('button', { name: '200', exact: true }).click()
   await expect(panel).toContainText('Игрок 2 решает, перекупать ли')
   await bids.getByRole('button', { name: 'Ва-банк 300' }).click()
@@ -115,7 +119,15 @@ test('кот: запасной разбор моделью (имя и ставк
   await expect(page.getByRole('group', { name: `${target}: 300` })).toBeVisible()
 })
 
+/** Скриншот для ревью вёрстки: SPECIAL_SHOT_DIR=/workspace [SPECIAL_MOBILE=1]. */
+async function shot(page: Page, name: string): Promise<void> {
+  const dir = process.env.SPECIAL_SHOT_DIR
+  if (!dir) return
+  await page.screenshot({ path: `${dir}/${name}-${process.env.SPECIAL_MOBILE ? 'mobile' : 'desktop'}.png` })
+}
+
 async function startSpecialRound(page: Page, names?: string): Promise<void> {
+  if (process.env.SPECIAL_MOBILE) await page.setViewportSize({ width: 390, height: 844 })
   await page.goto('/')
   await page.getByLabel('Модель').selectOption('mock')
   if (names) await page.getByLabel('Имена игроков').fill(names)

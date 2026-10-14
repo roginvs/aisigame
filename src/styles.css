@@ -2077,9 +2077,24 @@ button.buzzer.chooser:disabled {
 .special-options {
   display: flex;
   flex-wrap: wrap;
-  gap: 8px;
+  gap: 10px;
   justify-content: center;
-  margin-top: 8px;
+  width: min(100%, 560px);
+  margin: 10px auto 0;
+}
+.special-option {
+  flex: 1 1 120px;
+  min-height: 52px;
+  font-size: clamp(1rem, 2.2vw, 1.2rem);
+  font-weight: 800;
+  touch-action: manipulation;
+  transition: filter 120ms ease, transform 120ms ease;
+}
+.special-option:not(:disabled):hover { filter: brightness(1.1); }
+.special-option:not(:disabled):active { transform: scale(0.97); }
+.special-option.ghost:not(:disabled):hover { background: rgb(92 113 136 / 25%); }
+@media (max-width: 520px) {
+  .special-option { flex-basis: calc(50% - 5px); min-height: 56px; }
 }
 .special-log {
   list-style: none;

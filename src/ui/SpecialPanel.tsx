@@ -53,7 +53,7 @@ export function SpecialPanel(props: {
             {giverActs && !path.endsWith('announcing') ? (
               <div className="special-options" role="group" aria-label="Кому отдать">
                 {context.players.filter((player) => player.id !== special.giverId).map((player) => (
-                  <button key={player.id} type="button" onClick={() => onPick({ target: 'player', playerId: player.id })}>{player.name}</button>
+                  <button key={player.id} type="button" className="primary special-option" onClick={() => onPick({ target: 'player', playerId: player.id })}>{player.name}</button>
                 ))}
               </div>
             ) : null}
@@ -70,7 +70,7 @@ export function SpecialPanel(props: {
             {stakeButtons ? (
               <div className="special-options" role="group" aria-label="Ставка">
                 {special.stakeOptions.map((amount, index) => (
-                  <button key={amount} type="button" onClick={() => onPick({ target: 'stake', amount })}>
+                  <button key={amount} type="button" className="primary special-option" onClick={() => onPick({ target: 'stake', amount })}>
                     {index === 0 ? `Минимум ${amount}` : `Максимум ${amount}`}
                   </button>
                 ))}
@@ -99,7 +99,7 @@ export function SpecialPanel(props: {
       {bidderActs ? (
         <div className="special-options" role="group" aria-label="Ставка аукциона">
           {special.options.map((option) => (
-            <button key={optionLabel(option)} type="button" onClick={() => onPick({ target: 'auction', option })}>{optionLabel(option)}</button>
+            <button key={optionLabel(option)} type="button" className={option.kind === 'pass' ? 'ghost special-option' : 'primary special-option'} onClick={() => onPick({ target: 'auction', option })}>{optionLabel(option)}</button>
           ))}
         </div>
       ) : null}
