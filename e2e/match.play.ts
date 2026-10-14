@@ -173,6 +173,7 @@ test('картинка, звук, ролик, выбор, вопрос без т
   await expect(page.getByRole('button', { name: 'Стопка, 100, сыграно' })).toBeDisabled()
 
   await pick(page, 'Показ, 100')
+  await expect(page.getByRole('heading', { name: 'Что ставят на документ, чтобы заверить его?' })).toBeVisible()
   await expect(page.getByRole('img', { name: 'Иллюстрация к ответу' })).toHaveCount(0)
   await buzz(page, 'Игрок 1')
   await hear(page, 'мимо')

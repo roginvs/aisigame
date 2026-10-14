@@ -100,7 +100,7 @@
             <question price="100">
               <params>
                 <param name="question" type="content">
-                  <item>Что поставлено после метки ответа?</item>
+                  <item>Что ставят на документ, чтобы заверить его?</item>
                   <item type="marker"></item>
                   <item type="image" isRef="true">demo/seal.svg</item>
                 </param>
