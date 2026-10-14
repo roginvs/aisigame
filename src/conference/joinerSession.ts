@@ -131,6 +131,12 @@ export class JoinerSession {
       })
     }
     this.unsub = this.transport.subscribe((message, senderId) => {
+      // Ping отвечаем сразу, мимо очереди: иначе RTT включает время, пока очередь
+      // ждёт проверку пакета (реальный sha256), и pong опаздывает или теряется.
+      if (message.type === 'ping') {
+        if (!this.disposed && !this.buildRejected) this.answerPing(message, senderId)
+        return
+      }
       this.messageQueue = this.messageQueue
         .then(() => (this.disposed ? undefined : this.onMessage(message, senderId)))
         .catch((error: unknown) => {
@@ -271,12 +277,6 @@ export class JoinerSession {
 
   private async onMessage(message: ConferenceMessage, senderId: string): Promise<void> {
     if (this.buildRejected || this.disposed) return
-    if (message.type === 'ping') {
-      if (!this.acceptMaster(message.authorityToken, senderId, false)) return
-      this.transport.send({ type: 'pong', clientId: this.clientId, authToken: this.authToken, seq: message.seq, sentAt: message.sentAt })
-      this.noteMasterAlive()
-      return
-    }
     if (message.type === 'appealReply') {
       if (message.targetClientId !== this.clientId || !this.acceptMaster(message.authorityToken, senderId, false)) return
       const pending = this.appealPending.get(message.requestId)
@@ -611,6 +611,12 @@ export class JoinerSession {
     this.callbacks.onFatalError(mismatch)
     this.dispose()
     return false
+  }
+
+  private answerPing(message: { authorityToken: string; seq: number; sentAt: number }, senderId: string): void {
+    if (!this.acceptMaster(message.authorityToken, senderId, false)) return
+    this.transport.send({ type: 'pong', clientId: this.clientId, authToken: this.authToken, seq: message.seq, sentAt: message.sentAt })
+    this.noteMasterAlive()
   }
 
   private acceptMaster(authorityToken: string, senderId: string, canRebind: boolean): boolean {

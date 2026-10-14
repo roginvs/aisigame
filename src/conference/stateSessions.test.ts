@@ -280,8 +280,10 @@ it('ping: мастер каждые ~3 с меряет RTT гостя, знач�
     room.pongDelayMs = 0
     guest.send({ type: 'pong', clientId: 'guest', authToken: 'wrong', seq: 1, sentAt: Date.now() - 900 })
     expect(master.rosterList().find((entry) => entry.clientId === 'guest')?.pingMs).toBe(42)
-    await vi.advanceTimersByTimeAsync(1_000)
-    expect(joiner.snapshot()?.presence.find((entry) => entry.clientId === 'guest')?.pingMs).toBeGreaterThanOrEqual(0)
+    // Снимок гость применяет через очередь сообщений после реальной (не фейковой) проверки sha256
+    // пакета, поэтому под нагрузкой он приходит позже по реальному времени; waitFor ждёт и его.
+    await vi.waitFor(() => expect(joiner.snapshot()?.presence.find((entry) => entry.clientId === 'guest')?.pingMs).toBeGreaterThanOrEqual(0),
+      { interval: 50, timeout: 8_000 })
     // Pong задержан на 120 мс — следующий замер обновляет значение.
     room.pongDelayMs = 120
     await vi.advanceTimersByTimeAsync(3_000)
@@ -291,3 +293,26 @@ it('ping: мастер каждые ~3 с меряет RTT гостя, знач�
   }
 })
 
+
+it('ping: гость отвечает pong сразу, даже если очередь сообщений занята проверкой пакета', async () => {
+  const room = new Room()
+  const transport = room.connect('master')
+  const actor = createActor(gameMachine).start()
+  const players = [{ id: 1, name: 'Мастер', score: 0, clientId: 'master' }, { id: 2, name: 'Гость', score: 0, clientId: 'guest' }]
+  actor.send({ type: 'START_GAME', pack: demoPack, players })
+  const bytes = new Uint8Array([1, 2, 3])
+  const hash = await sha256Hex(bytes)
+  const master = new MasterSession({ transport, actor, client: { requestSpeech: vi.fn() } as unknown as GameVoice,
+    masterClientId: 'master', masterName: 'Мастер', pack: demoPack, packBytes: bytes, packHash: hash, authorityToken: 'master-token', onRoster: () => {}, resumePlayers: players })
+  const guest = room.connect('guest-endpoint')
+  const callbacks = { onSnapshot: vi.fn(), onLobby: vi.fn(), onPackReady: vi.fn(), onError: vi.fn(), onFatalError: vi.fn() }
+  // Кеш пакета не отвечает никогда — очередь гостя навсегда стоит на проверке пакета.
+  const joiner = new JoinerSession({ transport: guest, clientId: 'guest', authToken: 'guest-token', name: 'Гость', callbacks,
+    packCache: { get: () => new Promise<Uint8Array | null>(() => {}), put: async () => {}, delete: async () => {} } })
+  try {
+    await vi.advanceTimersByTimeAsync(3_000)
+    expect(master.rosterList().find((entry) => entry.clientId === 'guest')?.pingMs).toBe(0)
+  } finally {
+    joiner.dispose(); master.dispose(); actor.stop()
+  }
+})
