@@ -85,7 +85,12 @@ test('на планшете страница тоже скроллится и к
   await page.getByLabel('Пакет вопросов').selectOption('demo')
   await page.getByLabel('Ваше имя').fill('Мастер')
   await page.getByRole('button', { name: 'Начать игру' }).click()
-  await expect(page.getByRole('button', { name: 'Начать игру' })).toBeVisible()
+  // У формы старта своя кнопка «Начать игру»: её видимость ничего не говорит о лобби.
+  // Ждём признаки именно лобби мастера: форма ушла, есть «Ссылка для игры» и
+  // «Начать игру» уже внутри стола.
+  await expect(page.getByLabel('Пакет вопросов')).toHaveCount(0)
+  await expect(page.getByRole('button', { name: 'Ссылка для игры' })).toBeVisible()
+  await expect(page.locator('main.table').getByRole('button', { name: 'Начать игру' })).toBeVisible()
   await expectPageCanScrollVertically(page)
   await page.getByPlaceholder('Сообщение в чат…').scrollIntoViewIfNeeded()
   await expect(page.getByPlaceholder('Сообщение в чат…')).toBeVisible()
@@ -103,6 +108,7 @@ async function expectNoPageSideScroll(page: Page): Promise<void> {
 }
 
 async function expectPageCanScrollVertically(page: Page): Promise<void> {
+  await expect(page.locator('main.table')).toHaveCount(1)
   const sizes = await page.evaluate(() => ({
     client: document.documentElement.clientHeight,
     scroll: document.documentElement.scrollHeight,
