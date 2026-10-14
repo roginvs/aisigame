@@ -88,7 +88,7 @@ function allCues(): Array<[string, string]> {
   const appeal = { questionId: 'q', windowId: 1, startedAt: 0, remainingMs: 0, activePlayerId: 1 }
   list.push(['appeal', cues.announceInstructions({ ...c, announceKind: 'correct', appeal: appeal as never, outcomes: { q: { 1: { amount: 100, previous: -100 } } } as never })])
   for (const kind of ['opened', 'update', 'idle'] as const) {
-    list.push([`lobby-${kind}`, lobbySpeechInstructions({ kind, packName: 'Пакет', packSummary: '2 раунда, 3 вопроса.', roster: roster(), waitingForMaster: true })])
+    list.push([`lobby-${kind}`, lobbySpeechInstructions({ kind, packName: 'Пакет', packSummary: 'Раундов: 2, вопросов: 3.', roster: roster() })])
   }
   return list
 }
@@ -98,6 +98,8 @@ describe('подсказки ведущей: без ремарок, тона-п�
     it(name, () => {
       const folded = text.toLocaleLowerCase('ru').replaceAll('ё', 'е')
       for (const word of STOP) expect(folded, `${name}: «${word}»`).not.toContain(word)
+      const oblique = /(?:^|[\s«])(?:к|у|от|для|с|Спроси|Поторопи|попроси|Попроси|назови|Скажи|скажи|Поздравь|обратись к|Обратись к)\s+(?:Боря|Маша|Игрок 3)(?=[\s,.:;!?»]|$)/u
+      expect(spokenPayload(text).match(oblique)?.[0] ?? null, `${name}: имя в косвенном падеже`).toBeNull()
       expect(spokenPayload(text).match(/.{0,40}[()].{0,40}/)?.[0] ?? null, `${name}: скобки`).toBeNull()
     })
   }

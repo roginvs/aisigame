@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { setIdleScale } from './game/idle.ts'
+import { setAppealScale } from './game/appeals.ts'
 import { useMachine } from '@xstate/react'
 import { unlockAudio } from './audio/beep.ts'
 import { buildInviteUrl, parseInvite } from './conference/invite.ts'
@@ -273,6 +274,7 @@ export default function App() {
         hearSlow: (text, hearMs, thinkMs) => { client.hearSlow(text, hearMs, thinkMs) },
         setSpeechMs: (ms) => client.setSpeechMs(ms),
         setIdleScale: (scale) => setIdleScale(scale),
+        setAppealScale: (scale) => setAppealScale(scale),
         flipPackByte: () => joinerFlipPackRef.current?.(),
       }
     }

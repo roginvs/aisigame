@@ -1,6 +1,14 @@
 import type { AppealContext, AppealRequest, GameContext, OutcomeLedger, PlayerId } from './types.ts'
 
-export const appealWindowMs = 5_000
+export const APPEAL_WINDOW_MS = 5_000
+let appealScale = 1
+/** Демо и e2e: растянуть окно апелляции (4 — в четыре раза дольше), чтобы тест под нагрузкой не опаздывал к кнопке. */
+export function setAppealScale(next: number): void {
+  appealScale = Number.isFinite(next) && next > 0 ? next : 1
+}
+export function appealWindowMs(): number {
+  return Math.round(APPEAL_WINDOW_MS * appealScale)
+}
 
 export function eligibleAppealPlayers(context: Pick<GameContext, 'outcomes' | 'players'>, questionId: string): PlayerId[] {
   return context.players.filter((player) => {
@@ -81,7 +89,7 @@ export function readAppeal(value: unknown): AppealContext | null | undefined {
   if (typeof a.questionId !== 'string' || !a.questionId || !Number.isSafeInteger(a.windowId) || a.windowId < 1 ||
     !['open', 'closed'].includes(a.stage) || !Array.isArray(a.queue) || !a.queue.every(player) || new Set(a.queue).size !== a.queue.length ||
     (a.activePlayerId !== null && !player(a.activePlayerId)) || (a.lastPlayerId !== null && !player(a.lastPlayerId)) || !player(a.chooserId) ||
-    !Number.isFinite(a.remainingMs) || a.remainingMs < 0 || a.remainingMs > appealWindowMs ||
+    !Number.isFinite(a.remainingMs) || a.remainingMs < 0 || a.remainingMs > appealWindowMs() ||
     (a.startedAt !== null && !Number.isFinite(a.startedAt))) return undefined
   if ((a.summary !== undefined && a.summary !== 'pending' && a.summary !== 'done') || (a.timeUp !== undefined && typeof a.timeUp !== 'boolean')) return undefined
   if (a.acceptedRequestIds !== undefined && (!Array.isArray(a.acceptedRequestIds) || a.acceptedRequestIds.some((id) => typeof id !== 'string' || id.length > 200))) return undefined

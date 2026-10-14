@@ -93,6 +93,8 @@ test('аукцион: торг кнопками, перекуп и пас', asyn
 
 test('кот: запасной разбор моделью (имя и ставка), минус ставки и апелляция на ставку', async ({ page }) => {
   await startSpecialRound(page, 'Анна; Борис; Вера;')
+  // Окно апелляции 5 с: под параллельной нагрузкой два клика (кнопка + подтверждение) могли опоздать, и клик ждал до таймаута теста.
+  await page.evaluate(() => (window as unknown as { __aisigame?: { setAppealScale?: (scale: number) => void } }).__aisigame?.setAppealScale?.(4))
   await page.getByRole('button', { name: 'Сюрприз, 200', exact: true }).click()
   const panel = page.getByRole('article', { name: 'Кот в мешке' })
   await expect(panel).toHaveAttribute('data-listening', 'true')
@@ -107,8 +109,9 @@ test('кот: запасной разбор моделью (имя и ставк
   await answer(page, 'не знаю')
   const group = page.getByRole('group', { name: `${target}: -300` })
   await expect(group).toBeVisible()
+  await expect(group.getByRole('button', { name: 'Апелляция' })).toBeEnabled()
   await group.getByRole('button', { name: 'Апелляция' }).click()
-  await page.getByRole('button', { name: 'Да, я ответил правильно' }).click()
+  await page.getByRole('button', { name: 'Да, я ответил правильно' }).click({ timeout: 10_000 })
   await expect(page.getByRole('group', { name: `${target}: 300` })).toBeVisible()
 })
 

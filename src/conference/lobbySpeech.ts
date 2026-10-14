@@ -17,7 +17,6 @@ export type LobbySpeechFacts = {
   packName: string
   packSummary: string
   roster: RosterEntry[]
-  waitingForMaster?: boolean
   publicContext?: string
 }
 
@@ -71,7 +70,7 @@ export function lobbySpeechInstructions(facts: LobbySpeechFacts): string {
     lines.push(
       'Статусы не изменились. Если игроки недавно о чём-то говорили, можно коротко подхватить разговор.',
       'Иначе напомни состав: перечисли, кого ещё ждём и что у них: загрузка и сколько осталось, сверка или не нажал «готов».',
-      'Не устраивай ажиотаж и не повторяй одну и ту же шутку про ожидание.',
+      'Не повторяй одну и ту же шутку про ожидание.',
     )
   } else if (facts.kind === 'update') {
     lines.push(
@@ -95,9 +94,6 @@ export function lobbySpeechInstructions(facts: LobbySpeechFacts): string {
     lines.push('Все гости готовы.')
   } else {
     lines.push('Гостей пока нет — ждём игроков по ссылке.')
-  }
-  if (facts.waitingForMaster) {
-    lines.push('Мастер-игрок ещё не в комнате — можно коротко сказать, что ждём его.')
   }
   if (facts.publicContext) lines.push(facts.publicContext)
   return lines.join('\n')

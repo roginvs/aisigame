@@ -345,7 +345,7 @@ export const gameMachine = setup({
     events: {} as GameEvent,
   },
   delays: {
-    appealLeft: ({ context }) => context.appeal ? appealMsLeft(context.appeal) : appealWindowMs,
+    appealLeft: ({ context }) => context.appeal ? appealMsLeft(context.appeal) : appealWindowMs(),
     buzzerMs: gameConfig.buzzerMs,
     buzzerLeft: ({ context }) => buzzerMsLeft(context),
     answerMs: gameConfig.answerMs,
@@ -440,7 +440,7 @@ export const gameMachine = setup({
       const windowId = (context.appealSerial ?? 0) + 1
       return { appealSerial: windowId, appeal: { questionId, windowId, stage: 'closed' as const, queue: [], activePlayerId: null,
         lastPlayerId: null, chooserId: context.appeal?.stage === 'closed' ? context.appeal.chooserId : context.chooserId,
-        remainingMs: appealWindowMs, startedAt: Date.now() } }
+        remainingMs: appealWindowMs(), startedAt: Date.now() } }
     }),
     acceptAppeal: assign(({ context, event }) => {
       if (event.type !== 'APPEAL_REQUESTED' || !context.appeal) return {}
@@ -461,7 +461,7 @@ export const gameMachine = setup({
       const questionId = context.activeQuestionId
       if (!questionId) return {}
       const windowId = (context.appealSerial ?? 0) + 1
-      const base = { questionId, windowId, queue: [], activePlayerId: null, chooserId: context.chooserId, remainingMs: appealWindowMs, startedAt: Date.now() }
+      const base = { questionId, windowId, queue: [], activePlayerId: null, chooserId: context.chooserId, remainingMs: appealWindowMs(), startedAt: Date.now() }
       if (context.playedIds.includes(questionId)) {
         if (context.appeal?.questionId === questionId && context.appeal.stage === 'closed') return {}
         if (eligibleAppealPlayers(context, questionId).length === 0) return { appeal: null }
@@ -689,7 +689,7 @@ export const gameMachine = setup({
       appeal: ({ context }) => context.activeQuestionId ? {
         questionId: context.activeQuestionId, windowId: (context.appealSerial ?? 0) + 1, stage: 'open' as const,
         queue: [], activePlayerId: null, lastPlayerId: context.activePlayerId, chooserId: context.chooserId,
-        remainingMs: appealWindowMs, startedAt: Date.now(),
+        remainingMs: appealWindowMs(), startedAt: Date.now(),
       } : null,
 
       activePlayerId: () => null,

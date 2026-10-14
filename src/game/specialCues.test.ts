@@ -34,7 +34,7 @@ describe('реплики кота и аукциона', () => {
   })
   it('аукцион: авто-ставка, перекуп, итог', () => {
     const auction = { ...special, kind: 'auction' as const }
-    expect(auctionCue({ ...context, special: { ...auction, bid: 200 } })).toContain('автоматически')
+    expect(auctionCue({ ...context, special: { ...auction, bid: 200 } })).toContain('торгов нет')
     const ask = auctionAskCue({ ...context, special: { ...auction, recipientId: 3, leaderId: 2, bid: 400 } })
     expect(ask).toContain('назови текущую ставку 400, скажи, что она у игрока Боря')
     expect(ask).toContain('«Вася, у Бори уже четыреста')

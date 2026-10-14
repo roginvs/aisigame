@@ -28,6 +28,8 @@ export type MockControls = {
   setSpeechMs: (ms: number) => void
   /** Демо: ускорить отсчёт молчания (0.1 — в 10 раз быстрее, 1 — как в игре). */
   setIdleScale?: (scale: number) => void
+  /** Демо/e2e: растянуть окно апелляции. */
+  setAppealScale?: (scale: number) => void
   /** Только конференция на заглушке: портит байт пакета у joiner. */
   flipPackByte?: () => void
 }
@@ -393,7 +395,7 @@ function hostLine(purpose: string, instructions = ''): string {
   if (purpose === 'micWarning') {
     const name =
       /Имя игрока:\s*(.+)/.exec(instructions)?.[1]?.split('\n')[0]?.trim() ||
-      /обратись к\s+(.+?)\s+по имени/i.exec(instructions)?.[1]?.trim() ||
+      /(?:Выбирает вопрос|Отвечает после кнопки) игрок:\s*(.+?)\.\s/.exec(instructions)?.[1]?.trim() ||
       /выбирает вопрос[\s\S]*?([А-ЯA-Z][^\s,]+)/.exec(instructions)?.[1]?.trim()
     return name ? `${name}, включи микрофон.` : 'Микрофон выключен.'
   }

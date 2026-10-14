@@ -44,7 +44,7 @@ describe('молчание на выборе вопроса', () => {
     expect(nudges(actor)).toBe(0)
     tick(1)
     expect(nudges(actor)).toBe(1)
-    expect(idleNudgeCue('choosing.listening', ctx(actor))).toContain('молчит уже около 15 с')
+    expect(idleNudgeCue('choosing.listening', ctx(actor))).toContain('Молчит уже около 15 с')
     tick(idleSteps.choosing[1] - idleSteps.choosing[0])
     expect(nudges(actor)).toBe(2)
     expect(idleNudgeCue('choosing.listening', ctx(actor))).toContain('Поторопи')
