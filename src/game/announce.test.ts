@@ -579,8 +579,9 @@ describe('falseStartInstructions', () => {
     expect(one).toContain('Ситуация:')
     expect(one).toContain('Вася')
     expect(one).toContain('фальстарт')
-    expect(one).toContain('«Вася, фальстарт»')
-    expect(one).toContain('не обязательно дословно')
+    expect(one).not.toContain('Пример тона')
+    expect(one).not.toContain('фальстарт»')
+    expect(one).toContain('каждый раз по-новому')
     expect(one).not.toContain('Боевой Буратино')
     const two = falseStartInstructions(
       context({
@@ -593,7 +594,7 @@ describe('falseStartInstructions', () => {
     )
     expect(two).toContain('Маша')
     expect(two).toContain('Вася')
-    expect(two).toContain('«Ого, Маша и Вася, фальстарт»')
+    expect(two).not.toContain('Ого')
     expect(two).not.toContain('Боевой Буратино')
   })
 })

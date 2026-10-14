@@ -1,3 +1,4 @@
+import { appealResultLine } from '../game/appealSpeech.ts'
 import { AudioItems, type AudioReference, type AudioItemReady } from './audioItems.ts'
 import type { JudgeRequestContext, JudgmentCapabilities } from './judgmentRequest.ts'
 import { livePlayerChatVisible } from './liveSpeech.ts'
@@ -433,8 +434,10 @@ function announceLine(instructions: string): string {
   const folded = instructions.toLowerCase().replaceAll('ё', 'е')
   const quoted = [...instructions.matchAll(/«([^»]+)»/g)].map((match) => match[1]?.trim() ?? '').filter(Boolean)
   // Итог апелляции: заглушка говорит ровно пример из подсказки (итог за этот вопрос числом).
-  const appealLine = /итог апелляции по смыслу так: «([^»]+)»/.exec(instructions)?.[1]
-  if (appealLine) return appealLine
+  const facts = /Факты: апелляция (принята|не принята); игрок: (.+?); за этот вопрос было (-?\d+) \([^)]*\), стало (-?\d+) \([^)]*\); общий счёт (-?\d+)\./.exec(instructions)
+  if (facts) {
+    return appealResultLine({ name: facts[2] ?? '', accepted: facts[1] === 'принята', previous: Number(facts[3]), amount: Number(facts[4]), total: Number(facts[5]) })
+  }
   if (folded.includes('произнеси') && quoted[0]) return quoted[0]
   if (folded.includes('исход: молчание')) return 'Ничего не услышала, минус.'
   if (folded.includes('исход: повтор') || folded.includes('попроси повторить')) return 'Повторите, пожалуйста.'

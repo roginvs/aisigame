@@ -18,7 +18,7 @@ export function amountWords(amount: number, genitive = false): string {
 }
 
 /**
- * Итог апелляции одной фразой. Один итог на игрока за ячейку: новый заменяет прежний, это не доплата и не второе списание.
+ * Итог апелляции одной фразой — только заглушка ведущей и тесты; живая модель получает факты и говорит сама. Один итог на игрока за ячейку: новый заменяет прежний, это не доплата и не второе списание.
  * accepted — решение в пользу игрока (верно), иначе апелляция не помогла.
  */
 export function appealResultLine(input: { name: string; amount: number; previous: number; accepted: boolean; total?: number }): string {

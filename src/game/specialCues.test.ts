@@ -18,7 +18,8 @@ describe('реплики кота и аукциона', () => {
   it('кот: тему и вопрос до выбора не раскрывает, просит отдать', () => {
     const cue = catCue(context)
     expect(cue).toContain('Аня')
-    expect(cue).toContain('Кому отдадите')
+    expect(cue).toContain('кому он отдаёт кота')
+    expect(cue).not.toContain('Кому отдадите')
     expect(cue).not.toContain('СЕКРЕТНЫЙ ВОПРОС')
     expect(cue).not.toContain('ЭТАЛОН')
     expect(cue).toContain('Тему кота пока не называй')
@@ -34,7 +35,12 @@ describe('реплики кота и аукциона', () => {
   it('аукцион: авто-ставка, перекуп, итог', () => {
     const auction = { ...special, kind: 'auction' as const }
     expect(auctionCue({ ...context, special: { ...auction, bid: 200 } })).toContain('автоматически')
-    expect(auctionAskCue({ ...context, special: { ...auction, recipientId: 3, leaderId: 2, bid: 400 } })).toContain('Сейчас 400 у Боря')
+    const ask = auctionAskCue({ ...context, special: { ...auction, recipientId: 3, leaderId: 2, bid: 400 } })
+    expect(ask).toContain('назови текущую ставку (400) и у кого она (Боря)')
+    expect(ask).toContain('Примеры стиля')
+    expect(ask).toContain('не копируй')
+    expect(ask.match(/«[^»]+»/g)?.length).toBeGreaterThanOrEqual(4)
+    expect(ask).not.toContain('перекупаете?»')
     expect(auctionWonCue({ ...context, special: { ...auction, leaderId: 2, bid: 400 } })).toContain('уходит игроку Боря за 400')
     expect(auctionWonCue({ ...context, special: { ...auction, leaderId: 2, bid: 400 } })).not.toContain('СЕКРЕТНЫЙ')
   })

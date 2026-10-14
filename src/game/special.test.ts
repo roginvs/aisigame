@@ -78,7 +78,7 @@ describe('апелляции кота и аукциона', () => {
     expect(path(actor)).toBe('appealConfirm')
     vi.advanceTimersByTime(1)
     expect(score(actor, 3)).toBe(500)
-    expect(announceInstructions(ctx(actor))).toContain('теперь плюс пятьсот вместо минус пятисот')
+    expect(announceInstructions(ctx(actor))).toContain('стало плюс пятьсот, было минус пятьсот')
     heard(actor, 'announce')
     expect(path(actor)).toBe('choosing.listening')
   })

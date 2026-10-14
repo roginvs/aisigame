@@ -32,13 +32,3 @@ export function playerName(players: readonly Player[], id: PlayerId | null): str
   return players.find((player) => player.id === id)?.name ?? ''
 }
 
-/** Короткая реплика про фальстарт. Ответа пакета в ней нет. */
-export function falseStartLine(names: readonly string[]): string {
-  if (names.length === 0) return 'Фальстарт'
-  if (names.length === 1) return `${names[0]}, фальстарт`
-  const listed =
-    names.length === 2
-      ? `${names[0]} и ${names[1]}`
-      : `${names.slice(0, -1).join(', ')} и ${names[names.length - 1]}`
-  return `Ого, ${listed}, фальстарт`
-}

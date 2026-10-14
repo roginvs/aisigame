@@ -17,7 +17,7 @@ import { conversationLineFromTrace } from '../conference/traceConversation.ts'
 import { getTrace } from '../debug/trace.ts'
 import { withCommentary } from './commentary.ts'
 import { parseBet } from './bet.ts'
-import { appealResultLine, amountWords } from './appealSpeech.ts'
+import { amountWords } from './appealSpeech.ts'
 import { questionSpeech, spokenChoiceForms } from './choices.ts'
 import { matchSpokenCell, selectionChatText } from './choiceMatch.ts'
 import { answerListeningPrompt, echoesAnswerPrompt, phantomListedAnswer } from './answerPrompt.ts'
@@ -34,7 +34,7 @@ import {
   phoneticRetryReason,
   statePath,
 } from './machine.ts'
-import { falseStartLine, openingChooser, playerName } from './players.ts'
+import { openingChooser, playerName } from './players.ts'
 import { spokenAnswerCue } from './spokenAnswer.ts'
 import type { AnnounceKind, AuctionOption, GameContext, JudgmentStatus, PlayerId, SpeechPurpose } from './types.ts'
 
@@ -1644,10 +1644,9 @@ export function falseStartInstructions(context: GameContext): string {
     .filter((player) => context.falseStarts[player.id] !== undefined)
     .map((player) => player.name)
   const listed = names.length ? names.join(', ') : 'игрок'
-  const example = falseStartLine(names)
   return hostCue({
     situation: `На этом вопросе фальстарт: ${listed}. Окно кнопки ещё не началось.`,
-    goal: `Одной короткой живой фразой назови этих игроков и скажи, что был фальстарт. Пример тона: «${example}» — можно близко своими словами, не обязательно дословно.`,
+    goal: `Одной короткой живой фразой назови этих игроков по имени и скажи, что у них фальстарт (нажали раньше времени). Формулировку выбирай сам, каждый раз по-новому.`,
     constraints: ['Правильный ответ не называй. Вопрос не читай. Ничего про счёт и темы.'],
   })
 }
@@ -1783,7 +1782,7 @@ export function catCue(context: GameContext): string {
     ? 'Игрок один — вопрос остаётся у него.'
     : special?.recipientId != null
       ? `Вопрос автоматически уходит игроку ${nameOf(context, special.recipientId)}.`
-      : `${giver} должен отдать вопрос другому игроку. В конце спроси: «Кому отдадите?»`
+      : `${giver} должен отдать вопрос другому игроку. В конце спроси у ${giver}, кому он отдаёт кота, — своими словами.`
   return hostCue({
     situation: `Выбрана ячейка «кот в мешке». Выбирал ${giver}. Игроков: ${count}. ${who}${before}`,
     goal: `Поздравь: у ${giver} кот в мешке, вопрос нужно отдать. ${count >= 3 && special?.recipientId == null ? 'Спроси, кому отдаст.' : ''}`,
@@ -1838,13 +1837,28 @@ export function auctionCue(context: GameContext): string {
   })
 }
 
+/** Примеры тона для вопроса «перекупаете?» — модель не копирует, а варьирует. */
+export function auctionAskStyle(bidder: string, leader: string, bid: number): string {
+  return [
+    `«${bidder}, у ${leader} уже ${bid} — будете перебивать?»`,
+    `«${bid} от ${leader}. ${bidder}, поднимаете?»`,
+    `«${bidder}, ваше слово: перекупаете у ${leader} или пас?»`,
+    `«На кону ${bid}, лидирует ${leader}. ${bidder}, рискнёте?»`,
+    `«${bidder}, ${leader} предложил ${bid}. Дадите больше?»`,
+  ].join('; ')
+}
+
 export function auctionAskCue(context: GameContext): string {
   const special = context.special
   const bidder = nameOf(context, special?.recipientId)
   return hostCue({
     situation: `${auctionIdleNote(context)}Аукцион. Сейчас ${special?.allIn ? 'ва-банк ' : ''}${special?.bid} у игрока ${nameOf(context, special?.leaderId)}. Спрашиваешь игрока ${bidder}.`,
-    goal: `Обратись к игроку ${bidder}: «Сейчас ${special?.bid} у ${nameOf(context, special?.leaderId)}, перекупаете?»`,
-    constraints: ['Варианты не перечисляй: они на экране.', 'Одна короткая фраза.'],
+    goal: `Обратись к игроку ${bidder} по имени: назови текущую ставку (${special?.allIn ? 'ва-банк ' : ''}${special?.bid}) и у кого она (${nameOf(context, special?.leaderId)}), и спроси, будет ли ${bidder} перекупать.`,
+    constraints: [
+      `Примеры стиля — только чтобы понять тон, не копируй их и каждый раз говори по-новому: ${auctionAskStyle(bidder, nameOf(context, special?.leaderId), special?.bid ?? special?.nominal ?? 0)}.`,
+      'Варианты не перечисляй: они на экране.',
+      'Одна короткая фраза.',
+    ],
   })
 }
 
@@ -1978,12 +1992,15 @@ export function announceInstructions(context: GameContext): string {
     const closed = context.playedIds.includes(context.appeal.questionId)
     const previous = row?.previous ?? amount
     const verdict = context.announceKind === 'correct' ? 'верно' : context.announceKind === 'unclear' ? 'ответ не разобран' : context.announceKind === 'silence' ? 'ничего не услышала' : 'неверно'
-    const line = appealResultLine({ name: player?.name ?? 'игрока', amount, previous, accepted: context.announceKind === 'correct', total: player?.score ?? 0 })
+    const accepted = context.announceKind === 'correct'
+    const total = player?.score ?? 0
     const answer = closed && context.announceKind !== 'correct' ? ` ${spokenAnswerCue(question?.answers ?? [], question?.choices ?? [])}` : ''
     return hostCue({
       situation: `Апелляция ${player?.name ?? 'игрока'}: ${verdict}. Итог за этот вопрос у игрока ${player?.name ?? ''}: было ${previous}, стало ${amount} (${delta === 0 ? 'без изменений' : `${delta > 0 ? '+' : ''}${delta}`}); общий счёт ${player?.score ?? 0}. У игрока один итог за ячейку: новый заменяет прежний, это не дополнительное списание и не второе начисление.`,
-      goal: `Скажи итог апелляции по смыслу так: «${line}» Имя можно склонять («у Васи»), числа назови словами как в примере.${answer}`,
+      goal: `Скажи итог апелляции своими словами. Факты: апелляция ${accepted ? 'принята' : 'не принята'}; игрок: ${player?.name ?? 'игрок'}; за этот вопрос было ${previous} (${amountWords(previous)}), стало ${amount} (${amountWords(amount)}); общий счёт ${total}. Назови, принята ли апелляция, имя и итог за этот вопрос; общий счёт — если уместно.${answer}`,
       constraints: [
+        `Числа говори строго по фактам: за этот вопрос стало ${amountWords(amount)}${amount === previous ? ' (не изменилось)' : `, было ${amountWords(previous)}`}; общий счёт ${total}. Не путай знак (плюс/минус), не переставляй «было» и «стало», не округляй.`,
+        'Формулировку выбирай сам, каждый раз по-новому; имя можно склонять.',
         closed ? 'Не приглашай выбирать следующий вопрос: ещё обрабатываются апелляции.' : 'Эталон не называй и не намекай. Не приглашай выбирать следующий вопрос.',
         'Не говори расплывчато «счёт не изменился» или «счёт обновлён»: назови итог за этот вопрос числом.',
         'Не говори о повторном списании или доплате. Без ремарок, коротко.',
