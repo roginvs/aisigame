@@ -1,0 +1,10 @@
+/**
+ * Служебные слова, которые ведущая не должна произносить (ремарки, тон, смех словами).
+ * Только для проверки сказанного и тестов — в подсказки модели этот список не попадает.
+ */
+export const STAGE_WORDS = ['мягко', 'тихо', 'тепло', 'продолжим', 'итак', 'смешок', 'хихик', 'сухая фраза', 'в скобках', 'ремарк', 'по-доброму', 'спокойно', 'нейтральн'] as const
+
+export function stageWordsIn(text: string): string[] {
+  const folded = text.toLocaleLowerCase('ru').replaceAll('ё', 'е')
+  return STAGE_WORDS.filter((word) => folded.includes(word))
+}

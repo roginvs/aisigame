@@ -27,7 +27,7 @@ export function verbatimSpeech(text: string): string {
 }
 
 /** Второй абзац модель играет, но игрокам не читает. */
-export const playNoteMark = '\n\nКак сыграть, вслух не читать:\n'
+export const playNoteMark = '\n\nДействие ведущей, не слова реплики:\n'
 
 export function withPlayNote(spoken: string, note: string): string {
   const line = spoken.trim()
@@ -36,13 +36,13 @@ export function withPlayNote(spoken: string, note: string): string {
   return `${line}${playNoteMark}${aside}`
 }
 
-/** Текст, который можно сказать. Пометка «как сыграть» сюда не входит. */
+/** Текст, который можно сказать. Пометка действия сюда не входит. */
 export function spokenPayload(cue: string): string {
   const at = cue.indexOf(playNoteMark)
   return (at === -1 ? cue : cue.slice(0, at)).trim()
 }
 
-/** Как сыграть. Пусто, если пометки нет. */
+/** Действие ведущей, например смех. Пусто, если пометки нет. */
 export function playNote(cue: string): string {
   const at = cue.indexOf(playNoteMark)
   if (at === -1) return ''
@@ -77,13 +77,10 @@ export function isolatedToolResponse(options: {
   }
 }
 
-const toneAside =
-  'Ремарку, скобки и слова про тон вслух не читай и в скобки не ставь: «смешок», «с лёгким смешком», «хихикаем», «тёплая фраза», «сухая фраза», «в скобках».'
-
 export function isolatedCue(instructions: string, meta: { purpose: string; turn: number; take: number }) {
   const spoken = spokenPayload(instructions)
   const aside = playNote(instructions)
-  const performance = aside ? `Как сыграть, этот абзац игрокам не говорить: ${aside}` : ''
+  const performance = aside ? `Действие ведущей, не слова реплики: ${aside}` : ''
   return {
     conversation: 'none' as const,
     output_modalities: ['audio'] as const,
@@ -91,8 +88,7 @@ export function isolatedCue(instructions: string, meta: { purpose: string; turn:
     tools: [] as const,
     metadata: { purpose: meta.purpose, turn: String(meta.turn), take: String(meta.take) },
     instructions: [
-      'Ты ведущая. По сообщению ниже скажи игрокам одну короткую реплику своими словами, без предисловия и без пересказа задания. Ремарки и описания тона или действий («мягко», «тихо», «продолжим») не произноси. Не объявляй, что сейчас что-то произнесёшь. Если сообщение прямо не просит произнести эталон пакета, не произноси правильный ответ и не вспоминай его из других знаний. Не повторяй вопрос.',
-      toneAside,
+      'Ты ведущая. По сообщению ниже скажи игрокам одну короткую реплику своими словами, без предисловия и без пересказа задания. Говори только саму реплику: служебные пометки вслух не произноси. Не объявляй, что сейчас что-то произнесёшь. Если сообщение прямо не просит произнести эталон пакета, не произноси правильный ответ и не вспоминай его из других знаний. Не повторяй вопрос.',
       performance,
     ]
       .filter(Boolean)

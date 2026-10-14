@@ -1,3 +1,4 @@
+import { stageWordsIn } from './stageWords.ts'
 import { buildCommit, pageOrigin } from '../buildInfo.ts'
 
 export type TraceKind = 'in' | 'out' | 'state' | 'chat' | 'note'
@@ -73,6 +74,8 @@ export function pushHostLine(text: string, note = ''): boolean {
   if (!clean || clean === lastHostLine) return false
   lastHostLine = clean
   const caption = note.trim()
+  const stage = stageWordsIn(clean)
+  if (stage.length) pushTrace('note', `в речи ведущей служебные слова: ${stage.join(', ')}`)
   pushTrace(
     'chat',
     'Ведущая',

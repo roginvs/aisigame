@@ -65,7 +65,7 @@ describe('lobbySpeechInstructions', () => {
     expect(lobbyEveryoneReady(roster)).toBe(false)
     expect(instructions).toContain('не говори, что можно начинать')
     expect(instructions).toContain('Ещё ждём: Вася.')
-    expect(instructions).toContain('качает (40%, ещё ~2 мин)')
+    expect(instructions).toContain('качает, 40%, ещё ~2 мин')
     expect(instructions).not.toContain('Все гости в комнате скачали пакет и готовы')
   })
 

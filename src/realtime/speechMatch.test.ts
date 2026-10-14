@@ -67,21 +67,18 @@ describe('isolatedCue', () => {
     const response = isolatedCue(
       withPlayNote(
         'Одна короткая фраза: верно. Сразу назови очки: плюс 300. Можно добавить «дальше».',
-        'Один короткий звук «хи-хи». Не произноси «смешок» и «хихикаем».',
+        'Коротко рассмейся — только звук, без слов.',
       ),
       { purpose: 'announce', turn: 4, take: 1 },
     )
     const said = response.input[0]?.content[0]?.text ?? ''
     expect(said).toContain('плюс 300')
     expect(said).toContain('дальше')
-    expect(said).not.toContain('смешок')
-    expect(said).not.toContain('хихикаем')
-    expect(said).not.toContain('хи-хи')
+    expect(said).not.toContain('рассмейся')
     expect(response.instructions).toContain('без предисловия')
     expect(response.instructions).toContain('своими словами')
-    expect(response.instructions).toContain('хи-хи')
-    expect(response.instructions).toContain('смешок')
-    expect(response.instructions).toContain('не читай')
+    expect(response.instructions).toContain('Действие ведущей, не слова реплики: Коротко рассмейся')
+    expect(response.instructions).toContain('служебные пометки вслух не произноси')
   })
 })
 

@@ -1395,15 +1395,14 @@ function openChoiceCells(context: GameContext) {
 }
 
 /** Звук смеха. В слова реплики не входит. */
-const giggleNote =
-  'Один короткий звук «хи-хи». Это звук, не слово в предложении. Не произноси «смешок», «с лёгким смешком», «хихикаем», «тёплая фраза», «в скобках» и не читай ремарку в скобках.'
+const giggleNote = 'Коротко рассмейся — только звук, без слов.'
 
 /** Ошибка без смеха. В слова реплики не входит. */
-const dryNote = 'Ровно и коротко, без смеха. Не произноси «сухая фраза» и не читай ремарку в скобках.'
+const dryNote = 'Без смеха.'
 
 /** Общее для всех свободных реплик: коротко и без ремарок, которые модель иначе читает вслух. */
 const cueBrevity =
-  'Как можно короче: обычно одна короткая фраза, без вступления, пересказа и связок «итак», «продолжим», «переходим дальше». «Ситуация», «Цель» и «Ограничения» — для тебя, вслух их не пересказывай; описания тона и действий («мягко», «тихо», «продолжить») не произноси.'
+  'Как можно короче: обычно одна короткая фраза, без вступления и пересказа задания. Говори только саму реплику для игроков; служебные пометки не озвучивай.'
 
 /** Свободная реплика: ситуация, цель и жёсткие рамки — без готового скрипта. */
 function hostCue(parts: { situation: string; goal: string; constraints?: string[] }): string {
@@ -1460,7 +1459,7 @@ export function chooserHandoffCue(context: GameContext): string {
     return hostCue({
       situation: `${from} молчал около ${seconds(idle.waitedMs)} с и так и не выбрал вопрос. ${same ? `Игрок один — выбирает снова ${from}, отсчёт начинается заново.` : `Ход выбора переходит к следующему по кругу: ${to}.`}`,
       goal: same
-        ? `Коротко и по-доброму скажи, что ${from} так и не выбрал, и снова предложи ${from} выбрать вопрос.`
+        ? `Коротко скажи, что ${from} так и не выбрал, и снова предложи ${from} выбрать вопрос.`
         : `Коротко скажи, что ${from} не выбрал вопрос, и ясно объяви по имени, что теперь выбирает ${to}.`,
       constraints: [boardSecrets, 'Своими словами, без упрёка. Ячейку сама не открывай.'],
     })
@@ -1646,7 +1645,7 @@ export function falseStartInstructions(context: GameContext): string {
   const listed = names.length ? names.join(', ') : 'игрок'
   return hostCue({
     situation: `На этом вопросе фальстарт: ${listed}. Окно кнопки ещё не началось.`,
-    goal: `Одной короткой живой фразой назови этих игроков по имени и скажи, что у них фальстарт (нажали раньше времени). Формулировку выбирай сам, каждый раз по-новому.`,
+    goal: `Одной короткой фразой назови этих игроков по имени и скажи, что у них фальстарт: они нажали раньше времени. Формулировку выбирай сам, каждый раз по-новому.`,
     constraints: ['Правильный ответ не называй. Вопрос не читай. Ничего про счёт и темы.'],
   })
 }
@@ -1725,7 +1724,7 @@ export function idleNudgeCue(path: string, context: GameContext): string {
     const recipient = nameOf(context, context.special?.recipientId)
     const options = context.special?.stakeOptions ?? []
     return hostCue({
-      situation: `Кот в мешке у игрока ${recipient}; он выбирает ставку (минимум ${options[0]} или максимум ${options.at(-1)}) и молчит около ${waited} с. Если промолчит ещё около ${left} с, возьмём минимальную.`,
+      situation: `Кот в мешке у игрока ${recipient}; он выбирает ставку, минимум ${options[0]} или максимум ${options.at(-1)}, и молчит около ${waited} с. Если промолчит ещё около ${left} с, возьмём минимальную.`,
       goal: `Спроси ${recipient} по имени: минимум или максимум.`,
       constraints: ['Одна короткая фраза, своими словами.', 'Вопрос не читай.'],
     })
@@ -1818,7 +1817,7 @@ export function catStakeCue(context: GameContext): string {
 export function catStakeClarifyCue(context: GameContext): string {
   const options = context.special?.stakeOptions ?? []
   return hostCue({
-    situation: `Кот в мешке: ${nameOf(context, context.special?.recipientId)} выбирает ставку. Не поняла ответ (${context.special?.unclear || 'неясно'}).`,
+    situation: `Кот в мешке: ${nameOf(context, context.special?.recipientId)} выбирает ставку. Ответ не поняла, причина: ${context.special?.unclear || 'неясно'}.`,
     goal: `Коротко попроси выбрать: ${options[0]} или ${options.at(-1)}.`,
     constraints: ['Одна короткая фраза.'],
   })
@@ -1837,25 +1836,23 @@ export function auctionCue(context: GameContext): string {
   })
 }
 
-/** Примеры тона для вопроса «перекупаете?» — модель не копирует, а варьирует. */
-export function auctionAskStyle(bidder: string, leader: string, bid: number): string {
-  return [
-    `«${bidder}, у ${leader} уже ${bid} — будете перебивать?»`,
-    `«${bid} от ${leader}. ${bidder}, поднимаете?»`,
-    `«${bidder}, ваше слово: перекупаете у ${leader} или пас?»`,
-    `«На кону ${bid}, лидирует ${leader}. ${bidder}, рискнёте?»`,
-    `«${bidder}, ${leader} предложил ${bid}. Дадите больше?»`,
-  ].join('; ')
-}
+/** Примеры стиля для вопроса «перекупаете?» — с чужими именами, склонения написаны вручную; реальные имена модель склоняет сама. */
+export const auctionAskStyle = [
+  '«Вася, у Бори уже четыреста — будете перебивать?»',
+  '«Четыреста от Бори. Вася, поднимаете?»',
+  '«Боря держит четыреста. Вася, ваше слово?»',
+  '«Васе решать: перекупаете у Бори или пас?»',
+  '«На кону четыреста, лидирует Боря. Вася, рискнёте?»',
+].join('; ')
 
 export function auctionAskCue(context: GameContext): string {
   const special = context.special
   const bidder = nameOf(context, special?.recipientId)
   return hostCue({
     situation: `${auctionIdleNote(context)}Аукцион. Сейчас ${special?.allIn ? 'ва-банк ' : ''}${special?.bid} у игрока ${nameOf(context, special?.leaderId)}. Спрашиваешь игрока ${bidder}.`,
-    goal: `Обратись к игроку ${bidder} по имени: назови текущую ставку (${special?.allIn ? 'ва-банк ' : ''}${special?.bid}) и у кого она (${nameOf(context, special?.leaderId)}), и спроси, будет ли ${bidder} перекупать.`,
+    goal: `Обратись к игроку ${bidder} по имени: назови текущую ставку ${special?.allIn ? 'ва-банк ' : ''}${special?.bid}, скажи, что она у игрока ${nameOf(context, special?.leaderId)}, и спроси, будет ли ${bidder} перекупать.`,
     constraints: [
-      `Примеры стиля — только чтобы понять тон, не копируй их и каждый раз говори по-новому: ${auctionAskStyle(bidder, nameOf(context, special?.leaderId), special?.bid ?? special?.nominal ?? 0)}.`,
+      `Примеры стиля с другими именами и суммой — только чтобы понять тон; не копируй их, говори каждый раз по-новому, реальные имена склоняй сама: ${auctionAskStyle}.`,
       'Варианты не перечисляй: они на экране.',
       'Одна короткая фраза.',
     ],
@@ -1864,7 +1861,7 @@ export function auctionAskCue(context: GameContext): string {
 
 export function auctionClarifyCue(context: GameContext): string {
   return hostCue({
-    situation: `Аукцион: ${nameOf(context, context.special?.recipientId)} делает ставку. Не поняла (${context.special?.unclear || 'неясно'}).`,
+    situation: `Аукцион: ${nameOf(context, context.special?.recipientId)} делает ставку. Не поняла, причина: ${context.special?.unclear || 'неясно'}.`,
     goal: 'Коротко попроси назвать один из вариантов на экране.',
     constraints: ['Одна короткая фраза.'],
   })
@@ -1892,7 +1889,7 @@ export function awayAnnounceCue(context: GameContext): string {
   const question = questionById(context.questions, context.activeQuestionId)
   return hostCue({
     situation: `${nameOf(context, context.activePlayerId)} не вернулся. Очки не меняются. Следующий вопрос выбирает ${nameOf(context, context.chooserId)}.`,
-    goal: `${spokenAnswerCue(question?.answers ?? [], question?.choices ?? [])} Коротко скажи, что идём дальше и выбирает ${nameOf(context, context.chooserId)}.`,
+    goal: `${spokenAnswerCue(question?.answers ?? [], question?.choices ?? [])} Коротко скажи, что теперь выбирает ${nameOf(context, context.chooserId)}.`,
     constraints: ['Одна-две короткие фразы.'],
   })
 }
@@ -1996,14 +1993,14 @@ export function announceInstructions(context: GameContext): string {
     const total = player?.score ?? 0
     const answer = closed && context.announceKind !== 'correct' ? ` ${spokenAnswerCue(question?.answers ?? [], question?.choices ?? [])}` : ''
     return hostCue({
-      situation: `Апелляция ${player?.name ?? 'игрока'}: ${verdict}. Итог за этот вопрос у игрока ${player?.name ?? ''}: было ${previous}, стало ${amount} (${delta === 0 ? 'без изменений' : `${delta > 0 ? '+' : ''}${delta}`}); общий счёт ${player?.score ?? 0}. У игрока один итог за ячейку: новый заменяет прежний, это не дополнительное списание и не второе начисление.`,
-      goal: `Скажи итог апелляции своими словами. Факты: апелляция ${accepted ? 'принята' : 'не принята'}; игрок: ${player?.name ?? 'игрок'}; за этот вопрос было ${previous} (${amountWords(previous)}), стало ${amount} (${amountWords(amount)}); общий счёт ${total}. Назови, принята ли апелляция, имя и итог за этот вопрос; общий счёт — если уместно.${answer}`,
+      situation: `Апелляция ${player?.name ?? 'игрока'}: ${verdict}. Итог за этот вопрос у игрока ${player?.name ?? ''}: было ${previous}, стало ${amount}, ${delta === 0 ? 'без изменений' : `разница ${delta > 0 ? '+' : ''}${delta}`}; общий счёт ${player?.score ?? 0}. У игрока один итог за ячейку: новый заменяет прежний, это не дополнительное списание и не второе начисление.`,
+      goal: `Скажи итог апелляции своими словами. Факты: апелляция ${accepted ? 'принята' : 'не принята'}; игрок: ${player?.name ?? 'игрок'}; за этот вопрос было ${previous}, словами ${amountWords(previous)}, стало ${amount}, словами ${amountWords(amount)}; общий счёт ${total}. Назови, принята ли апелляция, имя и итог за этот вопрос; общий счёт — если уместно.${answer}`,
       constraints: [
-        `Числа говори строго по фактам: за этот вопрос стало ${amountWords(amount)}${amount === previous ? ' (не изменилось)' : `, было ${amountWords(previous)}`}; общий счёт ${total}. Не путай знак (плюс/минус), не переставляй «было» и «стало», не округляй.`,
+        `Числа говори строго по фактам: за этот вопрос стало ${amountWords(amount)}${amount === previous ? ', не изменилось' : `, было ${amountWords(previous)}`}; общий счёт ${total}. Не путай плюс и минус, не переставляй «было» и «стало», не округляй.`,
         'Формулировку выбирай сам, каждый раз по-новому; имя можно склонять.',
         closed ? 'Не приглашай выбирать следующий вопрос: ещё обрабатываются апелляции.' : 'Эталон не называй и не намекай. Не приглашай выбирать следующий вопрос.',
         'Не говори расплывчато «счёт не изменился» или «счёт обновлён»: назови итог за этот вопрос числом.',
-        'Не говори о повторном списании или доплате. Без ремарок, коротко.',
+        'Не говори о повторном списании или доплате.',
       ],
     })
   }
@@ -2071,7 +2068,7 @@ export function announceInstructions(context: GameContext): string {
     // Не «неверно»: реплики не было / не расслышали. Неверный ответ идёт через incorrect.
     return hostCue({
       situation: `Исход: молчание. ${playerNameLine || 'Игрок'} нажал кнопку, но за окно ответа ведущая ничего не услышала — ни слов, ни распознанного текста. Очки уже списаны; ячейку ещё можно перехватить.`,
-      goal: `Обратись к игроку по имени, коротко скажи, что ничего не услышала (можно в двух словах про микрофон), и сразу назови минус очков. ${minus} ${named} Формулировку выбери сам, каждый раз новыми словами.`,
+      goal: `Обратись к игроку по имени, коротко скажи, что ничего не услышала, можно коротко упомянуть микрофон, и сразу назови минус очков. ${minus} ${named} Формулировку выбери сам, каждый раз новыми словами.`,
       constraints: [
         'Не говори, что ответ неверный: реплики не было. Не оценивай содержание ответа.',
         'Правильный ответ не называй и не намекай. Не зови нажимать кнопку.',
@@ -2082,7 +2079,7 @@ export function announceInstructions(context: GameContext): string {
   }
   if (kind === 'silence') {
     const rest = [named, minus, finalNote].filter(Boolean).join(' ')
-    return `${withCloseGuess(cue, context)} Только после эталона коротко своими словами скажи, что за окно ответа ничего не услышала (можно про микрофон), и назови минус очков — не что ответ неверный.${rest ? ` ${rest}` : ''}`
+    return `${withCloseGuess(cue, context)} Только после эталона коротко своими словами скажи, что за окно ответа ничего не услышала, можно упомянуть микрофон, и назови минус очков — не что ответ неверный.${rest ? ` ${rest}` : ''}`
   }
   if (kind === 'repeat') {
     return hostCue({

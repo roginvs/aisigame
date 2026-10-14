@@ -36,7 +36,11 @@ describe('реплики кота и аукциона', () => {
     const auction = { ...special, kind: 'auction' as const }
     expect(auctionCue({ ...context, special: { ...auction, bid: 200 } })).toContain('автоматически')
     const ask = auctionAskCue({ ...context, special: { ...auction, recipientId: 3, leaderId: 2, bid: 400 } })
-    expect(ask).toContain('назови текущую ставку (400) и у кого она (Боря)')
+    expect(ask).toContain('назови текущую ставку 400, скажи, что она у игрока Боря')
+    expect(ask).toContain('«Вася, у Бори уже четыреста')
+    expect(ask).toContain('«Васе решать')
+    expect(ask).toContain('лидирует Боря')
+    expect(ask).toContain('реальные имена склоняй сама')
     expect(ask).toContain('Примеры стиля')
     expect(ask).toContain('не копируй')
     expect(ask.match(/«[^»]+»/g)?.length).toBeGreaterThanOrEqual(4)

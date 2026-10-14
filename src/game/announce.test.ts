@@ -419,7 +419,6 @@ describe('announceInstructions', () => {
     expect(spoken).toContain('Исход: верно')
     expect(spoken).toContain('плюс 300')
     expect(spoken).toContain('Маша')
-    expect(spoken).toContain('дальше')
     expect(spoken).toContain('Ситуация:')
     expect(spoken).not.toContain('смешок')
     expect(spoken).not.toContain('хихикаем')
@@ -428,11 +427,10 @@ describe('announceInstructions', () => {
     expect(spoken).not.toContain('Боевой Буратино')
     expect(spoken).not.toContain('синоним вроде')
     const note = playNote(line)
-    expect(line).toContain('Как сыграть, вслух не читать')
-    expect(note).toContain('хи-хи')
-    expect(note).toContain('смешок')
-    expect(note).toContain('хихикаем')
-    expect(note).toContain('не читай')
+    expect(line).toContain('Действие ведущей, не слова реплики')
+    expect(note).toContain('рассмейся')
+    expect(note).toContain('без слов')
+    expect(note).not.toContain('хи-хи')
   })
 
   it('неверный ответ без смеха и без слова «сухая» в реплике', () => {
@@ -449,7 +447,7 @@ describe('announceInstructions', () => {
     const note = playNote(line)
     expect(note).not.toContain('хи-хи')
     expect(note).not.toContain('хихикаем')
-    expect(note).toContain('сухая фраза')
+    expect(note).toBe('Без смеха.')
   })
 })
 
@@ -494,7 +492,7 @@ describe('welcomeInstructions', () => {
     expect(spoken).not.toContain('смешок')
     expect(spoken).not.toContain('хихикаем')
     expect(spoken).not.toContain('тёпл')
-    expect(playNote(line)).toContain('хи-хи')
+    expect(playNote(line)).toContain('рассмейся')
   })
 })
 
@@ -516,7 +514,7 @@ describe('finishedInstructions', () => {
     expect(spoken).not.toContain('хихикаем')
     expect(spoken).not.toContain('улыб')
     expect(spoken).not.toContain('тёпл')
-    expect(playNote(line)).toContain('хи-хи')
+    expect(playNote(line)).toContain('рассмейся')
   })
 })
 

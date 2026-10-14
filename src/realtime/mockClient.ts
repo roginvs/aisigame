@@ -434,7 +434,7 @@ function announceLine(instructions: string): string {
   const folded = instructions.toLowerCase().replaceAll('ё', 'е')
   const quoted = [...instructions.matchAll(/«([^»]+)»/g)].map((match) => match[1]?.trim() ?? '').filter(Boolean)
   // Итог апелляции: заглушка говорит ровно пример из подсказки (итог за этот вопрос числом).
-  const facts = /Факты: апелляция (принята|не принята); игрок: (.+?); за этот вопрос было (-?\d+) \([^)]*\), стало (-?\d+) \([^)]*\); общий счёт (-?\d+)\./.exec(instructions)
+  const facts = /Факты: апелляция (принята|не принята); игрок: (.+?); за этот вопрос было (-?\d+), словами [^,]+, стало (-?\d+), словами [^;]+; общий счёт (-?\d+)\./.exec(instructions)
   if (facts) {
     return appealResultLine({ name: facts[2] ?? '', accepted: facts[1] === 'принята', previous: Number(facts[3]), amount: Number(facts[4]), total: Number(facts[5]) })
   }
