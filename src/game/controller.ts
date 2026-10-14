@@ -404,6 +404,7 @@ export function attachController(options: {
       holdAnnounceWait()
       clearBuzzerWarning()
       client.setMicEnabled(false)
+      client.discardInputAudio()
       client.setOutputMuted(true)
       return
     }

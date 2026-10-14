@@ -50,6 +50,9 @@ export type ToolCall = {
 
 const callsUrl = 'https://api.openai.com/v1/realtime/calls'
 
+/** Одна настройка распознавания для старта сессии и для смены подсказки. */
+export const transcriptionConfig = { model: 'gpt-4o-mini-transcribe', language: 'ru' } as const
+
 function sessionBody(model: string) {
   return {
     type: 'realtime',
@@ -59,10 +62,7 @@ function sessionBody(model: string) {
     audio: {
       input: {
         noise_reduction: { type: 'far_field' },
-        transcription: {
-          model: 'gpt-4o-mini-transcribe',
-          language: 'ru',
-        },
+        transcription: { ...transcriptionConfig },
         turn_detection: {
           type: 'semantic_vad',
           eagerness: 'low',
@@ -419,7 +419,11 @@ export class RealtimeClient {
   setOutputMuted(muted: boolean): void {
     if (this.wire) this.wire.setOutputMuted(muted)
     else this.audio.muted = muted
-    if (muted) this.send({ type: 'input_audio_buffer.clear' })
+  }
+
+  /** Пауза: выбросить недослушанную речь игрока. Звук ведущей тут ни при чём. */
+  discardInputAudio(): void {
+    this.send({ type: 'input_audio_buffer.clear' })
   }
 
   setSpeechSpeed(speed: number): void {
@@ -440,11 +444,7 @@ export class RealtimeClient {
         type: 'realtime',
         audio: {
           input: {
-            transcription: {
-              model: 'gpt-4o-mini-transcribe',
-              language: 'ru',
-              prompt,
-            },
+            transcription: { ...transcriptionConfig, prompt },
           },
         },
       },
@@ -1422,6 +1422,7 @@ export type GameVoice = Pick<
   | 'connect'
   | 'setMicEnabled'
   | 'setOutputMuted'
+  | 'discardInputAudio'
   | 'setSpeechSpeed'
   | 'setTranscriptionPrompt'
   | 'gatePlayerChat'

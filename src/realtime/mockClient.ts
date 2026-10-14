@@ -114,6 +114,12 @@ export class MockRealtimeClient implements GameVoice {
     if (muted) this.onLink({ host: 'idle' })
   }
 
+  /** Сколько раз пауза выбрасывала речь игрока — для тестов. */
+  discardedInput = 0
+  discardInputAudio(): void {
+    this.discardedInput += 1
+  }
+
   setSpeechSpeed(_speed: number): void {}
 
   attachHostOutput(handler: (stream: MediaStream) => void): void {

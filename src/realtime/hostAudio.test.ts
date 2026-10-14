@@ -155,6 +155,15 @@ describe('host audio completion', () => {
     expect(finished).toEqual(['welcome'])
   })
 
+  it('выключение звука ведущей не трогает речь игрока; пауза выбрасывает её явно', () => {
+    const { sent } = open()
+    const mark = sent.length
+    client?.setOutputMuted(true)
+    expect(sent.slice(mark).some((event) => JSON.stringify(event).includes('input_audio_buffer.clear'))).toBe(false)
+    client?.discardInputAudio()
+    expect(sent.slice(mark).some((event) => JSON.stringify(event).includes('input_audio_buffer.clear'))).toBe(true)
+  })
+
   it('если звук так и не начался, через 8 с после генерации фаза продолжается', () => {
     const { finished, ask, done } = open()
     ask()
@@ -602,7 +611,9 @@ describe('host audio completion', () => {
     const beep = vi.mocked(playTimeoutBeep)
     beep.mockClear()
     vi.advanceTimersByTime(3_000)
+    const beforePause = sent.length
     actor.send({ type: 'PAUSE', path: 'buzzing' })
+    expect(sent.slice(beforePause).some((event) => JSON.stringify(event).includes('input_audio_buffer.clear'))).toBe(true)
     vi.advanceTimersByTime(gameConfig.buzzerMs)
     expect(beep).not.toHaveBeenCalled()
     expect(statePath(actor.getSnapshot().value)).toBe('paused')
