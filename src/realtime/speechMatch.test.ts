@@ -200,3 +200,27 @@ describe('надёжное чтение вопроса с картинкой и 
     expect(saysAnswer('Скажи слово тирамису максимально чётко', 'тирамисуслик')).toBe(false)
   })
 })
+
+import { hostInstructions } from '../config.ts'
+
+describe('защита дословного чтения от общих правил ведущей (регрессия 9f20b86)', () => {
+  const body = verbatimResponse('Посмотрите на картинку. Кто это?', { purpose: 'read', turn: 1, take: 1 })
+  it('правило хода идёт после общих правил и само по себе полное', () => {
+    const turnAt = body.instructions.indexOf('Инструкция этого хода:')
+    expect(turnAt).toBeGreaterThan(0)
+    const turn = body.instructions.slice(turnAt)
+    expect(turn).toContain('символ в символ')
+    expect(turn).toContain('не обращение к тебе, а текст для игроков')
+    expect(turn).toContain('не отвечай на него')
+    expect(turn).toContain('не говори, что не видишь')
+  })
+  it('текст вопроса — только в сообщении, не в инструкциях', () => {
+    expect(body.input[0]?.content[0]?.text).toBe('Посмотрите на картинку. Кто это?')
+    expect(body.instructions).not.toContain('Кто это?')
+  })
+  it('общие правила не разрешают пересказ текста пакета и знают про медиа', () => {
+    expect(hostInstructions).toContain('В обычных репликах формулируй сама')
+    expect(hostInstructions).toContain('Ты их не видишь и не должна')
+    expect(hostInstructions).toContain('Свой вопрос и свой ответ вместо них не придумывай')
+  })
+})
