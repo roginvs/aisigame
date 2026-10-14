@@ -858,8 +858,9 @@ describe('game machine', () => {
     actor.send({ type: 'HOST_AUDIO_FINISHED', purpose: 'bridge' })
     actor.send({ type: 'QUESTION_SELECTED', themeId: 'Столицы', value: 0 })
     expect(statePath(actor.getSnapshot().value)).toBe('finalBets.asking')
-    actor.send({ type: 'HOST_AUDIO_FINISHED', purpose: 'bet' })
+    // Ранний слух: ставку можно сказать, пока ведущая ещё спрашивает.
     actor.send({ type: 'PLAYER_SPEECH_FINISHED' })
+    expect(statePath(actor.getSnapshot().value)).toBe('finalBets.resolving')
     actor.send({ type: 'BET_PLACED', playerId: 1, amount: 40 })
     expect(statePath(actor.getSnapshot().value)).toBe('flashing')
     actor.send({ type: 'BUZZER_PRESSED', playerId: 2 })

@@ -193,6 +193,8 @@ stateDiagram-v2
 
 ## Переходы
 
+**Ранний слух.** Слух открывается в момент, когда табло показало запрос игроку, а не после речи ведущей: `cat.announcing`, `cat.staking.asking`, `auction.announcing`, `auction.asking`, `finalBets.asking` (`PLAYER_SPEECH_FINISHED` → `resolving`) и `chooserHandoff` (`PLAYER_SPEECH_STARTED` → `choosing.listening`). Ведущая обрывается только валидным ответом (или началом речи в `chooserHandoff`/`finalBets.asking`); эхо её реплики отбрасывается через `literalRepeat`. Чтение вопроса, `turnCue`, `appealCue` и правила кнопки не менялись; hearTurnOnly сохраняется (микс модели сфокусирован на игроке для всего корня фазы).
+
 Один и тот же `HOST_AUDIO_FINISHED` с чужим `purpose` состояние не меняет. Ниже — только то, что машина принимает. Нумерация ниже — ссылки внутри документа, не подсчёт переходов: есть пункты с буквами и несколько guard в одном пункте.
 
 ### Из любого узла

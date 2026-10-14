@@ -4,6 +4,7 @@ import type { ToolCall } from '../realtime/client.ts'
 import { MockRealtimeClient } from '../realtime/mockClient.ts'
 vi.mock('../audio/beep.ts', () => ({ playTimeoutBeep: vi.fn(), unlockAudio: vi.fn() }))
 import { gameConfig } from '../config.ts'
+import { pushHostLine } from '../debug/trace.ts'
 import { attachController } from './controller.ts'
 import { gameMachine, statePath } from './machine.ts'
 import type { Player, Question, QuestionPack } from './types.ts'
@@ -189,6 +190,54 @@ describe('ставка финала: тот же запасной путь', () 
     expect(tool.instructions).toContain('от 0 до 800')
     expect(tool.schema).toMatchObject({ parameters: { properties: { amount: { minimum: 0, maximum: 800 } } } })
     expect(actor.getSnapshot().context.bets).toEqual([expect.objectContaining({ playerId: 1, amount: 800 })])
+    stop(); actor.stop()
+  })
+})
+
+describe('ранний слух: запрос уже на табло, ведущая ещё говорит', () => {
+  it('кот: получатель и ставка голосом до конца речи ведущей', async () => {
+    const client = new SpyClient()
+    const { actor, stop } = await boot(client)
+    client.setSpeechMs(8000)
+    actor.send({ type: 'QUESTION_SELECTED', themeId: 'c', value: 200 })
+    expect(statePath(actor.getSnapshot().value)).toBe('cat.announcing')
+    await vi.advanceTimersByTimeAsync(gameConfig.catMeowMs ?? 0)
+    client.hear('отдаю Вере', 1200)
+    await until(actor, 'cat.staking.asking')
+    expect(actor.getSnapshot().context.special?.recipientId).toBe(3)
+    await vi.advanceTimersByTimeAsync(300)
+    expect(statePath(actor.getSnapshot().value)).toBe('cat.staking.asking')
+    client.hear('максимум', 1200)
+    await until(actor, 'reading')
+    expect(actor.getSnapshot().context.activeStake).toBe(500)
+    stop(); actor.stop()
+  })
+
+  it('аукцион: ставка голосом во время объявления', async () => {
+    const client = new SpyClient()
+    const { actor, stop } = await boot(client, [0, 900, 0])
+    client.setSpeechMs(8000)
+    actor.send({ type: 'QUESTION_SELECTED', themeId: 'a', value: 100 })
+    expect(statePath(actor.getSnapshot().value)).toBe('auction.announcing')
+    await vi.advanceTimersByTimeAsync(300)
+    expect(statePath(actor.getSnapshot().value)).toBe('auction.announcing')
+    client.hear('ва-банк', 1200)
+    await until(actor, 'auction.won')
+    expect(actor.getSnapshot().context.special).toMatchObject({ leaderId: 2, allIn: true })
+    stop(); actor.stop()
+  })
+
+  it('эхо реплики ведущей не принимается за ставку', async () => {
+    const client = new SpyClient()
+    const { actor, stop } = await boot(client, [0, 900, 0])
+    client.setSpeechMs(8000)
+    actor.send({ type: 'QUESTION_SELECTED', themeId: 'a', value: 100 })
+    await vi.advanceTimersByTimeAsync(300)
+    pushHostLine('Аукцион! Борис, ваша ставка: двести или ва-банк?')
+    client.hear('Аукцион! Борис, ваша ставка: двести или ва-банк?', 1500)
+    await vi.advanceTimersByTimeAsync(3000)
+    expect(actor.getSnapshot().context.special?.bid).toBeNull()
+    expect(client.tools.find((item) => item.name === 'auctionBid')).toBeUndefined()
     stop(); actor.stop()
   })
 })

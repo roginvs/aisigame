@@ -1443,6 +1443,8 @@ export const gameMachine = setup({
     chooserHandoff: {
       on: {
         HOST_AUDIO_FINISHED: { guard: 'purposeChooserHandoff', target: 'choosing' },
+        // Новый выбирающий может говорить, пока ведущая ещё объявляет передачу хода.
+        PLAYER_SPEECH_STARTED: 'choosing',
       },
     },
     cat: {
@@ -1457,7 +1459,10 @@ export const gameMachine = setup({
               { guard: and([heardPurpose('cat'), 'catHasRecipient']), target: 'staking' },
               { guard: heardPurpose('cat'), target: 'picking' },
             ],
+            // Ранний слух: на табло уже кнопки, голос принимаем до конца речи ведущей.
+            PLAYER_SPEECH_FINISHED: 'resolving',
             CAT_RECIPIENT: { guard: 'validCatRecipient', target: '#game.cat.staking', actions: 'setCatRecipient' },
+            CAT_PICK_UNCLEAR: { target: 'clarifying', actions: 'noteSpecialUnclear' },
           },
         },
         picking: {
@@ -1499,6 +1504,8 @@ export const gameMachine = setup({
                   { guard: and([heardPurpose('catStake'), 'catFixed']), target: '#game.cat.placed', actions: 'setCatFixedStake' },
                   { guard: heardPurpose('catStake'), target: 'listening' },
                 ],
+                PLAYER_SPEECH_FINISHED: 'resolving',
+                CAT_STAKE_UNCLEAR: { target: 'clarifying', actions: 'noteSpecialUnclear' },
               },
             },
             listening: {
@@ -1553,13 +1560,17 @@ export const gameMachine = setup({
               { guard: and([heardPurpose('auction'), 'auctionHasBid']), target: 'advancing' },
               { guard: heardPurpose('auction'), target: 'listening' },
             ],
+            PLAYER_SPEECH_FINISHED: 'resolving',
             AUCTION_BID: { guard: 'validAuctionBid', target: '#game.auction.advancing', actions: 'applyAuctionBid' },
+            AUCTION_UNCLEAR: { target: 'clarifying', actions: 'noteSpecialUnclear' },
           },
         },
         asking: {
           on: {
             HOST_AUDIO_FINISHED: { guard: heardPurpose('auctionAsk'), target: 'listening' },
+            PLAYER_SPEECH_FINISHED: 'resolving',
             AUCTION_BID: { guard: 'validAuctionBid', target: '#game.auction.advancing', actions: 'applyAuctionBid' },
+            AUCTION_UNCLEAR: { target: 'clarifying', actions: 'noteSpecialUnclear' },
           },
         },
         listening: {
@@ -1740,6 +1751,7 @@ export const gameMachine = setup({
         asking: {
           on: {
             HOST_AUDIO_FINISHED: { guard: 'purposeBet', target: 'hearing' },
+            PLAYER_SPEECH_FINISHED: 'resolving',
           },
         },
         hearing: {

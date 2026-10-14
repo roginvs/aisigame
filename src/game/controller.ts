@@ -12,7 +12,8 @@ import { JudgmentClock } from './judgmentClock.ts'
 import { gameConfig } from '../config.ts'
 import { noteLink, pushJudgeLine, pushPlayerLine, pushTrace } from '../debug/trace.ts'
 import type { GameVoice, LinkStatus, ToolCall } from '../realtime/client.ts'
-import { verbatimSpeech, withPlayNote } from '../realtime/speechMatch.ts'
+import { spokenPayload, verbatimSpeech, withPlayNote } from '../realtime/speechMatch.ts'
+import { echoesTranscriptionPrompt } from './promptEcho.ts'
 import type { ConferenceHistoryMessage } from '../conference/messages.ts'
 import { conversationLineFromTrace } from '../conference/traceConversation.ts'
 import { getTrace } from '../debug/trace.ts'
@@ -93,6 +94,8 @@ export function attachController(options: {
   /** Инвалидирует in-flight разбор ставки при смене финалиста. */
   let betEpoch = 0
   let specialEpoch = 0
+  /** Текст текущего хода ведущей — чтобы не принять её эхо за ответ игрока при раннем слухе. */
+  let lastHostSpoken = ''
   let specialHeard = ''
   let specialIntroTimer: ReturnType<typeof setTimeout> | null = null
   /** Инвалидирует фразу без кнопки после смены окна buzzing. */
@@ -245,9 +248,15 @@ export function attachController(options: {
       overRead = true
       return
     }
-    if (path === 'choosing.clarifying' || specialClarifying(path)) {
+    if (path === 'choosing.clarifying' || specialClarifying(path) || path === 'chooserHandoff') {
       client.interruptSpeech()
-      actor.send({ type: 'PLAYER_SPEECH_STARTED' })
+      if (path === 'chooserHandoff') actor.send({ type: 'PLAYER_SPEECH_STARTED' })
+      else actor.send({ type: 'PLAYER_SPEECH_STARTED' })
+      return
+    }
+    if (path === 'finalBets.asking') {
+      // Речь началась во время объявления ставки — обрываем ведущую, ждём конец фразы как в hearing.
+      client.interruptSpeech()
       return
     }
     if (path === 'answering.waiting' || path === 'answering.hearing') {
@@ -289,7 +298,7 @@ export function attachController(options: {
       settle(considerTalkover(durationMs, itemId))
       return
     }
-    if (path === 'finalBets.hearing') {
+    if (path === 'finalBets.asking' || path === 'finalBets.hearing') {
       actor.send({ type: 'PLAYER_SPEECH_FINISHED' })
       settle(considerBet(itemId))
       return
@@ -486,7 +495,9 @@ export function attachController(options: {
       choiceEpoch += 1
       expectingToolTurn = null
       client.interruptSpeech()
-      client.setMicEnabled(false)
+      // Слушаем сразу: на табло уже кнопки получателя / ставки, речь ведущей не блокирует.
+      client.setTranscriptionPrompt(specialPrompt(path, context))
+      client.setMicEnabled(true)
       // Мяу / динь звучит у всех локально; первая фраза — после звука.
       const purpose = path === 'cat.announcing' ? 'cat' : 'auction'
       const waitMs = from === 'paused' || from.startsWith(purpose === 'cat' ? 'cat.' : 'auction.') ? 0 : purpose === 'cat' ? catMeowMs : auctionDingMs
@@ -495,10 +506,10 @@ export function attachController(options: {
         specialIntroTimer = null
         const now = actor.getSnapshot()
         if (statePath(now.value) !== path) return
-        speak(purpose, purpose === 'cat' ? catCue(now.context) : auctionCue(now.context), undefined, true)
+        speakWhileListening(purpose, purpose === 'cat' ? catCue(now.context) : auctionCue(now.context))
       }, waitMs)
     }
-    if (specialListening(path)) {
+    if (specialListening(path) && path !== 'cat.announcing' && path !== 'auction.announcing') {
       specialEpoch += 1
       expectingToolTurn = null
       client.setTranscriptionPrompt(specialPrompt(path, context))
@@ -516,14 +527,10 @@ export function attachController(options: {
     if (path === 'cat.staking.clarifying') speakWhileListening('catStakeClarify', catStakeClarifyCue(context))
     if (path === 'auction.clarifying') speakWhileListening('auctionClarify', auctionClarifyCue(context))
     if (path === 'cat.staking.asking') {
-      specialEpoch += 1
-      client.setMicEnabled(false)
-      speak('catStake', catStakeCue(context), undefined, true)
+      speakWhileListening('catStake', catStakeCue(context))
     }
     if (path === 'auction.asking') {
-      specialEpoch += 1
-      client.setMicEnabled(false)
-      speak('auctionAsk', auctionAskCue(context), undefined, true)
+      speakWhileListening('auctionAsk', auctionAskCue(context))
     }
     if (path === 'auction.won') {
       specialEpoch += 1
@@ -546,7 +553,8 @@ export function attachController(options: {
     if (path === 'bridging') speak('bridge', bridgeInstructions(context), undefined, true)
     if (path === 'chooserHandoff') {
       choiceEpoch += 1
-      speak('chooserHandoff', chooserHandoffCue(context), undefined, true)
+      client.setTranscriptionPrompt(listeningPrompt(context))
+      speakWhileListening('chooserHandoff', chooserHandoffCue(context))
     }
     if (path === 'choosing.listening' || path === 'choosing.clarifying' || path === 'chooserHandoff') {
       expectingToolTurn = null
@@ -612,7 +620,8 @@ export function attachController(options: {
     }
     if (path === 'finalBets.asking') {
       betEpoch += 1
-      speak('bet', betInstructions(context))
+      client.setTranscriptionPrompt(finalBetPrompt(context))
+      speakWhileListening('bet', betInstructions(context))
     }
     if (path === 'finalBets.hearing') {
       betEpoch += 1
@@ -704,9 +713,18 @@ export function attachController(options: {
 
   function speakWhileListening(purpose: SpeechPurpose, instructions: string, expect?: string): void {
     speechTurn += 1
+    lastHostSpoken = expect ?? spokenPayload(instructions)
     // conversation:none — подсказка про микрофон и уточнение выбора не продолжают лобби/партию.
     client.requestSpeech(purpose, speechTurn, expect ? instructions : withCommentary(instructions, actor.getSnapshot().context, publicHistory()), expect, true)
     client.setMicEnabled(true)
+  }
+
+  /** Расшифровка дословно повторила реплику ведущей (эхо из динамика при раннем слухе). */
+  function echoesHost(text: string): boolean {
+    if (!text.trim()) return false
+    const hostLine = [...getTrace()].reverse().find((entry) => conversationLineFromTrace(entry)?.role === 'host')
+    const said = hostLine ? conversationLineFromTrace(hostLine)?.text ?? '' : ''
+    return [said, lastHostSpoken].some((line) => line && echoesTranscriptionPrompt(text, line))
   }
 
   /** Вопросы, эталон которых уже написан в чат (по одному разу на вопрос). */
@@ -728,6 +746,7 @@ export function attachController(options: {
     chatNote?: (spoken: string) => string,
   ): void {
     speechTurn += 1
+    lastHostSpoken = expect ?? spokenPayload(instructions)
     client.setMicEnabled(false)
     client.requestSpeech(purpose, speechTurn, expect ? instructions : withCommentary(instructions, actor.getSnapshot().context, publicHistory()), expect, isolated || !expect, chatNote)
   }
@@ -834,6 +853,10 @@ export function attachController(options: {
       pushTrace('note', 'распознавание повторило подсказку вариантов, это не выбор')
       return
     }
+    if (echoesHost(heard.text)) {
+      pushTrace('note', 'речь совпала с репликой ведущей, это эхо, не выбор')
+      return
+    }
     if (!heard.arrived) pushPlayerLine('речь не распознана')
     const text = heard.text.trim()
     const shown = text || 'речь не распознана'
@@ -847,33 +870,37 @@ export function attachController(options: {
       sendSpecialUnclear(path, 'не расслышала')
       return
     }
-    if (path === 'cat.picking') {
+    if (path === 'cat.announcing' || path === 'cat.picking') {
       const candidates = context.players.filter((player) => player.id !== special.giverId)
       const playerId = matchSpokenPlayer(text, candidates)
       if (playerId !== null) {
+        client.interruptSpeech()
         pushJudgeLine(`Услышала: «${text}» — кот уходит игроку ${nameOf(context, playerId)}`)
         actor.send({ type: 'CAT_RECIPIENT', playerId })
         return
       }
       const self = matchSpokenPlayer(text, context.players.filter((player) => player.id === special.giverId)) !== null
       if (self && spokenPlayers(text, candidates).length === 0) {
+        client.interruptSpeech()
         pushJudgeLine(`Услышала: «${text}», себе оставить нельзя`)
         actor.send({ type: 'CAT_PICK_UNCLEAR', reason: 'себе оставить нельзя' })
         return
       }
     }
-    if (path === 'cat.staking.listening' && special.recipientId !== null) {
+    if ((path === 'cat.staking.asking' || path === 'cat.staking.listening') && special.recipientId !== null) {
       const amount = matchCatStake(text, special.stakeOptions)
       if (amount !== null) {
+        client.interruptSpeech()
         pushJudgeLine(`Ставка: ${amount}`)
         actor.send({ type: 'CAT_STAKE', playerId: special.recipientId, amount })
         return
       }
     }
-    if (path === 'auction.listening' && special.recipientId !== null) {
+    if ((path === 'auction.announcing' || path === 'auction.asking' || path === 'auction.listening') && special.recipientId !== null) {
       const money = context.players.find((player) => player.id === special.recipientId)?.score ?? 0
       const option = matchAuctionSpeech(text, { options: special.options, nominal: special.nominal, current: special.bid, money })
       if (option) {
+        client.interruptSpeech()
         pushJudgeLine(`Аукцион: ${optionLabel(option)}`)
         actor.send({ type: 'AUCTION_BID', playerId: special.recipientId, option })
         return
@@ -1363,8 +1390,17 @@ function micOpen(path: string): boolean {
 const specialPurposes = new Set<string>(['cat', 'catClarify', 'catStake', 'catStakeClarify', 'auction', 'auctionAsk', 'auctionClarify', 'auctionWon', 'specialAway'])
 
 /** Узлы кота/аукциона, где слушаем одного игрока. */
+/** Фазы, где на табло уже есть запрос к игроку — слушаем сразу, не дожидаясь конца речи ведущей. */
 export function specialListening(path: string): boolean {
-  return path === 'cat.picking' || path === 'cat.staking.listening' || path === 'auction.listening'
+  return (
+    path === 'cat.announcing' ||
+    path === 'cat.picking' ||
+    path === 'cat.staking.asking' ||
+    path === 'cat.staking.listening' ||
+    path === 'auction.announcing' ||
+    path === 'auction.asking' ||
+    path === 'auction.listening'
+  )
 }
 
 function specialClarifying(path: string): boolean {

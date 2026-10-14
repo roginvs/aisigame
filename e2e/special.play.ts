@@ -26,6 +26,7 @@ test('кот в мешке голосом: имя получателя и ста
   await startSpecialRound(page)
   await hear(page, 'Сюрприз 300')
   const panel = page.getByRole('article', { name: 'Кот в мешке' })
+  await expect(panel).toHaveAttribute('data-listening', 'true')
   await expect(panel).toContainText('Города')
   await expect(panel.getByRole('group', { name: 'Кому отдать' })).toBeVisible()
   const giverLine = (await panel.locator('.special-status').textContent()) ?? ''
@@ -82,12 +83,14 @@ test('аукцион: торг кнопками, перекуп и пас', asyn
   await expect(panel).toContainText('Игрок 1 делает ставку')
   await expect(bids.getByRole('button', { name: '200', exact: true })).toHaveClass(/special-option/)
   await shot(page, 'auction')
-  await bids.getByRole('button', { name: '200', exact: true }).click()
+  // Ранний слух: табло уже просит ставку — слушаем сразу, не дожидаясь конца речи ведущей.
+  await expect(panel).toHaveAttribute('data-listening', 'true')
+  await hear(page, '200')
   await expect(panel).toContainText('Игрок 2 решает, перекупать ли')
   await bids.getByRole('button', { name: 'Ва-банк 300' }).click()
   await expect(panel).toContainText('Игрок 1 решает, перекупать ли')
   await expect(bids.getByRole('button')).toHaveText(['Пас', 'Ва-банк 400'])
-  // Голос слушаем после вопроса ведущей.
+  // Голос слушаем с момента, когда табло показало запрос.
   await expect(panel).toHaveAttribute('data-listening', 'true')
   await hear(page, 'пас')
   await expect(page.getByRole('heading', { name: 'Какой город — столица Австралии?' })).toBeVisible()

@@ -6,7 +6,7 @@ import { getTrace } from '../debug/trace.ts'
 import type { ToolCall } from '../realtime/client.ts'
 import { MockRealtimeClient } from '../realtime/mockClient.ts'
 vi.mock('../audio/beep.ts', () => ({ playTimeoutBeep: vi.fn(), unlockAudio: vi.fn() }))
-import { attachController, type GameControllerActions } from './controller.ts'
+import { attachController, specialListening, type GameControllerActions } from './controller.ts'
 import { gameMachine, statePath } from './machine.ts'
 import type { Question, QuestionPack } from './types.ts'
 
@@ -203,6 +203,18 @@ describe('attachController choice', () => {
     actor.stop()
   })
 
+  it('новый выбирающий может говорить, пока ведущая объявляет передачу хода', async () => {
+    const client = new MockRealtimeClient()
+    const { actor, stop } = await boot(client)
+    client.setSpeechMs(8000)
+    actor.send({ type: 'CHOOSER_OFFLINE', fromPlayerId: 2, toPlayerId: 1 })
+    expect(statePath(actor.getSnapshot().value)).toBe('chooserHandoff')
+    client.hear('история сто', 1200)
+    await vi.advanceTimersByTimeAsync(50)
+    expect(statePath(actor.getSnapshot().value)).not.toBe('chooserHandoff')
+    stop()
+  })
+
   it('свободно объявляет передачу выбора после отключения', async () => {
     const client = new MockRealtimeClient()
     const requestSpeech = vi.spyOn(client, 'requestSpeech')
@@ -216,7 +228,6 @@ describe('attachController choice', () => {
       cue,
       undefined,
       true,
-      undefined,
     )
     expect(cue).toContain('Ситуация:')
     expect(cue).toContain('Игрок 2')
@@ -672,5 +683,19 @@ describe('attachController answer listening', () => {
     expect(score()).toBe(100)
     stop()
     actor.stop()
+  })
+})
+
+describe('specialListening — ранний слух', () => {
+  it('открыт на объявлении и ставке, пока ведущая ещё говорит', () => {
+    expect(specialListening('cat.announcing')).toBe(true)
+    expect(specialListening('cat.picking')).toBe(true)
+    expect(specialListening('cat.staking.asking')).toBe(true)
+    expect(specialListening('cat.staking.listening')).toBe(true)
+    expect(specialListening('auction.announcing')).toBe(true)
+    expect(specialListening('auction.asking')).toBe(true)
+    expect(specialListening('auction.listening')).toBe(true)
+    expect(specialListening('reading.sealed')).toBe(false)
+    expect(specialListening('choosing.listening')).toBe(false)
   })
 })
