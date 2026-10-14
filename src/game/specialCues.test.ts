@@ -18,7 +18,7 @@ describe('реплики кота и аукциона', () => {
   it('кот: тему и вопрос до выбора не раскрывает, просит отдать', () => {
     const cue = catCue(context)
     expect(cue).toContain('Аня')
-    expect(cue).toContain('кому он отдаёт кота')
+    expect(cue).toContain('кому отдать кота')
     expect(cue).not.toContain('Кому отдадите')
     expect(cue).not.toContain('СЕКРЕТНЫЙ ВОПРОС')
     expect(cue).not.toContain('ЭТАЛОН')

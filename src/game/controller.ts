@@ -468,7 +468,7 @@ export function attachController(options: {
       dropAnswerAttempt()
       client.interruptSpeech()
       speak('appeal', hostCue({
-        situation: `Ручная апелляция. Сейчас повторяет ответ ${context.players.find((p) => p.id === context.activePlayerId)?.name ?? 'игрок'}; за этот вопрос у него сейчас ${amountWords(context.outcomes?.[context.activeQuestionId ?? '']?.[context.activePlayerId ?? 0]?.amount ?? 0)}. Новый ответ заменит этот итог, а не добавится к нему.`,
+        situation: `Ручная апелляция. Сейчас повторяет ответ ${context.players.find((p) => p.id === context.activePlayerId)?.name ?? 'игрок'}; итог за этот вопрос сейчас ${amountWords(context.outcomes?.[context.activeQuestionId ?? '']?.[context.activePlayerId ?? 0]?.amount ?? 0)}. Новый ответ заменит этот итог, а не добавится к нему.`,
         goal: 'Обратись по имени и коротко попроси повторить ответ.',
         constraints: ['Не перечитывай вопрос. Эталон не называй.'],
       }), undefined, true)
@@ -1457,10 +1457,10 @@ export function chooserHandoffCue(context: GameContext): string {
     const to = playerName(context.players, idle.toId) || from
     const same = idle.toId === idle.fromId
     return hostCue({
-      situation: `Игрок ${from} молчал около ${seconds(idle.waitedMs)} с и так и не выбрал вопрос. ${same ? `Игрок один — выбирает снова ${from}, отсчёт начинается заново.` : `Ход выбора переходит к следующему по кругу: ${to}.`}`,
+      situation: `Игрок ${from}: около ${seconds(idle.waitedMs)} с тишины, вопрос так и не выбран. ${same ? `Игрок один — выбирает снова ${from}, отсчёт начинается заново.` : `Ход выбора переходит к следующему по кругу: ${to}.`}`,
       goal: same
         ? `Коротко скажи, что ${from} так и не выбрал, и снова предложи ${from} выбрать вопрос.`
-        : `Коротко скажи, что ${from} не выбрал вопрос, и ясно объяви по имени, что теперь выбирает ${to}.`,
+        : `Коротко скажи, что вопрос так и не выбран, и ясно объяви по имени, что теперь выбирает ${to}.`,
       constraints: [boardSecrets, 'Своими словами, без упрёка. Ячейку сама не открывай.'],
     })
   }
@@ -1471,8 +1471,8 @@ export function chooserHandoffCue(context: GameContext): string {
   const finalTheme = currentRound(context, context.roundIndex)?.kind === 'final'
   const what = finalTheme ? 'тему финала' : 'вопрос'
   return hostCue({
-    situation: `${left} отключился во время выбора. Сейчас выбирает ${next}: нужно выбрать ${what}.`,
-    goal: `Ясно объяви, что ${left} отключился и что теперь выбирает ${next}; попроси выбрать ${what}.`,
+    situation: `Во время выбора отключён игрок: ${left}. Сейчас выбирает ${next}: нужно выбрать ${what}.`,
+    goal: `Ясно объяви, что связь с игроком ${left} пропала и что теперь выбирает ${next}; попроси выбрать ${what}.`,
     constraints: [
       boardSecrets,
       'Ячейку сама не открывай.',
@@ -1720,7 +1720,7 @@ export function idleNudgeCue(path: string, context: GameContext): string {
     const giver = nameOf(context, context.special?.giverId)
     return hostCue({
       situation: `Кот в мешке. Отдаёт вопрос другому игроку: ${giver}. Молчит около ${waited} с.${soon('кот уйдёт случайному игроку')}`,
-      goal: `Обратись по имени к игроку ${giver} и спроси, кому он отдаёт кота.`,
+      goal: `Обратись по имени к игроку ${giver} и спроси, кому отдать кота.`,
       constraints: [...style, 'Тему кота не называй. Вопрос не читай.'],
     })
   }
@@ -1760,7 +1760,7 @@ export function idleAutoCue(context: GameContext): string {
 function auctionIdleFirst(context: GameContext): string {
   const idle = context.idleOutcome
   if (idle?.kind !== 'auction') return ''
-  return idle.autoOpen ? 'Сначала коротко скажи, что торги открыты по номиналу из-за молчания. ' : `Сначала коротко скажи, что ${nameOf(context, idle.fromId)} пасует из-за молчания. `
+  return idle.autoOpen ? 'Сначала коротко скажи, что торги открыты по номиналу из-за молчания. ' : `Сначала коротко скажи, что ${nameOf(context, idle.fromId)} — пас из-за молчания. `
 }
 
 function auctionIdleNote(context: GameContext): string {
@@ -1768,8 +1768,8 @@ function auctionIdleNote(context: GameContext): string {
   if (idle?.kind !== 'auction') return ''
   const who = nameOf(context, idle.fromId)
   return idle.autoOpen
-    ? `Игрок ${who} промолчал около ${seconds(idle.waitedMs)} с — торги открыты по номиналу ${context.special?.nominal}. `
-    : `Игрок ${who} промолчал около ${seconds(idle.waitedMs)} с — это пас. `
+    ? `Игрок ${who}: около ${seconds(idle.waitedMs)} с тишины — торги открыты по номиналу ${context.special?.nominal}. `
+    : `Игрок ${who}: около ${seconds(idle.waitedMs)} с тишины — это пас. `
 }
 
 function nameOf(context: GameContext, id: number | null | undefined): string {
@@ -1788,13 +1788,13 @@ export function catCue(context: GameContext): string {
   const question = questionById(context.questions, context.activeQuestionId)
   const before = question?.cat?.knows === 'before' ? ` Тема: «${catTheme(context)}», варианты цены: ${special?.stakeOptions.join(' или ')}.` : ''
   const who = count === 1
-    ? 'Игрок один — вопрос остаётся у него.'
+    ? 'Игрок один — вопрос остаётся у того же игрока.'
     : special?.recipientId != null
       ? `Вопрос автоматически уходит игроку ${nameOf(context, special.recipientId)}.`
-      : `Игрок ${giver} должен отдать вопрос другому игроку.`
+      : `Игрок ${giver} отдаёт вопрос другому игроку.`
   return hostCue({
-    situation: `Выбрана ячейка «кот в мешке». Выбирал ${giver}. Игроков: ${count}. ${who}${before}`,
-    goal: `Поздравь игрока ${giver}, обратившись по имени: ему достался кот в мешке, вопрос нужно отдать. ${count >= 3 && special?.recipientId == null ? 'В конце своими словами спроси, кому он отдаёт кота.' : ''}`,
+    situation: `Выбрана ячейка «кот в мешке». Выбор игрока: ${giver}. Игроков: ${count}. ${who}${before}`,
+    goal: `Поздравь игрока ${giver}, обратившись по имени: достался кот в мешке, вопрос нужно отдать. ${count >= 3 && special?.recipientId == null ? 'В конце своими словами спроси, кому отдать кота.' : ''}`,
     constraints: [question?.cat?.knows === 'before' ? '' : 'Тему кота пока не называй.', 'Вопрос не читай.'],
   })
 }
@@ -1812,7 +1812,7 @@ export function catStakeCue(context: GameContext): string {
   const special = context.special
   const recipient = nameOf(context, special?.recipientId)
   const idle = context.idleOutcome?.kind === 'catPick' ? context.idleOutcome : null
-  const idleNote = idle ? `Игрок ${nameOf(context, idle.fromId)} молчал около ${seconds(idle.waitedMs)} с и не выбрал, кому отдать кота, — кот случайно достался игроку ${recipient}. ` : ''
+  const idleNote = idle ? `Игрок ${nameOf(context, idle.fromId)}: около ${seconds(idle.waitedMs)} с тишины, получатель кота не назван, — кот случайно достался игроку ${recipient}. ` : ''
   const options = special?.stakeOptions ?? []
   const fixed = options.length <= 1
   return hostCue({
@@ -1839,10 +1839,10 @@ export function auctionCue(context: GameContext): string {
   const giver = nameOf(context, special?.giverId)
   const auto = special?.bid != null
   return hostCue({
-    situation: `Выбрана ячейка-аукцион. Выбирал ${giver}. Номинал ${special?.nominal}. ${auto ? `Счёт игрока ${giver} не выше номинала, поэтому торгов нет: вопрос играется за номинал ${special?.bid}.` : ''}`,
+    situation: `Выбрана ячейка-аукцион. Выбор игрока: ${giver}. Номинал ${special?.nominal}. ${auto ? `Счёт игрока ${giver} не выше номинала, поэтому торгов нет: вопрос играется за номинал ${special?.bid}.` : ''}`,
     goal: auto
-      ? `Поздравь игрока ${giver}, обратившись по имени: ему достался вопрос-аукцион. Скажи, что торгов не будет и вопрос играется за ${special?.bid}.`
-      : `Поздравь игрока ${giver}, обратившись по имени: ему достался вопрос-аукцион. Попроси сделать ставку, минимум ${special?.nominal}.`,
+      ? `Поздравь игрока ${giver}, обратившись по имени: достался вопрос-аукцион. Скажи, что торгов не будет и вопрос играется за ${special?.bid}.`
+      : `Поздравь игрока ${giver}, обратившись по имени: достался вопрос-аукцион. Попроси сделать ставку, минимум ${special?.nominal}.`,
     constraints: ['Варианты ставок целиком не перечисляй: они на экране.', 'Вопрос не читай.'],
   })
 }
@@ -1887,8 +1887,8 @@ export function auctionWonCue(context: GameContext): string {
 
 export function specialAwayCue(context: GameContext): string {
   return hostCue({
-    situation: `Игрок ${nameOf(context, context.special?.awayPlayerId)} отключился. Ждём до 15 секунд.`,
-    goal: `Коротко скажи, что ${nameOf(context, context.special?.awayPlayerId)} отключился и мы немного подождём.`,
+    situation: `Игрок ${nameOf(context, context.special?.awayPlayerId)} отключён. Ждём до 15 секунд.`,
+    goal: `Коротко скажи, что связь с игроком ${nameOf(context, context.special?.awayPlayerId)} пропала и мы немного подождём.`,
     constraints: [],
   })
 }
@@ -1897,7 +1897,7 @@ export function specialAwayCue(context: GameContext): string {
 export function awayAnnounceCue(context: GameContext): string {
   const question = questionById(context.questions, context.activeQuestionId)
   return hostCue({
-    situation: `Игрок ${nameOf(context, context.activePlayerId)} не вернулся. Очки не меняются. Следующий вопрос выбирает ${nameOf(context, context.chooserId)}.`,
+    situation: `Игрок ${nameOf(context, context.activePlayerId)} так и не на связи. Очки не меняются. Следующий вопрос выбирает ${nameOf(context, context.chooserId)}.`,
     goal: `${spokenAnswerCue(question?.answers ?? [], question?.choices ?? [])} Коротко скажи, что теперь выбирает ${nameOf(context, context.chooserId)}.`,
     constraints: [],
     length: 'Одна-две короткие фразы.',
@@ -1945,7 +1945,7 @@ export function finalBetInstructions(transcript: string, score: number): string 
 /** Изолированный запрос: кому отдают кота. Кандидаты — только «id: имя», сам выбравший не входит. */
 export function catRecipientInstructions(transcript: string, candidates: Array<{ id: PlayerId; name: string }>): string {
   return [
-    'Кот в мешке: выбравший игрок отдаёт вопрос другому. Определи, кого он назвал.',
+    'Кот в мешке: выбравший игрок отдаёт вопрос другому. Определи, кого назвали.',
     'Кандидаты (id: имя):',
     ...candidates.map((player) => `${player.id}: ${player.name}`),
     `Распознанный текст: «${transcript}»`,
@@ -2075,7 +2075,7 @@ export function announceInstructions(context: GameContext): string {
   if (kind === 'silence' && !publish) {
     // Не «неверно»: реплики не было / не расслышали. Неверный ответ идёт через incorrect.
     return hostCue({
-      situation: `Исход: молчание. ${playerNameLine || 'Игрок'} нажал кнопку, но за окно ответа ведущая ничего не услышала — ни слов, ни распознанного текста. Очки уже списаны; ячейку ещё можно перехватить.`,
+      situation: `Исход: молчание. Кнопку нажал игрок: ${playerNameLine || 'игрок'}, но за окно ответа ведущая ничего не услышала — ни слов, ни распознанного текста. Очки уже списаны; ячейку ещё можно перехватить.`,
       goal: `Обратись к игроку по имени, коротко скажи, что ничего не услышала, можно коротко упомянуть микрофон, и сразу назови минус очков. ${minus} ${named} Формулировку выбери сама, каждый раз новыми словами.`,
       constraints: [
         'Не говори, что ответ неверный: реплики не было. Не оценивай содержание ответа.',

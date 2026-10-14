@@ -401,7 +401,7 @@ function hostLine(purpose: string, instructions = ''): string {
   }
   if (purpose === 'idleNudge') return 'Ждём ваш выбор.'
   if (purpose === 'idleAuto') return 'Ставка минимальная.'
-  if (purpose === 'chooserHandoff' && /не выбрал/.test(instructions)) {
+  if (purpose === 'chooserHandoff' && /не выбран/.test(instructions)) {
     const next = /теперь выбирает\s+([^.]+)\./.exec(instructions)?.[1]?.trim()
     return next ? `Время вышло. Выбирает ${next}.` : 'Время вышло. Выбирайте снова.'
   }

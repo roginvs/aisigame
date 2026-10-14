@@ -217,7 +217,7 @@ describe('attachController choice', () => {
     expect(cue).toContain('Ситуация:')
     expect(cue).toContain('Игрок 2')
     expect(cue).toContain('Игрок 1')
-    expect(cue).toContain('отключился')
+    expect(cue).toContain('отключён')
     expect(cue).toContain('попроси выбрать вопрос')
     expect(cue).not.toContain('Игрок 2 отключился. Игрок 1, выбирайте вопрос.')
     await vi.advanceTimersByTimeAsync(80)

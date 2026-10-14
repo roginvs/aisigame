@@ -54,7 +54,7 @@ describe('молчание на выборе вопроса', () => {
     expect(next).not.toBe(first)
     expect(ctx(actor).idleOutcome).toMatchObject({ kind: 'choosing', fromId: first, toId: next })
     const cue = chooserHandoffCue(ctx(actor))
-    expect(cue).toContain('не выбрал')
+    expect(cue).toContain('так и не выбран')
     expect(cue).toContain(ctx(actor).players.find((p) => p.id === next)!.name)
     actor.send({ type: 'HOST_AUDIO_FINISHED', purpose: 'chooserHandoff' })
     expect(path(actor)).toBe('choosing.listening')
@@ -154,7 +154,7 @@ describe('молчание в коте', () => {
     const before = nudges(actor)
     tick(idleSteps.catPick[0])
     expect(nudges(actor)).toBe(before + 1)
-    expect(idleNudgeCue('cat.picking', ctx(actor))).toContain('кому он отдаёт кота')
+    expect(idleNudgeCue('cat.picking', ctx(actor))).toContain('кому отдать кота')
     tick(idleSteps.catPick[1] - idleSteps.catPick[0])
     expect(path(actor)).toBe('cat.staking.asking')
     const recipient = ctx(actor).special!.recipientId
