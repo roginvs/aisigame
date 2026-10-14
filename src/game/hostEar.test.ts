@@ -4,8 +4,8 @@ import { MockRealtimeClient } from '../realtime/mockClient.ts'
 vi.mock('../audio/beep.ts', () => ({ playTimeoutBeep: vi.fn(), unlockAudio: vi.fn() }))
 import { attachController } from './controller.ts'
 import {
-  clearHostEar, getHostEar, HOST_EAR_HEARING_MAX_MS, HOST_EAR_PROCESSING_MAX_MS,
-  hostEarHearing, hostEarMicClosed, hostEarProcessing, hostEarSurvives, readHostEar, subscribeHostEar,
+  clearHostEar, getHostEar, hostEarHearing, hostEarHostSpoke, hostEarMicClosed, hostEarProcessing,
+  hostEarShown, hostEarSurvives, readHostEar, settleHostEar, subscribeHostEar,
 } from './hostEar.ts'
 import { gameMachine, statePath } from './machine.ts'
 import type { QuestionPack } from './types.ts'
@@ -39,36 +39,43 @@ describe('hostEar: стор', () => {
     expect(getHostEar()).toBe('idle')
   })
 
-  it('hearing гаснет по страховке, если speech_stopped потерялся', () => {
+  it('таймеров нет: без событий состояние держится', () => {
     hostEarHearing()
-    vi.advanceTimersByTime(HOST_EAR_HEARING_MAX_MS - 1)
+    vi.advanceTimersByTime(10 * 60_000)
     expect(getHostEar()).toBe('hearing')
-    vi.advanceTimersByTime(1)
+  })
+
+  it('разбор без перехода гасит только свою фразу', () => {
+    hostEarHearing()
+    const first = hostEarProcessing()
+    hostEarHearing()
+    settleHostEar(first)
+    expect(getHostEar()).toBe('hearing')
+    const second = hostEarProcessing()
+    settleHostEar(second)
     expect(getHostEar()).toBe('idle')
   })
 
-  it('processing гаснет по страховке', () => {
+  it('речь ведущей гасит processing', () => {
     hostEarHearing()
     hostEarProcessing()
-    vi.advanceTimersByTime(HOST_EAR_PROCESSING_MAX_MS)
+    hostEarHostSpoke()
     expect(getHostEar()).toBe('idle')
   })
 
-  it('новый старт перезапускает страховку', () => {
-    hostEarHearing()
-    vi.advanceTimersByTime(HOST_EAR_HEARING_MAX_MS - 100)
-    hostEarHearing()
-    vi.advanceTimersByTime(200)
-    expect(getHostEar()).toBe('hearing')
+  it('в лобби, подключении и финале ухо не показываем', () => {
+    for (const path of ['startMenu', 'lobby', 'connecting', 'finished', 'paused']) expect(hostEarShown(path)).toBe(false)
+    expect(hostEarShown('choosing.listening')).toBe(true)
   })
 
-  it('закрытый микрофон посреди речи переводит в processing', () => {
+  it('закрытый микрофон посреди речи гасит hearing, но не processing', () => {
     hostEarHearing()
+    hostEarMicClosed()
+    expect(getHostEar()).toBe('idle')
+    hostEarHearing()
+    hostEarProcessing()
     hostEarMicClosed()
     expect(getHostEar()).toBe('processing')
-    clearHostEar()
-    hostEarMicClosed()
-    expect(getHostEar()).toBe('idle')
   })
 
   it('переживают только переходы, вызванные самой речью', () => {
@@ -137,12 +144,41 @@ describe('hostEar: контроллер', () => {
     stop()
   })
 
-  it('выключенный мик посреди речи → processing, затем страховка', async () => {
+  it('выключенный мик посреди речи гасит', async () => {
     const { client, stop } = await boot()
     client.onSpeechStarted({ itemId: 'e' })
     client.setMicEnabled(false)
+    expect(getHostEar()).toBe('idle')
+    stop()
+  })
+
+  it('шум на выборе: разбор без перехода гасит processing, выбор остаётся', async () => {
+    const { client, actor, stop } = await boot()
+    client.hear('а', 100)
+    expect(getHostEar()).toBe('hearing')
+    await vi.advanceTimersByTimeAsync(60)
+    await vi.advanceTimersByTimeAsync(0)
+    expect(statePath(actor.getSnapshot().value)).toBe('choosing.listening')
+    expect(getHostEar()).toBe('idle')
+    stop()
+  })
+
+  it('потерянный транскрипт: ждём 2,2 с разбора и гасим без таймера уха', async () => {
+    const { client, actor, stop } = await boot()
+    client.onSpeechStarted({ itemId: 'lost' })
+    client.onSpeechStopped({ durationMs: 120, itemId: 'lost' })
     expect(getHostEar()).toBe('processing')
-    await vi.advanceTimersByTimeAsync(HOST_EAR_PROCESSING_MAX_MS)
+    await vi.advanceTimersByTimeAsync(2300)
+    expect(statePath(actor.getSnapshot().value)).toBe('choosing.listening')
+    expect(getHostEar()).toBe('idle')
+    stop()
+  })
+
+  it('речь ведущей гасит processing', async () => {
+    const { client, stop } = await boot()
+    client.onSpeechStarted({ itemId: 'x' })
+    client.onSpeechStopped({ durationMs: 900, itemId: 'x' })
+    client.onLink({ host: 'speaking' })
     expect(getHostEar()).toBe('idle')
     stop()
   })

@@ -2,41 +2,49 @@
  * Что ведущая (модель) сейчас воспринимает из речи игрока — только для показа.
  * idle — тишина; hearing — между speech_started и speech_stopped;
  * processing — фраза закончена, ждём текст/решение.
- * Игра это не читает. Застрять нельзя: каждое состояние гаснет по страховочному таймеру.
+ * Игра это не читает. Таймеров нет: гасят только события игры и сессии
+ * (смена состояния, разбор фразы без перехода, речь ведущей, закрытый мик, обрыв).
  */
 export type HostEar = 'idle' | 'hearing' | 'processing'
 
-/** Дольше любой реплики в игре (ответ 10 с + терпение semantic_vad low ~8 с). */
-export const HOST_EAR_HEARING_MAX_MS = 25_000
-/** Распознавание обычно < 1 с; дальше честнее показать обычное «думает». */
-export const HOST_EAR_PROCESSING_MAX_MS = 6_000
-
 let ear: HostEar = 'idle'
-let timer: ReturnType<typeof setTimeout> | null = null
+/** Растёт на каждой смене: отложенный разбор гасит только «свою» фразу. */
+let generation = 0
 const listeners = new Set<() => void>()
 
-function set(next: HostEar, maxMs: number | null): void {
-  if (timer !== null) clearTimeout(timer)
-  timer = maxMs === null ? null : setTimeout(() => {
-    timer = null
-    set('idle', null)
-  }, maxMs)
+function set(next: HostEar): void {
+  generation += 1
   if (ear === next) return
   ear = next
   for (const listener of listeners) listener()
 }
 
-export function hostEarHearing(): void { set('hearing', HOST_EAR_HEARING_MAX_MS) }
+export function hostEarHearing(): void { set('hearing') }
 /** speech_stopped без открытого hearing (старт был до смены ситуации) ничего не зажигает. */
-export function hostEarProcessing(): void { if (ear === 'hearing') set('processing', HOST_EAR_PROCESSING_MAX_MS) }
-export function clearHostEar(): void { set('idle', null) }
-/** Микрофон закрыт посреди речи: новой речи не будет, услышанное ещё разбирается. */
-export function hostEarMicClosed(): void { hostEarProcessing() }
+export function hostEarProcessing(): number | null {
+  if (ear !== 'hearing') return null
+  set('processing')
+  return generation
+}
+export function clearHostEar(): void { if (ear !== 'idle') set('idle') }
+/** Разбор фразы закончился, а состояние не сменилось: гасим, если с тех пор ничего нового. */
+export function settleHostEar(token: number | null): void {
+  if (token !== null && token === generation && ear === 'processing') set('idle')
+}
+/** Микрофон закрыт посреди речи без смены состояния: конца фразы можно не дождаться — гасим. */
+export function hostEarMicClosed(): void { if (ear === 'hearing') set('idle') }
+/** Ведущая заговорила — значит, уже ответила на фразу. */
+export function hostEarHostSpoke(): void { if (ear === 'processing') set('idle') }
 
 export function getHostEar(): HostEar { return ear }
 export function subscribeHostEar(listener: () => void): () => void {
   listeners.add(listener)
   return () => listeners.delete(listener)
+}
+
+/** Ухо показываем только в партии: в лобби/подключении/финале нет хода, который его погасит. */
+export function hostEarShown(path: string): boolean {
+  return !['startMenu', 'lobby', 'connecting', 'restoring', 'finished', 'failed', 'stopped', 'paused'].includes(path)
 }
 
 /** Переход, который сам вызван речью: не гасим. Всё прочее — новая ситуация, гасим. */

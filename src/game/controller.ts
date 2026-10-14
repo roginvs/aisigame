@@ -1,5 +1,5 @@
 import type { Actor, SnapshotFrom } from 'xstate'
-import { clearHostEar, hostEarHearing, hostEarMicClosed, hostEarProcessing, hostEarSurvives } from './hostEar.ts'
+import { clearHostEar, hostEarHearing, hostEarHostSpoke, hostEarMicClosed, hostEarProcessing, hostEarShown, hostEarSurvives, settleHostEar } from './hostEar.ts'
 import { playTimeoutBeep } from '../audio/beep.ts'
 import { auctionDingMs, audioJudgmentTimings, catMeowMs } from '../options.ts'
 import { matchAuctionSpeech, optionLabel } from './auction.ts'
@@ -201,6 +201,7 @@ export function attachController(options: {
     // Связь упала/закрыта — speech_stopped уже не придёт; закрытый мик — новой речи не будет.
     if (patch.connection && patch.connection !== 'connected') clearHostEar()
     else if (patch.mic && patch.mic !== 'live') hostEarMicClosed()
+    if (patch.host === 'speaking') hostEarHostSpoke()
     setLink((current) => ({ ...current, ...patch }))
   }
   client.onFailure = (message) => {
@@ -223,7 +224,7 @@ export function attachController(options: {
   client.onSpeechStarted = (info) => {
     const path = statePath(actor.getSnapshot().value)
     if (path === 'stopped' || path === 'paused') return
-    hostEarHearing()
+    if (hostEarShown(path)) hostEarHearing()
     const itemId = info?.itemId ?? null
     if (itemId) {
       openSpeechItemId = itemId
@@ -255,7 +256,14 @@ export function attachController(options: {
   client.onSpeechStopped = ({ durationMs, itemId }) => {
     const path = statePath(actor.getSnapshot().value)
     if (path === 'stopped' || path === 'paused') return
-    hostEarProcessing()
+    // Разбор без перехода (эхо, шум, чужая попытка, лобби) гасит ухо сам; переход гасит подписка.
+    const earToken = hostEarProcessing()
+    const settle = (work?: Promise<void>) => {
+      const from = statePath(actor.getSnapshot().value)
+      const done = () => { if (statePath(actor.getSnapshot().value) === from) settleHostEar(earToken) }
+      if (work) void work.finally(done)
+      else done()
+    }
     // VAD-длительность может быть длиннее wall-clock с момента started — для окна попытки
     // берём фактический старт utterance, иначе короткий фантом-гард ломает нормальные ответы.
     const speechStartedAt =
@@ -269,21 +277,22 @@ export function attachController(options: {
     const startedOverRead = overRead
     overRead = false
     if ((startedOverRead || isReadingPath(path) || path === 'falseStartCue') && !path.startsWith('answering')) {
-      void considerTalkover(durationMs, itemId)
+      settle(considerTalkover(durationMs, itemId))
       return
     }
     if (path === 'finalBets.hearing') {
       actor.send({ type: 'PLAYER_SPEECH_FINISHED' })
-      void considerBet(itemId)
+      settle(considerBet(itemId))
       return
     }
     if (specialListening(path)) {
-      void considerSpecial(path, durationMs, itemId)
+      settle(considerSpecial(path, durationMs, itemId))
       return
     }
     if (path === 'answering.waiting' || path === 'answering.hearing') {
       if (!acceptAnswerSpeech(durationMs, itemId, speechStartedAt)) {
         client.suppressPlayerChat(itemId)
+        settle()
         return
       }
       answerItemId = itemId ?? liveSpeechItemId
@@ -301,9 +310,14 @@ export function attachController(options: {
     }
     if (statePath(actor.getSnapshot().value) === 'choosing.listening') {
       lastChooserSpeechAt = Date.now()
-      void considerChoice(durationMs, itemId)
+      settle(considerChoice(durationMs, itemId))
+      return
     }
-    if (statePath(actor.getSnapshot().value).startsWith('buzzing')) void considerBlurt(durationMs, itemId)
+    if (statePath(actor.getSnapshot().value).startsWith('buzzing')) {
+      settle(considerBlurt(durationMs, itemId))
+      return
+    }
+    settle()
   }
   client.onToolCall = (call, purpose, turn) => {
     const path = statePath(actor.getSnapshot().value)
