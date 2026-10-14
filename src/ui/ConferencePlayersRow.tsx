@@ -205,6 +205,37 @@ export function ConferencePlayersRow(props: {
           </div>
         )
       })}
+      {pendingGuests(roster, players).map((entry) => {
+        const isSelf = Boolean(selfClientId && entry.clientId === selfClientId)
+        const tile =
+          matchConferenceTile(tiles, { selfClientId, clientId: entry.clientId, name: entry.name }) ?? emptyTile(entry.name, isSelf)
+        return (
+          <div
+            key={`pending-${entry.clientId}`}
+            className={['player', 'conference-player', 'pending-guest', isSelf ? 'self' : '', entry.stale ? 'stale' : ''].filter(Boolean).join(' ')}
+            role="group"
+            aria-label={`${entry.name}, ещё не играет`}
+            data-pending="true"
+          >
+            <ConferenceVideoTile tile={tile} bindVideo={bindVideo} pingMs={entry.pingMs} />
+            <div className="player-lobby-progress">
+              <div className="roster-bar" role="progressbar" aria-valuenow={entry.percent} aria-valuemin={0} aria-valuemax={100}>
+                <span style={{ transform: `scaleX(${Math.max(0, Math.min(1, entry.percent / 100))})` }} />
+              </div>
+              <p className="status-line">{packProgressLabel(entry)} · ещё не играет</p>
+            </div>
+          </div>
+        )
+      })}
     </section>
   )
+}
+
+/** Гости в комнате, которые ещё не игроки партии (качают/сверяют пакет): видны сразу, с прогрессом. */
+export function pendingGuests<T extends { clientId: string; isMaster?: boolean; hidden?: boolean }>(
+  roster: readonly T[],
+  players: readonly { clientId?: string }[],
+): T[] {
+  const playing = new Set(players.map((player) => player.clientId).filter(Boolean))
+  return roster.filter((entry) => !entry.isMaster && !entry.hidden && !playing.has(entry.clientId))
 }

@@ -35,6 +35,7 @@ import { commentaryContext } from '../game/commentary.ts'
 import { emptyMessageRing } from './messageRing.ts'
 import { ConferenceStatePublisher } from './stateProtocol.ts'
 import { conversationLineFromTrace } from './traceConversation.ts'
+import { setPendingGuests } from '../game/commentary.ts'
 import { throttleLatest } from '../realtime/liveSpeech.ts'
 
 /** Черновик речи joiner-ам не чаще ~4 раз в секунду. */
@@ -129,7 +130,10 @@ export class MasterSession {
     this.packBytes = options.packBytes
     this.packHash = options.packHash
     this.authorityToken = options.authorityToken
-    this.onRosterCb = options.onRoster
+    this.onRosterCb = () => {
+      this.notePendingGuests()
+      options.onRoster()
+    }
     this.initialHistory = options.messageRing ?? emptyMessageRing()
     this.onHistory = options.onHistory ?? (() => {})
     this.isRoomSpeaking = options.isRoomSpeaking ?? (() => false)
@@ -567,6 +571,7 @@ export class MasterSession {
   }
 
   private buildSnapshot(phase: string): ConferenceSnapshot {
+    this.notePendingGuests()
     const context = this.gameStarted
       ? this.actor.getSnapshot().context
       : lobbyContext(this.pack, this.roster.get(this.masterClientId)?.name ?? 'Мастер')
@@ -594,6 +599,13 @@ export class MasterSession {
     if (ear !== 'idle' || !this.gameStarted) return ear
     const link = getLinkStatus()
     return hostMood(phase, { host: link.host as LinkStatus['host'], mic: link.mic as LinkStatus['mic'] }, 'idle') === 'listen' ? 'listening' : 'idle'
+  }
+
+  /** Ведущей: кто в комнате, но ещё не игрок партии (качает пакет). */
+  private notePendingGuests(): void {
+    if (!this.gameStarted) { setPendingGuests([]); return }
+    const playing = new Set(this.actor.getSnapshot().context.players.map((player) => player.clientId).filter(Boolean))
+    setPendingGuests(this.roster.list().filter((entry) => !entry.isMaster && !entry.hidden && !playing.has(entry.clientId)).map((entry) => entry.name))
   }
 
   private maybeOpenLobbySpeech(): void {

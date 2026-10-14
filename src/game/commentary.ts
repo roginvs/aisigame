@@ -5,6 +5,12 @@ import { playNote, spokenPayload, withPlayNote } from '../realtime/speechMatch.t
 
 const maxHistoryChars = 24_000
 
+/** Гости в комнате, ещё не игроки (качают пакет): мастер обновляет по ростеру. */
+let pendingGuestNames: string[] = []
+export function setPendingGuests(names: readonly string[]): void {
+  pendingGuestNames = [...names]
+}
+
 /** Public UI history only; never serialize game context, pack answers or credentials. */
 export function commentaryContext(context: GameContext | null, history: readonly ConferenceHistoryMessage[]): string {
   const rows: object[] = []
@@ -33,6 +39,10 @@ export function commentaryContext(context: GameContext | null, history: readonly
         lastHeard: context.heard,
         judgment: context.judgmentStatus,
         playedQuestions: context.playedIds,
+        ...(pendingGuestNames.length ? {
+          joiningNotPlaying: pendingGuestNames,
+          joiningNote: 'Эти гости уже в комнате и могут говорить, но качают пакет и ещё не играют: не обращайся к ним как к игрокам, не давай им ход и очки.',
+        } : {}),
       } : {}),
       history: rows,
     }),
