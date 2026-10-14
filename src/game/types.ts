@@ -1,3 +1,4 @@
+import type { IdleClock, IdleOutcome, TalkState } from './idle.ts'
 /** Порядковый номер игрока с 1. Клавиатура есть только у 1, 2 и 3. */
 export type PlayerId = number
 
@@ -32,6 +33,8 @@ export type SpeechPurpose =
   | 'auctionClarify'
   | 'auctionWon'
   | 'specialAway'
+  | 'idleNudge'
+  | 'idleAuto'
 
 export type RoundKind = 'normal' | 'final'
 
@@ -217,6 +220,8 @@ export type GameEvent =
   | { type: 'CONNECTION_FAILED'; message: string }
   | { type: 'CONNECTION_LOST'; message: string }
   | { type: 'HOST_AUDIO_FINISHED'; purpose: SpeechPurpose }
+  | { type: 'IDLE_SPEECH'; active: boolean }
+  | { type: 'HOST_TALKING'; active: boolean }
   | { type: 'PLAYER_SPEECH_STARTED' }
   | { type: 'PLAYER_SPEECH_FINISHED' }
   | { type: 'QUESTION_SELECTED'; themeId: string; value: number }
@@ -293,4 +298,12 @@ export type GameContext = AppealFields & {
   falseStarts: Partial<Record<PlayerId, number>>
   /** Кот в мешке или аукцион на текущей ячейке. */
   special?: SpecialState | null
+  /** Отсчёт тишины игрока (выбор, кот, ставка, аукцион). */
+  idle?: IdleClock | null
+  /** Счётчик реплик-напоминаний: контроллер говорит на каждое увеличение. */
+  idleNudges?: number
+  /** Последнее автодействие по молчанию — для реплики ведущей. */
+  idleOutcome?: IdleOutcome | null
+  /** Кто сейчас говорит: ведущая / игрок. Пока говорят, отсчёт тишины стоит. */
+  talk?: TalkState
 }

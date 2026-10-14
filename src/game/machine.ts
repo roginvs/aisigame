@@ -4,6 +4,7 @@ import { autoCatRecipient, nextInCircle } from './cat.ts'
 import { appealMsLeft, appealRequestError, appealStake, appealWindowMs, eligibleAppealPlayers, settleOutcome } from './appeals.ts'
 import { gameConfig } from '../config.ts'
 import { catAwayWaitMs } from '../options.ts'
+import { advanceIdle, enterIdle, idleDelay, idleIsFinal, pauseIdle, type IdleKind } from './idle.ts'
 import { questionSpeech } from './choices.ts'
 import { earlyBuzzerMsFor } from './earlyBuzzer.ts'
 import { findQuestion, nextPlayableRound, questionById, questionsInRound } from './pack.ts'
@@ -354,8 +355,80 @@ export const gameMachine = setup({
     earlyLeft: ({ context }) => context.earlyLeftMs ?? gameConfig.earlyBuzzerMs,
     answerMediaHoldMs: gameConfig.answerMediaHoldMs,
     catAwayWaitMs: catAwayWaitMs,
+    idleStep: ({ context }) => idleDelay(context.idle),
   },
   actions: {
+    noteTalk: assign(({ context, event }) => {
+      const talk = { host: Boolean(context.talk?.host), player: Boolean(context.talk?.player) }
+      if (event.type === 'IDLE_SPEECH') talk.player = event.active
+      if (event.type === 'HOST_TALKING') talk.host = event.active
+      return { talk }
+    }),
+    idleEnter: assign(({ context }, params: { kind: IdleKind }) => {
+      const clock = enterIdle(context.idle, params.kind, context.talk, Date.now())
+      const fresh = clock.stage === 0 && clock.elapsedMs === 0 && !context.idle?.carry
+      return fresh ? { idle: clock, idleOutcome: null } : { idle: clock }
+    }),
+    idleTalk: assign(({ context, event }) => {
+      if (!context.idle) return {}
+      const reset = event.type === 'IDLE_SPEECH' && event.active
+      return { idle: pauseIdle(context.idle, Date.now(), reset) }
+    }),
+    idleNudge: assign(({ context }) => context.idle
+      ? { idle: advanceIdle(context.idle, Date.now()), idleNudges: (context.idleNudges ?? 0) + 1 }
+      : {}),
+    idlePassChooser: assign(({ context }) => {
+      const fromId = context.chooserId
+      const toId = context.players.length > 1 ? nextInCircle(context.players, fromId) ?? fromId : fromId
+      return {
+        chooserId: toId,
+        idle: null,
+        idleOutcome: { kind: 'choosing' as const, fromId, toId, waitedMs: context.idle?.elapsedMs ?? 0 },
+        clarifyReason: '',
+        statusLine: toId === fromId ? `${playerName(context, fromId)}, выбирайте вопрос` : `Выбирает ${playerName(context, toId)}`,
+      }
+    }),
+    idleGiveCat: assign(({ context }) => {
+      const special = context.special
+      if (!special) return {}
+      const others = context.players.filter((player) => player.id !== special.giverId)
+      const toId = others[Math.floor(Math.random() * others.length)]?.id ?? special.giverId
+      return {
+        special: { ...special, recipientId: toId, unclear: '' },
+        idle: null,
+        idleOutcome: { kind: 'catPick' as const, fromId: special.giverId, toId, waitedMs: context.idle?.elapsedMs ?? 0 },
+        statusLine: `Кот у игрока ${playerName(context, toId)}`,
+      }
+    }),
+    idleMinStake: assign(({ context }) => {
+      const special = context.special
+      if (!special) return {}
+      const stake = Math.min(...(special.stakeOptions.length ? special.stakeOptions : [special.nominal]))
+      return {
+        special: { ...special, stake, unclear: '' },
+        idle: null,
+        idleOutcome: { kind: 'catStake' as const, fromId: special.recipientId ?? 0, toId: special.recipientId, waitedMs: context.idle?.elapsedMs ?? 0, stake },
+      }
+    }),
+    idleAuctionPass: assign(({ context }) => {
+      const special = context.special
+      if (!special || special.recipientId === null) return {}
+      const who = special.recipientId
+      const name = playerName(context, who)
+      const waitedMs = context.idle?.elapsedMs ?? 0
+      if (special.bid === null) {
+        return {
+          special: { ...special, bid: special.nominal, leaderId: who, options: [], unclear: '', log: [...special.log, `${name} — ${special.nominal}, молча`] },
+          idle: null,
+          idleOutcome: { kind: 'auction' as const, fromId: who, toId: null, waitedMs, autoOpen: true },
+        }
+      }
+      return {
+        special: { ...special, passed: [...special.passed, who], options: [], unclear: '', log: [...special.log, `${name} — пас (молчание)`] },
+        idle: null,
+        idleOutcome: { kind: 'auction' as const, fromId: who, toId: null, waitedMs },
+      }
+    }),
     clearAppeals: assign({ appeal: () => null }),
     markRoundSummary: assign(({ context }) => context.appeal ? { appeal: { ...context.appeal, summary: 'pending' as const } } : {}),
     markSummaryDone: assign(({ context }) => context.appeal ? { appeal: { ...context.appeal, summary: 'done' as const } } : {}),
@@ -492,6 +565,7 @@ export const gameMachine = setup({
       statusLine: () => 'Ведущая разбирает выбор',
     }),
     handoffChooser: assign({
+      idleOutcome: () => null,
       chooserId: ({ context, event }) =>
         event.type === 'CHOOSER_OFFLINE' ? event.toPlayerId : context.chooserId,
       clarifyReason: ({ context, event }) => {
@@ -527,6 +601,7 @@ export const gameMachine = setup({
       clarifyReason: () => '',
     }),
     openQuestion: assign({
+      idleOutcome: () => null,
       appeal: () => null,
       special: () => null,
       activeQuestionId: ({ context, event }) => {
@@ -1020,6 +1095,7 @@ export const gameMachine = setup({
     }),
   },
   guards: {
+    idleNudgeDue: ({ context }) => !idleIsFinal(context.idle),
     validAppeal: ({ context, event }) => event.type === 'APPEAL_REQUESTED' &&
       appealRequestError(context, context.appeal?.activePlayerId !== null && context.appeal?.stage === 'closed' ? 'answering.waiting' : context.appeal?.stage === 'open' ? 'buzzing.open' : 'choosing.listening', event) === null,
     closedAppeal: ({ context }) => context.appeal?.stage === 'closed' && context.appeal.activePlayerId !== null,
@@ -1232,6 +1308,8 @@ export const gameMachine = setup({
       guard: not(stateIn('startMenu')),
       actions: 'addPlayer',
     },
+    IDLE_SPEECH: { actions: 'noteTalk' },
+    HOST_TALKING: { actions: 'noteTalk' },
   },
   states: {
     startMenu: {
@@ -1304,7 +1382,11 @@ export const gameMachine = setup({
       },
       states: {
         listening: {
+          entry: { type: 'idleEnter', params: { kind: 'choosing' } },
+          after: { idleStep: [{ guard: 'idleNudgeDue', target: 'listening', reenter: true, actions: 'idleNudge' }, { target: '#game.chooserHandoff', actions: 'idlePassChooser' }] },
           on: {
+            IDLE_SPEECH: { target: 'listening', reenter: true, actions: ['idleTalk', 'noteTalk'] },
+            HOST_TALKING: { target: 'listening', reenter: true, actions: ['idleTalk', 'noteTalk'] },
             PLAYER_SPEECH_FINISHED: 'resolving',
             QUESTION_SELECTED: [
               { guard: 'finalWithoutPlayers', target: '#game.finished' },
@@ -1366,7 +1448,11 @@ export const gameMachine = setup({
           },
         },
         picking: {
+          entry: { type: 'idleEnter', params: { kind: 'catPick' } },
+          after: { idleStep: [{ guard: 'idleNudgeDue', target: 'picking', reenter: true, actions: 'idleNudge' }, { target: '#game.cat.staking', actions: 'idleGiveCat' }] },
           on: {
+            IDLE_SPEECH: { target: 'picking', reenter: true, actions: ['idleTalk', 'noteTalk'] },
+            HOST_TALKING: { target: 'picking', reenter: true, actions: ['idleTalk', 'noteTalk'] },
             PLAYER_SPEECH_FINISHED: 'resolving',
             CAT_RECIPIENT: { guard: 'validCatRecipient', target: '#game.cat.staking', actions: 'setCatRecipient' },
             CAT_PICK_UNCLEAR: { target: 'clarifying', actions: 'noteSpecialUnclear' },
@@ -1403,8 +1489,12 @@ export const gameMachine = setup({
               },
             },
             listening: {
-              on: {
-                PLAYER_SPEECH_FINISHED: 'resolving',
+              entry: { type: 'idleEnter', params: { kind: 'catStake' } },
+          after: { idleStep: [{ guard: 'idleNudgeDue', target: 'listening', reenter: true, actions: 'idleNudge' }, { target: '#game.cat.autoStaked', actions: 'idleMinStake' }] },
+          on: {
+                IDLE_SPEECH: { target: 'listening', reenter: true, actions: ['idleTalk', 'noteTalk'] },
+            HOST_TALKING: { target: 'listening', reenter: true, actions: ['idleTalk', 'noteTalk'] },
+            PLAYER_SPEECH_FINISHED: 'resolving',
                 CAT_STAKE_UNCLEAR: { target: 'clarifying', actions: 'noteSpecialUnclear' },
               },
             },
@@ -1422,6 +1512,10 @@ export const gameMachine = setup({
               },
             },
           },
+        },
+        /** Молчал на ставке: взяли минимум, ведущая объявляет, потом вопрос. */
+        autoStaked: {
+          on: { HOST_AUDIO_FINISHED: { guard: heardPurpose('idleAuto'), target: 'placed' } },
         },
         placed: { always: { target: '#game.flashing', actions: 'placeSpecial' } },
         /** Восстановление и RESUME: получатель уже есть — к ставке, иначе снова объявление. */
@@ -1455,7 +1549,11 @@ export const gameMachine = setup({
           },
         },
         listening: {
+          entry: { type: 'idleEnter', params: { kind: 'auction' } },
+          after: { idleStep: [{ guard: 'idleNudgeDue', target: 'listening', reenter: true, actions: 'idleNudge' }, { target: 'advancing', actions: 'idleAuctionPass' }] },
           on: {
+            IDLE_SPEECH: { target: 'listening', reenter: true, actions: ['idleTalk', 'noteTalk'] },
+            HOST_TALKING: { target: 'listening', reenter: true, actions: ['idleTalk', 'noteTalk'] },
             PLAYER_SPEECH_FINISHED: 'resolving',
             AUCTION_BID: { guard: 'validAuctionBid', target: '#game.auction.advancing', actions: 'applyAuctionBid' },
             AUCTION_UNCLEAR: { target: 'clarifying', actions: 'noteSpecialUnclear' },

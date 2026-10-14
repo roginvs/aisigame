@@ -1,9 +1,10 @@
 import type { Actor, SnapshotFrom } from 'xstate'
-import { clearHostEar, hostEarHearing, hostEarHostSpoke, hostEarMicClosed, hostEarProcessing, hostEarShown, hostEarSurvives, settleHostEar } from './hostEar.ts'
+import { clearHostEar, getHostEar, subscribeHostEar, hostEarHearing, hostEarHostSpoke, hostEarMicClosed, hostEarProcessing, hostEarShown, hostEarSurvives, settleHostEar } from './hostEar.ts'
 import { playTimeoutBeep } from '../audio/beep.ts'
 import { auctionDingMs, audioJudgmentTimings, catMeowMs } from '../options.ts'
 import { matchAuctionSpeech, optionLabel } from './auction.ts'
-import { matchCatStake } from './cat.ts'
+import { matchCatStake, nextInCircle } from './cat.ts'
+import { idleThresholds } from './idle.ts'
 import { matchSpokenPlayer, spokenPlayers } from './nameMatch.ts'
 import type { JudgmentInputMode, JudgmentSource, JudgeRequestContext } from '../realtime/judgmentRequest.ts'
 import { JudgmentClock } from './judgmentClock.ts'
@@ -202,6 +203,13 @@ export function attachController(options: {
     if (patch.connection && patch.connection !== 'connected') clearHostEar()
     else if (patch.mic && patch.mic !== 'live') hostEarMicClosed()
     if (patch.host === 'speaking') hostEarHostSpoke()
+    if (patch.host !== undefined) {
+      const active = patch.host === 'speaking'
+      if (active !== hostTalking) {
+        hostTalking = active
+        actor.send({ type: 'HOST_TALKING', active })
+      }
+    }
     setLink((current) => ({ ...current, ...patch }))
   }
   client.onFailure = (message) => {
@@ -340,10 +348,26 @@ export function attachController(options: {
     if (purpose === 'catPick' || purpose === 'specialBid') handleSpecialTool(call, turn)
   }
 
+  // Отсчёт тишины в машине стоит, пока игрок говорит (ухо ведущей) или говорит ведущая.
+  let hostTalking = false
+  let playerTalking = false
+  const earUnsub = subscribeHostEar(() => {
+    const active = getHostEar() === 'hearing'
+    if (active === playerTalking) return
+    playerTalking = active
+    actor.send({ type: 'IDLE_SPEECH', active })
+  })
+  let lastIdleNudges = actor.getSnapshot().context.idleNudges ?? 0
+
   let previousRound = actor.getSnapshot().context.roundIndex
   const subscription = actor.subscribe((snapshot) => {
     const path = statePath(snapshot.value)
     const round = snapshot.context.roundIndex
+    const nudges = snapshot.context.idleNudges ?? 0
+    if (nudges !== lastIdleNudges) {
+      lastIdleNudges = nudges
+      if (path === previousPath && isIdlePath(path)) speakWhileListening('idleNudge', idleNudgeCue(path, snapshot.context))
+    }
     if (path === previousPath && round === previousRound) return
     const from = previousPath
     const fromRound = previousRound
@@ -503,6 +527,11 @@ export function attachController(options: {
       specialEpoch += 1
       client.setMicEnabled(false)
       speak('auctionWon', auctionWonCue(context), undefined, true)
+    }
+    if (path === 'cat.autoStaked') {
+      specialEpoch += 1
+      client.setMicEnabled(false)
+      speak('idleAuto', idleAutoCue(context), undefined, true)
     }
     if (path === 'specialAway') {
       specialEpoch += 1
@@ -1234,6 +1263,7 @@ export function attachController(options: {
   })
 
   return () => {
+    earUnsub()
     clearHostEar()
     onActions?.(null)
     connectToken += 1
@@ -1330,6 +1360,8 @@ function isSpeechPurpose(purpose: string): purpose is SpeechPurpose {
     purpose === 'turn' ||
     purpose === 'chooserHandoff' ||
     purpose === 'micWarning' ||
+    purpose === 'idleNudge' ||
+    purpose === 'idleAuto' ||
     purpose === 'falseStart' ||
     specialPurposes.has(purpose)
   )
@@ -1420,6 +1452,19 @@ export function mutedAnswerMicCue(playerName: string): string {
 
 /** Передача выбора после отключения: ясно назвать ушедшего и нового выбирающего, без готовой фразы. */
 export function chooserHandoffCue(context: GameContext): string {
+  const idle = context.idleOutcome
+  if (idle?.kind === 'choosing') {
+    const from = playerName(context.players, idle.fromId) || 'Игрок'
+    const to = playerName(context.players, idle.toId) || from
+    const same = idle.toId === idle.fromId
+    return hostCue({
+      situation: `${from} молчал около ${seconds(idle.waitedMs)} с и так и не выбрал вопрос. ${same ? `Игрок один — выбирает снова ${from}, отсчёт начинается заново.` : `Ход выбора переходит к следующему по кругу: ${to}.`}`,
+      goal: same
+        ? `Коротко и по-доброму скажи, что ${from} так и не выбрал, и снова предложи ${from} выбрать вопрос.`
+        : `Коротко скажи, что ${from} не выбрал вопрос, и ясно объяви по имени, что теперь выбирает ${to}.`,
+      constraints: [boardSecrets, 'Своими словами, без упрёка. Ячейку сама не открывай.'],
+    })
+  }
   const left =
     context.clarifyReason.match(/^(.+?)\s+отключился/)?.[1]?.trim() ||
     'Игрок'
@@ -1640,6 +1685,85 @@ function withCloseGuess(cue: string, context: GameContext): string {
 /** Дословная реплика, когда ответ один: модель не должна пересказывать задание. */
 // ——— Кот в мешке и аукцион: свободные реплики (ситуация + цель + ограничения) ———
 
+function seconds(ms: number): number {
+  return Math.max(1, Math.round(ms / 1000))
+}
+
+const idlePaths = new Set(['choosing.listening', 'cat.picking', 'cat.staking.listening', 'auction.listening'])
+export function isIdlePath(path: string): boolean {
+  return idlePaths.has(path)
+}
+
+/** Напоминание о молчании: ведущая получает кто, сколько ждали и что будет дальше; слова — её. */
+export function idleNudgeCue(path: string, context: GameContext): string {
+  const clock = context.idle
+  const steps = clock ? idleThresholds(clock.kind) : [0]
+  const waited = seconds(clock?.elapsedMs ?? 0)
+  const left = seconds((steps.at(-1) ?? 0) - (clock?.elapsedMs ?? 0))
+  const hurry = (clock?.stage ?? 1) >= 2
+  const style = ['Одна короткая фраза, своими словами, каждый раз по-новому.', 'Не перечисляй темы, цены и варианты: они на экране.']
+  if (path === 'choosing.listening') {
+    const who = playerName(context.players, context.chooserId) || 'Игрок'
+    const nextId = context.players.length > 1 ? nextInCircle(context.players, context.chooserId) : null
+    const next = nextId ? playerName(context.players, nextId) : null
+    return hostCue({
+      situation: `${who} выбирает вопрос и молчит уже около ${waited} с. ${next ? `Если промолчит ещё около ${left} с, выбор перейдёт к игроку ${next}.` : `Если промолчит ещё около ${left} с, ведущая напомнит снова.`}`,
+      goal: hurry
+        ? `Поторопи ${who} по имени: время на выбор заканчивается.${next ? ` Можно намекнуть, что иначе выбирать будет ${next}.` : ''}`
+        : `Обратись к ${who} по имени и предложи выбрать тему и стоимость.`,
+      constraints: [boardSecrets, ...style, 'Ячейку сама не выбирай.'],
+    })
+  }
+  if (path === 'cat.picking') {
+    const giver = nameOf(context, context.special?.giverId)
+    return hostCue({
+      situation: `Кот в мешке: ${giver} должен отдать вопрос другому игроку и молчит около ${waited} с. Если промолчит ещё около ${left} с, кот уйдёт случайному игроку.`,
+      goal: `Спроси ${giver} по имени, кому он отдаёт кота.`,
+      constraints: [...style, 'Тему кота не называй. Вопрос не читай.'],
+    })
+  }
+  if (path === 'cat.staking.listening') {
+    const recipient = nameOf(context, context.special?.recipientId)
+    const options = context.special?.stakeOptions ?? []
+    return hostCue({
+      situation: `Кот в мешке у игрока ${recipient}; он выбирает ставку (минимум ${options[0]} или максимум ${options.at(-1)}) и молчит около ${waited} с. Если промолчит ещё около ${left} с, возьмём минимальную.`,
+      goal: `Спроси ${recipient} по имени: минимум или максимум.`,
+      constraints: ['Одна короткая фраза, своими словами.', 'Вопрос не читай.'],
+    })
+  }
+  const special = context.special
+  const bidder = nameOf(context, special?.recipientId)
+  const opening = special?.bid == null
+  return hostCue({
+    situation: opening
+      ? `Аукцион: ${bidder} открывает торги и молчит около ${waited} с. Если промолчит ещё около ${left} с, торги откроются по номиналу ${special?.nominal}.`
+      : `Аукцион: сейчас ${special?.bid} у игрока ${nameOf(context, special?.leaderId)}; ${bidder} решает и молчит около ${waited} с. Если промолчит ещё около ${left} с, это будет пас.`,
+    goal: opening ? `Попроси ${bidder} по имени назвать ставку.` : `Спроси ${bidder} по имени: перекупает или пас.`,
+    constraints: [...style],
+  })
+}
+
+/** Ставка за кота взята по молчанию: объявить и перейти к вопросу. */
+export function idleAutoCue(context: GameContext): string {
+  const idle = context.idleOutcome
+  const recipient = nameOf(context, context.special?.recipientId)
+  return hostCue({
+    situation: `Кот в мешке: ${recipient} молчал около ${seconds(idle?.waitedMs ?? 0)} с и не выбрал ставку. Берём минимальную: ${idle?.stake ?? context.special?.stake}. Дальше ты прочитаешь вопрос.`,
+    goal: `Коротко скажи ${recipient}, что раз ставку не назвал, играем на минимум ${idle?.stake ?? context.special?.stake}.`,
+    constraints: ['Одна короткая фраза, своими словами.', 'Вопрос не читай.'],
+  })
+}
+
+/** Что случилось по молчанию на аукционе — для следующей реплики. */
+function auctionIdleNote(context: GameContext): string {
+  const idle = context.idleOutcome
+  if (idle?.kind !== 'auction') return ''
+  const who = nameOf(context, idle.fromId)
+  return idle.autoOpen
+    ? `${who} промолчал около ${seconds(idle.waitedMs)} с — торги открыты по номиналу ${context.special?.nominal}. Сначала коротко скажи это. `
+    : `${who} промолчал около ${seconds(idle.waitedMs)} с — это пас. Сначала коротко скажи это. `
+}
+
 function nameOf(context: GameContext, id: number | null | undefined): string {
   return context.players.find((player) => player.id === id)?.name ?? 'игрок'
 }
@@ -1679,10 +1803,12 @@ export function catClarifyCue(context: GameContext): string {
 export function catStakeCue(context: GameContext): string {
   const special = context.special
   const recipient = nameOf(context, special?.recipientId)
+  const idle = context.idleOutcome?.kind === 'catPick' ? context.idleOutcome : null
+  const idleNote = idle ? `${nameOf(context, idle.fromId)} молчал около ${seconds(idle.waitedMs)} с и не выбрал, кому отдать кота, — кот случайно достался игроку ${recipient}. Сначала коротко скажи это. ` : ''
   const options = special?.stakeOptions ?? []
   const fixed = options.length <= 1
   return hostCue({
-    situation: `Кот в мешке у игрока ${recipient}. Тема: «${catTheme(context)}». ${fixed ? `Цена фиксированная: ${options[0] ?? special?.nominal}.` : `Ставка на выбор: минимум ${options[0]} или максимум ${options.at(-1)}.`}`,
+    situation: `${idleNote}Кот в мешке у игрока ${recipient}. Тема: «${catTheme(context)}». ${fixed ? `Цена фиксированная: ${options[0] ?? special?.nominal}.` : `Ставка на выбор: минимум ${options[0]} или максимум ${options.at(-1)}.`}`,
     goal: fixed
       ? `Обратись к игроку ${recipient}: назови тему и цену вопроса. Сейчас прочитаешь вопрос.`
       : `Обратись к игроку ${recipient}: назови тему и попроси выбрать ставку — минимум или максимум.`,
@@ -1716,7 +1842,7 @@ export function auctionAskCue(context: GameContext): string {
   const special = context.special
   const bidder = nameOf(context, special?.recipientId)
   return hostCue({
-    situation: `Аукцион. Сейчас ${special?.allIn ? 'ва-банк ' : ''}${special?.bid} у игрока ${nameOf(context, special?.leaderId)}. Спрашиваешь игрока ${bidder}.`,
+    situation: `${auctionIdleNote(context)}Аукцион. Сейчас ${special?.allIn ? 'ва-банк ' : ''}${special?.bid} у игрока ${nameOf(context, special?.leaderId)}. Спрашиваешь игрока ${bidder}.`,
     goal: `Обратись к игроку ${bidder}: «Сейчас ${special?.bid} у ${nameOf(context, special?.leaderId)}, перекупаете?»`,
     constraints: ['Варианты не перечисляй: они на экране.', 'Одна короткая фраза.'],
   })
@@ -1733,7 +1859,7 @@ export function auctionClarifyCue(context: GameContext): string {
 export function auctionWonCue(context: GameContext): string {
   const special = context.special
   return hostCue({
-    situation: `Торги закончены. Вопрос уходит игроку ${nameOf(context, special?.leaderId)} за ${special?.bid ?? special?.nominal}.`,
+    situation: `${auctionIdleNote(context)}Торги закончены. Вопрос уходит игроку ${nameOf(context, special?.leaderId)} за ${special?.bid ?? special?.nominal}.`,
     goal: `Скажи, что вопрос уходит игроку ${nameOf(context, special?.leaderId)} за ${special?.bid ?? special?.nominal}. Сейчас прочитаешь вопрос.`,
     constraints: ['Вопрос не читай.', 'Одна короткая фраза.'],
   })

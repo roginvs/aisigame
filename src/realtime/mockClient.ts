@@ -25,6 +25,8 @@ export type MockControls = {
   /** Демо плашки ведущей: «Слышу…» hearMs, потом «Поняла, думаю…» thinkMs, потом итоговый текст. */
   hearSlow?: (text: string, hearMs?: number, thinkMs?: number) => void
   setSpeechMs: (ms: number) => void
+  /** Демо: ускорить отсчёт молчания (0.1 — в 10 раз быстрее, 1 — как в игре). */
+  setIdleScale?: (scale: number) => void
   /** Только конференция на заглушке: портит байт пакета у joiner. */
   flipPackByte?: () => void
 }
@@ -393,6 +395,12 @@ function hostLine(purpose: string, instructions = ''): string {
       /обратись к\s+(.+?)\s+по имени/i.exec(instructions)?.[1]?.trim() ||
       /выбирает вопрос[\s\S]*?([А-ЯA-Z][^\s,]+)/.exec(instructions)?.[1]?.trim()
     return name ? `${name}, включи микрофон.` : 'Микрофон выключен.'
+  }
+  if (purpose === 'idleNudge') return 'Ждём ваш выбор.'
+  if (purpose === 'idleAuto') return 'Ставка минимальная.'
+  if (purpose === 'chooserHandoff' && /не выбрал/.test(instructions)) {
+    const next = /теперь выбирает\s+([^.]+)\./.exec(instructions)?.[1]?.trim()
+    return next ? `Время вышло. Выбирает ${next}.` : 'Время вышло. Выбирайте снова.'
   }
   if (purpose === 'chooserHandoff') {
     const left = /что\s+(.+?)\s+отключился/i.exec(instructions)?.[1]?.trim()
