@@ -1,3 +1,5 @@
+import { withHostRules } from '../config.ts'
+import { freeReplyMaxOutputTokens } from '../options.ts'
 export function speechMatches(said: string, expected: string): boolean {
   const want = words(expected)
   const heard = words(said)
@@ -65,7 +67,7 @@ export function isolatedToolResponse(options: {
     tool_choice: { type: 'function' as const, name: options.name },
     tools: options.audioItemId ? options.tools.filter((tool) => (tool as { name?: string }).name === options.name) : options.tools,
     metadata: { purpose: options.purpose, turn: String(options.turn), ...options.metadata },
-    instructions: options.instructions,
+    instructions: withHostRules(options.instructions),
     input: [
       {
         type: 'message' as const,
@@ -86,13 +88,14 @@ export function isolatedCue(instructions: string, meta: { purpose: string; turn:
     output_modalities: ['audio'] as const,
     tool_choice: 'none' as const,
     tools: [] as const,
+    max_output_tokens: freeReplyMaxOutputTokens,
     metadata: { purpose: meta.purpose, turn: String(meta.turn), take: String(meta.take) },
-    instructions: [
+    instructions: withHostRules([
       'Ты ведущая. По сообщению ниже скажи игрокам одну короткую реплику своими словами, без предисловия и без пересказа задания. Говори только саму реплику: служебные пометки вслух не произноси. Не объявляй, что сейчас что-то произнесёшь. Если сообщение прямо не просит произнести эталон пакета, не произноси правильный ответ и не вспоминай его из других знаний.',
       performance,
     ]
       .filter(Boolean)
-      .join(' '),
+      .join(' ')),
     input: [
       {
         type: 'message' as const,
@@ -110,8 +113,8 @@ export function verbatimResponse(text: string, meta: { purpose: string; turn: nu
     tool_choice: 'none' as const,
     tools: [] as const,
     metadata: { purpose: meta.purpose, turn: String(meta.turn), take: String(meta.take) },
-    instructions:
-      'Ты ведущая и сейчас говоришь игрокам. Сообщение ниже — готовая фраза: сам вопрос или уже принятая реплика. Начни сразу с этой фразы и скажи только её, символ в символ. Если это вопрос, ты его только читаешь: не отвечай на него, не подсказывай и не называй ответ, даже если знаешь его. После последнего слова сразу замолчи. Не объявляй тему и номинал. Не говори, что ячейка выбрана. Не добавляй «вопрос», «отлично» и ничего до или после.',
+    instructions: withHostRules(
+      'Ты ведущая и сейчас говоришь игрокам. Сообщение ниже — готовая фраза: сам вопрос или уже принятая реплика. Начни сразу с этой фразы и скажи только её, символ в символ. Если это вопрос, ты его только читаешь: не отвечай на него, не подсказывай и не называй ответ, даже если знаешь его. После последнего слова сразу замолчи. Не объявляй тему и номинал. Не говори, что ячейка выбрана. Не добавляй «вопрос», «отлично» и ничего до или после.'),
     input: [
       {
         type: 'message' as const,

@@ -100,3 +100,12 @@ export const defaultRoundPrices = { min: 100, max: 500 } as const
 /** Запасной номинал вопроса, когда в пакете нет ни одной цены. */
 export const defaultQuestionPrice = 100
 
+
+/** Сколько последних сообщений журнала идёт ведущей как публичный контекст. */
+export const commentaryHistoryMessages = 10
+
+/**
+ * Мягкий потолок свободной реплики (`max_output_tokens`): ~3–4 предложения аудио
+ * с запасом. Не для дословного чтения вопроса и не для вызова функций.
+ */
+export const freeReplyMaxOutputTokens = 800

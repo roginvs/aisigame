@@ -119,3 +119,44 @@ describe('verbatimResponse', () => {
     expect(body.instructions).toContain('не отвечай на него')
   })
 })
+
+import { hostInstructions as hostRulesForTest, withoutHostRules } from '../config.ts'
+import { speechDurationMs } from './utterance.ts'
+import { grokOutbound } from './grokWire.ts'
+import { responseCue } from './geminiWire.ts'
+
+describe('host persona reaches isolated replies', () => {
+  const rule = 'Пол игрока определяй по имени'
+  it('isolatedCue, isolatedToolResponse and verbatim carry the shared rules', () => {
+    const cue = isolatedCue('Похвали Машу', { purpose: 'x', turn: 1, take: 1 })
+    expect(cue.instructions.startsWith(hostRulesForTest)).toBe(true)
+    expect(cue.instructions).toContain(rule)
+    expect(cue.instructions).toContain('Ты ведущая. По сообщению')
+    expect(cue.max_output_tokens).toBeGreaterThan(0)
+    const tool = isolatedToolResponse({ name: 't', instructions: 'Выбери', purpose: 'p', turn: 1, mode: 'text', tools: [] })
+    expect(tool.instructions).toContain(rule)
+    expect(tool.instructions).toContain('Выбери')
+    expect(verbatimResponse('Вопрос', { purpose: 'q', turn: 1, take: 1 }).instructions).toContain(rule)
+  })
+  it('Gemini does not duplicate rules already in systemInstruction', () => {
+    const cue = isolatedCue('Похвали Машу', { purpose: 'x', turn: 1, take: 1 })
+    expect(withoutHostRules(cue.instructions)).not.toContain(rule)
+    expect(responseCue({ type: 'response.create', response: cue }).text).not.toContain(rule)
+  })
+  it('Grok keeps rules but drops the OpenAI length cap', () => {
+    const cue = isolatedCue('Похвали', { purpose: 'x', turn: 1, take: 1 })
+    const out = grokOutbound({ type: 'response.create', response: cue }) as { response: Record<string, unknown> }
+    expect(out.response.max_output_tokens).toBeUndefined()
+    expect(String(out.response.instructions)).toContain(rule)
+  })
+})
+
+describe('speechDurationMs', () => {
+  it('prefers audio_start_ms/audio_end_ms', () => {
+    expect(speechDurationMs(1000, 1450, 0, 99_999)).toBe(450)
+  })
+  it('falls back to arrival time', () => {
+    expect(speechDurationMs(undefined, 1450, 100, 700)).toBe(600)
+    expect(speechDurationMs(null, null, null, 700)).toBe(10_000)
+  })
+})

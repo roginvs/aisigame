@@ -1,5 +1,6 @@
 import type { ConferenceHistoryMessage } from '../conference/messages.ts'
 import type { GameContext } from './types.ts'
+import { commentaryHistoryMessages } from '../options.ts'
 import { playNote, spokenPayload, withPlayNote } from '../realtime/speechMatch.ts'
 
 const maxHistoryChars = 24_000
@@ -8,10 +9,10 @@ const maxHistoryChars = 24_000
 export function commentaryContext(context: GameContext | null, history: readonly ConferenceHistoryMessage[]): string {
   const rows: object[] = []
   let size = 0
-  for (const message of history.slice(-200).reverse()) {
+  for (const message of history.slice(-commentaryHistoryMessages).reverse()) {
     const row = message.kind === 'chat'
-      ? { kind: 'chat', name: message.name.slice(0, 100), text: message.text.slice(0, 2000), at: message.at }
-      : { kind: message.role, text: message.text.slice(0, 2000), note: message.note?.slice(0, 1000), at: message.at }
+      ? { kind: 'chat', name: message.name.slice(0, 100), text: message.text.slice(0, 2000) }
+      : { kind: message.role, text: message.text.slice(0, 2000), note: message.note?.slice(0, 1000) }
     const length = JSON.stringify(row).length
     if (size + length > maxHistoryChars) break
     rows.unshift(row)

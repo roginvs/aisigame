@@ -648,7 +648,7 @@ describe('attachController answer listening', () => {
     const hint = client.prompts.at(-1) ?? ''
     expect(hint).toContain('Пылесосел')
     expect(hint).toContain('Утюгусь')
-    expect(hint).toContain('пустая расшифровка')
+    expect(hint).not.toContain('отвечает')
     expect(hint).toContain('Редкие слова')
     expect(hint).not.toContain('«Пылесосел»')
     expect(hint).not.toContain('Шлакоблокунь')

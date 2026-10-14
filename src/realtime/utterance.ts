@@ -25,3 +25,11 @@ export function transcriptionConfidence(logprobs: unknown): number | null {
   if (!probs.length) return null
   return Math.min(...probs)
 }
+
+/** Длительность речи по `audio_start_ms`/`audio_end_ms`; иначе по времени прихода событий. */
+export function speechDurationMs(audioStartMs: unknown, audioEndMs: unknown, startedAt: number | null, now: number): number {
+  if (typeof audioStartMs === 'number' && typeof audioEndMs === 'number' && audioEndMs >= audioStartMs) {
+    return Math.round(audioEndMs - audioStartMs)
+  }
+  return startedAt === null ? 10_000 : Math.round(now - startedAt)
+}

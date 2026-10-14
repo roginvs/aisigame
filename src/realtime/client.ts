@@ -1,10 +1,12 @@
 import { unlockAudio } from '../audio/beep.ts'
-import { gameConfig, hostInstructions } from '../config.ts'
+import { gameConfig, hostInstructions, withHostRules } from '../config.ts'
 import { recordResponseUsage, resetUsage } from './usage.ts'
 import { livePlayerChatVisible } from './liveSpeech.ts'
 import { clearLivePlayerLine, logTrace, pushHostLine, pushPlayerLine, pushTrace, setLivePlayerLine } from '../debug/trace.ts'
 import { outputCut, outputFlushWaitMs, timersAfterPlaybackStarted, timersAfterResponseDone } from './playback.ts'
 import type { HostAudioTimers, OutputCutState } from './playback.ts'
+import { freeReplyMaxOutputTokens } from '../options.ts'
+import { speechDurationMs } from './utterance.ts'
 import { isolatedCue, isolatedToolResponse, speechMatches, speechOverruns, verbatimResponse } from './speechMatch.ts'
 import { AudioItems, type AudioReference, type AudioItemReady } from './audioItems.ts'
 import { audioJudgmentCapable, type JudgmentCapabilities, type JudgeRequestContext } from './judgmentRequest.ts'
@@ -132,6 +134,8 @@ export class RealtimeClient {
   /** Isolated tool calls use conversation:none — their call_id is not in the session. */
   private lastToolIsolated = false
   private inputStartedAt: number | null = null
+  /** `audio_start_ms` из speech_started — длительность по аудиобуферу, а не по времени прихода событий. */
+  private inputAudioStartMs: number | null = null
   private inputItemId: string | null = null
   private transcriptionPrompt = ''
   private transcripts = new Map<string, StoredTranscript>()
@@ -676,6 +680,7 @@ export class RealtimeClient {
     this.outputFlush = 'idle'
     this.pendingTool = null
     this.wireOpen = false
+    this.inputAudioStartMs = null
     this.micLive = false
     this.wire?.close()
     this.inputStartedAt = null
@@ -775,7 +780,7 @@ export class RealtimeClient {
           output_modalities: mode === 'text' ? ['text'] : ['audio'],
           tool_choice: { type: 'function', name: pending.name },
           metadata: { purpose: pending.purpose, turn: String(pending.turn) },
-          instructions: pending.instructions,
+          instructions: withHostRules(pending.instructions),
         }
     this.send({ type: 'response.create', response })
     if (!this.canSend()) this.dropLink('Связь с ведущей прервалась. Начните игру ещё раз.')
@@ -870,6 +875,13 @@ export class RealtimeClient {
       if (this.pendingTool && this.toolMode === 'text' && /modalit|output/i.test(message)) {
         this.toolMode = 'audio'
         this.sendToolRequest('audio')
+        return
+      }
+      const pending = this.pendingTool
+      if (pending && failsPendingTool(message, typeof error.code === 'string' ? error.code : '')) {
+        // Быстрый отказ: машина сразу переспросит, а не ждёт таймаута tool.
+        this.pendingTool = null
+        this.onToolCall(null, toolPurposes[pending.name] ?? pending.purpose, pending.turn)
       }
       return
     }
@@ -962,12 +974,14 @@ export class RealtimeClient {
     if (type === 'conversation.item.truncated') this.onTruncated(event)
     if (type === 'input_audio_buffer.speech_started') {
       this.inputStartedAt = performance.now()
+      this.inputAudioStartMs = typeof event.audio_start_ms === 'number' ? event.audio_start_ms : null
       this.inputItemId = readItemId(event)
       this.onSpeechStarted({ itemId: this.inputItemId })
     }
     if (type === 'input_audio_buffer.speech_stopped') {
       const started = this.inputStartedAt
-      const durationMs = started === null ? 10_000 : Math.round(performance.now() - started)
+      const durationMs = speechDurationMs(this.inputAudioStartMs, event.audio_end_ms, started, performance.now())
+      this.inputAudioStartMs = null
       const itemId = readItemId(event) ?? this.inputItemId
       this.inputStartedAt = null
       this.onSpeechStopped({ durationMs, itemId })
@@ -1128,8 +1142,9 @@ export class RealtimeClient {
       response: {
         output_modalities: ['audio'],
         tool_choice: 'none',
+        max_output_tokens: freeReplyMaxOutputTokens,
         metadata: { purpose: speech.purpose, turn: String(speech.turn), take: String(speech.retries + 1) },
-        instructions,
+        instructions: withHostRules(instructions),
       },
     })
   }
@@ -1465,3 +1480,8 @@ function readToolCall(response: Record<string, unknown>): ToolCall | null {
   return null
 }
 
+
+/** Ошибка API, при которой ждущий tool-запрос не придёт. Отмена неактивного ответа — не про него. */
+export function failsPendingTool(message: string, code: string): boolean {
+  return !/cancel/i.test(`${code} ${message}`)
+}

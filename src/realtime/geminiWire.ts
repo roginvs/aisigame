@@ -1,4 +1,4 @@
-import { hostInstructions } from '../config.ts'
+import { hostInstructions, withoutHostRules } from '../config.ts'
 import { base64ToPcm, pcmToBase64, PcmMic, PcmPlayer } from './pcm.ts'
 import { sessionTools } from './tools.ts'
 import type { VoiceSink, VoiceWire } from './wire.ts'
@@ -51,7 +51,7 @@ export function responseCue(event: object): { text: string; tool: string } {
   const choice = asRecord(response.tool_choice)
   const tool = text(choice.name)
   const parts: string[] = []
-  const instructions = text(response.instructions)
+  const instructions = withoutHostRules(text(response.instructions))
   if (instructions) parts.push(instructions)
   const input = Array.isArray(response.input) ? response.input : []
   for (const item of input) {

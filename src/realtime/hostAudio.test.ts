@@ -362,6 +362,21 @@ describe('host audio completion', () => {
     expect(finished).toEqual(['announce'])
   })
 
+  it('ошибка API сразу проваливает ждущий tool, отмена — нет', () => {
+    const { feed } = open()
+    const tools: Array<{ call: unknown; purpose: string; turn: number }> = []
+    client!.onToolCall = (call, purpose, turn) => {
+      tools.push({ call, purpose, turn })
+    }
+    client!.requestTool('select', 3, 'selectQuestion', 'Вызови selectQuestion.', true)
+    feed({ type: 'error', error: { code: 'response_cancel_not_active', message: 'Cancellation failed: no active response' } })
+    expect(tools).toEqual([])
+    feed({ type: 'error', error: { code: 'server_error', message: 'The server had an error' } })
+    expect(tools).toEqual([{ call: null, purpose: 'select', turn: 3 }])
+    feed({ type: 'error', error: { code: 'server_error', message: 'again' } })
+    expect(tools).toHaveLength(1)
+  })
+
   it('поздний selectQuestion не сбрасывает новый pending tool', () => {
     const { feed } = open()
     const tools: Array<{ purpose: string; turn: number }> = []

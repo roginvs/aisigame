@@ -30,6 +30,12 @@ export function grokOutbound(event: object): object | 'clear-output' | 'drop' {
   const type = text(record.type)
   if (type === 'output_audio_buffer.clear') return 'clear-output'
   if (type === 'session.update') return grokSession(asRecord(record.session))
+  if (type === 'response.create' && 'max_output_tokens' in asRecord(record.response)) {
+    // Потолок длины — поле OpenAI; Grok его не документирует, не рискуем ошибкой.
+    const { max_output_tokens: _cap, ...response } = asRecord(record.response)
+    void _cap
+    return { ...record, response }
+  }
   return event
 }
 

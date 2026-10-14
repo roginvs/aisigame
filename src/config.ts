@@ -42,3 +42,20 @@ export const hostInstructions = `
 Если нужно действие игры, вызывай только переданную функцию и не подменяй её свободной речью.
 Не упоминай API, модели и внутренние идентификаторы.
 `.trim()
+
+const turnRulesMark = '\n\nИнструкция этого хода:\n'
+
+/**
+ * В OpenAI/Grok `response.instructions` заменяет инструкции сессии целиком,
+ * поэтому персона и общие правила (включая пол игрока) идут в каждый ответ.
+ */
+export function withHostRules(turn: string): string {
+  if (turn.startsWith(hostInstructions)) return turn
+  return `${hostInstructions}${turnRulesMark}${turn}`
+}
+
+/** Gemini держит правила в systemInstruction — в реплике хода их не дублируем. */
+export function withoutHostRules(text: string): string {
+  const prefix = `${hostInstructions}${turnRulesMark}`
+  return text.startsWith(prefix) ? text.slice(prefix.length) : text
+}

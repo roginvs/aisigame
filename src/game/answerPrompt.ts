@@ -1,9 +1,6 @@
 import { literalRepeat } from './promptEcho.ts'
 const transcriptionPromptMax = 1024
 
-export const answerListeningLead =
-  'Игрок отвечает по-русски одним словом или короткой фразой. Тишина, кашель и шум — пустая расшифровка, не подставляй слова из словаря.'
-
 /** Метка списка в подсказке: Whisper не должен выдавать её как речь. */
 const answerListMark = 'Редкие слова, которые могут встретиться:'
 
@@ -16,13 +13,13 @@ export const phantomAnswerMaxMs = 650
 /** Очень неуверенная расшифровка, совпавшая с эталоном из подсказки — скорее галлюцинация. */
 export const phantomAnswerMaxConfidence = 0.28
 
-/** Подсказка распознавания, пока после кнопки слушают ответ. Без текста вопроса и без тем. */
+/** Подсказка распознавания на ответе: только редкие слова/эталон, без инструкций (их Whisper повторяет как речь). */
 export function answerListeningPrompt(answers: readonly string[]): string {
   const lines = uniqueLines(answers)
   if (!lines.length) {
-    return 'Игрок отвечает на вопрос викторины по-русски. Тишина и шум — пустая расшифровка.'
+    return ''
   }
-  const head = `${answerListeningLead} ${answerListMark}`
+  const head = answerListMark
   const picked: string[] = []
   for (const line of lines) {
     if (formatPrompt(head, [...picked, line]).length > transcriptionPromptMax) break

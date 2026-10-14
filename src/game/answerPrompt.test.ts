@@ -14,7 +14,7 @@ describe('answerListeningPrompt', () => {
     const prompt = answerListeningPrompt(['Пылесосел', 'Утюгусь', 'Пылесосел'])
     expect(prompt).toContain('Пылесосел')
     expect(prompt).toContain('Утюгусь')
-    expect(prompt).toContain('пустая расшифровка')
+    expect(prompt).not.toContain('отвечает')
     expect(prompt).toContain('Редкие слова')
     expect(prompt).not.toContain('«Пылесосел»')
     expect(prompt).not.toContain('Возможные ответы')
@@ -30,12 +30,7 @@ describe('answerListeningPrompt', () => {
     const prompt = answerListeningPrompt(['Пылесосел', 'Утюгусь'])
     expect(echoesAnswerPrompt(prompt, prompt)).toBe(true)
     expect(echoesAnswerPrompt(`Редкие слова, которые могут встретиться: Пылесосел, Утюгусь.`, prompt)).toBe(true)
-    expect(
-      echoesAnswerPrompt(
-        'Игрок отвечает по-русски одним словом или короткой фразой. Тишина, кашель и шум — пустая расшифровка, не подставляй слова из словаря.',
-        prompt,
-      ),
-    ).toBe(true)
+    expect(answerListeningPrompt([])).toBe('')
     expect(echoesAnswerPrompt('пылесосел', prompt)).toBe(false)
     expect(echoesAnswerPrompt('Пылесосел.', prompt)).toBe(false)
     expect(echoesAnswerPrompt('Утюгусь', prompt)).toBe(false)
