@@ -19,6 +19,7 @@ import {
   restoredMatch,
   sha256Hex,
   type SavedGame,
+  hearTurnOnlyOf,
 } from './savedGame.ts'
 import { demoPack } from './questions.ts'
 
@@ -661,6 +662,13 @@ describe('saved game', () => {
     expect(readSavedGame(storage)?.roomId).toBeUndefined()
   })
 
+  it('«Меньше слышать» по умолчанию вкл., явное значение уважается', () => {
+    expect(hearTurnOnlyOf(null)).toBe(true)
+    expect(hearTurnOnlyOf({})).toBe(true)
+    expect(hearTurnOnlyOf({ hearTurnOnly: false })).toBe(false)
+    expect(hearTurnOnlyOf({ hearTurnOnly: true })).toBe(true)
+  })
+
   it('сохраняет и снимает галку «Меньше слышать»', () => {
     const storage = memory()
     persistMatch(
@@ -687,7 +695,7 @@ describe('saved game', () => {
       },
       storage,
     )
-    expect(readSavedGame(storage)?.hearTurnOnly).toBeUndefined()
+    expect(readSavedGame(storage)?.hearTurnOnly).toBe(false)
 
     persistConferenceLobby(
       {
@@ -713,6 +721,6 @@ describe('saved game', () => {
       },
       storage,
     )
-    expect(readSavedGame(storage)?.hearTurnOnly).toBeUndefined()
+    expect(readSavedGame(storage)?.hearTurnOnly).toBe(false)
   })
 })

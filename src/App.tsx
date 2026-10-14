@@ -46,6 +46,7 @@ import {
   resumePackTitle,
   sha256Hex,
   type SavedGame,
+  hearTurnOnlyOf,
 } from './game/savedGame.ts'
 import { loadSiq, revokePackMedia } from './game/siq.ts'
 import { preferredPackId, readStartPrefs, writeStartPrefs } from './game/startPrefs.ts'
@@ -140,7 +141,7 @@ export default function App() {
   const [conferenceRoomId, setConferenceRoomId] = useState<string | null>(null)
   const [conferenceLobby, setConferenceLobby] = useState(false)
   /** Мастер: вне выбора/ответа модель глуха; на ходе — только этот игрок. В снимке партии. */
-  const [hearTurnOnly, setHearTurnOnly] = useState(() => readSavedGame()?.hearTurnOnly === true)
+  const [hearTurnOnly, setHearTurnOnly] = useState(() => hearTurnOnlyOf(readSavedGame()))
   const [masterRoster, setMasterRoster] = useState<RosterEntry[]>([])
   const [masterRosterAll, setMasterRosterAll] = useState<RosterEntry[]>([])
   const [masterParticipantIds, setMasterParticipantIds] = useState<Record<string, string>>({})
@@ -997,7 +998,7 @@ export default function App() {
     conference?: { masterName?: string; jitsiBase?: string },
   ): Promise<void> {
     resumeConferenceOptions.current = conference ?? null
-    setHearTurnOnly(saved.hearTurnOnly === true)
+    setHearTurnOnly(hearTurnOnlyOf(saved))
     if (readMatchMode(saved) === 'conference' && saved.packHash) {
       const cached = await getPack(saved.packHash)
       if (cached) {

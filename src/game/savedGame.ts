@@ -38,7 +38,7 @@ export type SavedGame = SavedMatch & {
   roomId?: string
   /** Только старые входные снимки; при чтении мигрируется в message0…message199. */
   chat?: { name: string; text: string; at?: string }[]
-  /** Мастер: галка «Меньше слышать». Старые снимки без поля — выкл. */
+  /** Мастер: галка «Меньше слышать». Хранится явно true/false; без поля — по умолчанию вкл. (`hearTurnOnlyOf`). */
   hearTurnOnly?: boolean
 } & Partial<ConferenceMessageRing>
 
@@ -79,7 +79,7 @@ export function persistConferenceLobby(
     roomId: input.roomId,
     ...input.messageRing,
     chat: input.chat,
-    ...(input.hearTurnOnly === true ? { hearTurnOnly: true } : {}),
+    ...(typeof input.hearTurnOnly === 'boolean' ? { hearTurnOnly: input.hearTurnOnly } : {}),
     players: [input.master],
     roundIndex: input.pack.rounds[0]?.index ?? 0,
     playedIds: [],
@@ -311,7 +311,7 @@ export function persistMatch(
     packHash,
     ...matchFromContext(input.context, phase),
     ...conference,
-    ...(hearTurnOnly ? { hearTurnOnly: true } : {}),
+    ...(typeof hearTurnOnly === 'boolean' ? { hearTurnOnly } : {}),
   })
   if (!game) return readSavedGame(storage)
   storage.setItem(gameStorageKey, JSON.stringify(game))
@@ -424,22 +424,21 @@ export function persistConferenceHistory(roomId: string, history: ConferenceMess
   return game
 }
 
-/** `undefined` — оставить как в прошлом снимке; `false` — выкл. и не писать поле. */
-function resolveHearTurnOnly(input: boolean | undefined, previous: boolean | undefined): boolean {
-  if (input === true) return true
-  if (input === false) return false
-  return previous === true
+/** `undefined` — оставить как в прошлом снимке (или не писать поле, если его не было). */
+function resolveHearTurnOnly(input: boolean | undefined, previous: boolean | undefined): boolean | undefined {
+  return typeof input === 'boolean' ? input : previous
+}
+
+/** «Меньше слышать» по умолчанию включено; явное сохранённое значение уважаем. */
+export function hearTurnOnlyOf(saved: Pick<SavedGame, 'hearTurnOnly'> | null | undefined): boolean {
+  return saved?.hearTurnOnly ?? true
 }
 
 function patchHearTurnOnly(input: boolean | undefined, storage: Storage): SavedGame | null {
   const previous = readSavedGame(storage)
   if (!previous || input === undefined) return previous
-  const nextOn = input === true
-  const wasOn = previous.hearTurnOnly === true
-  if (nextOn === wasOn) return previous
-  const raw = { ...previous } as SavedGame & { hearTurnOnly?: boolean }
-  if (nextOn) raw.hearTurnOnly = true
-  else delete raw.hearTurnOnly
+  if (previous.hearTurnOnly === input) return previous
+  const raw = { ...previous, hearTurnOnly: input } as SavedGame
   const game = sanitize(raw)
   if (!game) return previous
   storage.setItem(gameStorageKey, JSON.stringify(game))
@@ -636,7 +635,7 @@ function normalizeConference(
   if (typeof record.roomId === 'string' && record.roomId.trim()) out.roomId = record.roomId.trim()
   const chat = normalizeChat(record.chat)
   if (out.mode === 'conference') Object.assign(out, readMessageRing(record) ?? messageRingFromLegacyChat(chat ?? []))
-  if (record.hearTurnOnly === true) out.hearTurnOnly = true
+  if (typeof record.hearTurnOnly === 'boolean') out.hearTurnOnly = record.hearTurnOnly
   return out
 }
 
