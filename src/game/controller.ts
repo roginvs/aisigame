@@ -1027,6 +1027,40 @@ export function attachController(options: {
     }
   }
 
+  /** Оценка по аудио: 'done' — вердикт отдан, 'dead' — попытка уже неактуальна, 'fallback' — переходить к тексту. */
+  async function tryAudioJudgment(run: NonNullable<typeof judgeRun>): Promise<'done' | 'dead' | 'fallback'> {
+    const { context } = run
+    try {
+      if (!run.itemId) throw new Error('missing-audio-item')
+      const ref = client.audioReference(run.itemId)
+      const ready = await run.clock.within((signal) => client.waitForAudioItem(ref, Infinity, signal), audioJudgmentTimings.readyMs)
+      await run.clock.active()
+      if (!judgeLive(run)) return 'dead'
+      if (!ready.ready) throw new Error(ready.reason)
+      toolTurn += 1
+      // Only the dedicated audio Promise may settle this request, never the legacy callback.
+      expectingToolTurn = null
+      const request = audioContext(context, run.itemId, toolTurn, 'primary')
+      const call = await run.clock.within((signal) => client.requestAudioJudgment(request, judgmentInstructions(context, '', 'audio'), signal),
+        Math.min(run.clock.remaining(), Math.max(0, audioJudgmentTimings.responseMs - run.clock.elapsed())))
+      await run.clock.active()
+      if (!judgeLive(run)) return 'dead'
+      validateAudioCall(call, context)
+      answerSource = 'audio'
+      expectingToolTurn = request.turn
+      pushTrace('note', 'audio judgment result', { ...request, elapsedMs: Math.round(run.clock.elapsed()), heard: asRecord(call.arguments).heard })
+      handleJudgment(call, request.turn)
+      return 'done'
+    } catch (error) {
+      if (!judgeLive(run)) return 'dead'
+      await run.clock.active()
+      if (!judgeLive(run)) return 'dead'
+      expectingToolTurn = null
+      pushTrace('note', 'audio judgment fallback', { attemptId: context.attemptId, reason: error instanceof Error ? error.message : 'audio-error', remainingMs: Math.round(run.clock.remaining()) })
+    }
+    return 'fallback'
+  }
+
   async function requestJudgment(context: GameContext): Promise<void> {
     // RESUME must not send another primary while the original is still in flight.
     if (judgeRun && judgeRun.context.attemptId === context.attemptId) return
@@ -1039,36 +1073,7 @@ export function attachController(options: {
       model: client.judgmentCapabilities().model, attemptId: context.attemptId })
     if (run.mode === 'shadow') startShadow(run)
     try {
-      if (run.mode === 'audio') {
-        try {
-          if (!run.itemId) throw new Error('missing-audio-item')
-          const ref = client.audioReference(run.itemId)
-          const ready = await run.clock.within((signal) => client.waitForAudioItem(ref, Infinity, signal), audioJudgmentTimings.readyMs)
-          await run.clock.active()
-          if (!judgeLive(run)) return
-          if (!ready.ready) throw new Error(ready.reason)
-          toolTurn += 1
-          // Only the dedicated audio Promise may settle this request, never the legacy callback.
-          expectingToolTurn = null
-          const request = audioContext(context, run.itemId, toolTurn, 'primary')
-          const call = await run.clock.within((signal) => client.requestAudioJudgment(request, judgmentInstructions(context, '', 'audio'), signal),
-            Math.min(run.clock.remaining(), Math.max(0, audioJudgmentTimings.responseMs - run.clock.elapsed())))
-          await run.clock.active()
-          if (!judgeLive(run)) return
-          validateAudioCall(call, context)
-          answerSource = 'audio'
-          expectingToolTurn = request.turn
-          pushTrace('note', 'audio judgment result', { ...request, elapsedMs: Math.round(run.clock.elapsed()), heard: asRecord(call.arguments).heard })
-          handleJudgment(call, request.turn)
-          return
-        } catch (error) {
-          if (!judgeLive(run)) return
-          await run.clock.active()
-          if (!judgeLive(run)) return
-          expectingToolTurn = null
-          pushTrace('note', 'audio judgment fallback', { attemptId: context.attemptId, reason: error instanceof Error ? error.message : 'audio-error', remainingMs: Math.round(run.clock.remaining()) })
-        }
-      }
+      if (run.mode === 'audio' && (await tryAudioJudgment(run)) !== 'fallback') return
       await requestTextJudgment(run)
     } catch (error) {
       if (judgeLive(run)) pushTrace('note', 'judgment waiting for machine timeout', { reason: error instanceof Error ? error.message : 'judge-error' })
@@ -1084,7 +1089,15 @@ export function attachController(options: {
     if (!judgeLive(run) || run.clock.remaining() <= 0) return
     const answerPrompt = answerPromptFor(context)
     const echo = echoesAnswerPrompt(heard.text, answerPrompt)
-    if (echo || phantomListedAnswer(heard.text, answerPrompt, answerDurationMs, heard.confidence)) {
+    const phantom = !echo && phantomListedAnswer(heard.text, answerPrompt, answerDurationMs, heard.confidence)
+    if (phantom && run.mode !== 'audio' && run.itemId && client.judgmentCapabilities().isolatedAudioReference) {
+      // Эталон в подсказке нужен для выдуманных слов, но короткая или неуверенная расшифровка, равная эталону,
+      // может быть подстановкой распознавателя: перепроверяем по самому аудио, тексту не верим вслепую.
+      pushTrace('note', `расшифровка совпала с эталоном при ${answerDurationMs} мс, conf ${heard.confidence ?? '—'} — проверяю по аудио`)
+      const result = await tryAudioJudgment(run)
+      if (result !== 'fallback') return
+    }
+    if (echo || phantom) {
       pushTrace('note', echo ? 'распознавание повторило подсказку ответа, это не ответ' : `фантом ответа из подсказки (${answerDurationMs} мс, conf ${heard.confidence ?? '—'}): ${heard.text}`)
       client.suppressPlayerChat(itemId)
       actor.send({ type: 'ANSWER_ECHO' })

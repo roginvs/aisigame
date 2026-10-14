@@ -186,11 +186,12 @@ describe('attachController choice', () => {
     const client = new MockRealtimeClient()
     const { actor, stop } = await boot(client)
     expect(statePath(actor.getSnapshot().value)).toBe('choosing.listening')
-    const echo = 'Тема и цена: ОРДЫ И ХАНЫ 200 двести, 400 четыреста, 600 шестьсот, 800 восемьсот.'
+    const echo = (client as unknown as { transcriptionPrompt: string }).transcriptionPrompt
+    expect(echo.length).toBeGreaterThan(20)
     client.hear(echo, 400)
     await vi.advanceTimersByTimeAsync(80)
     expect(statePath(actor.getSnapshot().value)).toBe('choosing.listening')
-    expect(playerLines().some((line) => line.includes('Тема и цена'))).toBe(false)
+    expect(playerLines().some((line) => line.includes(echo.slice(1, 15)))).toBe(false)
     expect(getTrace().some((entry) => entry.kind === 'note' && entry.title.includes('подсказку'))).toBe(true)
 
     client.hear('ПЦ 400.', 800)
@@ -487,7 +488,7 @@ describe('attachController answer listening', () => {
     actor.stop()
   })
 
-  it('не засчитывает короткий фантом эталона из подсказки Whisper', async () => {
+  it('короткая расшифровка, равная эталону, перепроверяется по аудио: тишина не засчитывается, настоящий ответ — да', async () => {
     const client = new MockRealtimeClient()
     const { actor, stop } = await boot(client)
     actor.send({ type: 'QUESTION_SELECTED', themeId: 'p', value: 400 })
@@ -496,20 +497,28 @@ describe('attachController answer listening', () => {
     expect(statePath(actor.getSnapshot().value)).toBe('answering.waiting')
     const scoreBefore = actor.getSnapshot().context.players.find((player) => player.id === 1)?.score ?? 0
 
-    // Тишина / шум: VAD короткий, Whisper подставил эталон из подсказки.
-    client.hear('ответ', 400)
-    await vi.advanceTimersByTimeAsync(120)
+    // Шум 400 мс: распознаватель подставил эталон из подсказки, а в аудио слов нет.
+    client.hearAudio('', 'ответ', 400)
+    await vi.advanceTimersByTimeAsync(400)
+    expect(getTrace().some((entry) => entry.kind === 'note' && String(entry.title).includes('проверяю по аудио'))).toBe(true)
+    expect(actor.getSnapshot().context.players.find((player) => player.id === 1)?.score).not.toBe(scoreBefore + 400)
+    const after = actor.getSnapshot().context.players.find((player) => player.id === 1)?.score ?? 0
+    expect(after).toBeLessThanOrEqual(scoreBefore)
 
-    expect(statePath(actor.getSnapshot().value)).toBe('answering.waiting')
-    expect(actor.getSnapshot().context.players.find((player) => player.id === 1)?.score).toBe(scoreBefore)
-    expect(
-      getTrace().some((entry) => entry.kind === 'note' && String(entry.title).includes('фантом ответа')),
-    ).toBe(true)
+    stop()
+    actor.stop()
+  })
 
-    client.hear('ответ', 900)
-    await vi.advanceTimersByTimeAsync(120)
+  it('короткий настоящий ответ, равный эталону, подтверждается по аудио и засчитывается', async () => {
+    const client = new MockRealtimeClient()
+    const { actor, stop } = await boot(client)
+    actor.send({ type: 'QUESTION_SELECTED', themeId: 'p', value: 400 })
+    await vi.advanceTimersByTimeAsync(gameConfig.cellFlashMs + 80)
+    actor.send({ type: 'BUZZER_PRESSED', playerId: 1 })
+    const scoreBefore = actor.getSnapshot().context.players.find((player) => player.id === 1)?.score ?? 0
+    client.hearAudio('ответ', 'ответ', 400)
+    await vi.advanceTimersByTimeAsync(400)
     expect(actor.getSnapshot().context.players.find((player) => player.id === 1)?.score).toBe(scoreBefore + 400)
-
     stop()
     actor.stop()
   })

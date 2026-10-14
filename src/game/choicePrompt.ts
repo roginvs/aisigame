@@ -1,3 +1,4 @@
+import { echoesTranscriptionPrompt } from './promptEcho.ts'
 const hundreds: Record<number, string> = {
   0: 'ноль',
   100: 'сто',
@@ -22,8 +23,6 @@ export function priceWords(value: number): string {
 }
 
 const transcriptionPromptMax = 1024
-const severalNames = 3
-const manyPrices = 3
 
 export function choicePrompt(kind: 'normal' | 'final', cells: { theme: string; value: number }[]): string {
   if (!cells.length) return 'Игрок выбирает ячейку на табло.'
@@ -36,25 +35,10 @@ export function choicePrompt(kind: 'normal' | 'final', cells: { theme: string; v
   return wrapCatalog(themePrices(cells, false))
 }
 
-/** Расшифровка повторяет подсказку тем, а не реплику игрока. */
+/** Расшифровка дословно повторила каталог (из двух и больше пунктов); один названный пункт — это выбор, не эхо. */
 export function echoesChoicePrompt(transcript: string, prompt: string): boolean {
-  if (/^\s*тема и цена(?=$|[^\p{L}\p{N}])/iu.test(transcript)) return true
-  const said = canon(transcript)
-  const hint = canon(prompt)
-  if (!said || !hint) return false
-  const clauses = catalogClauses(prompt)
-  const themes = [...new Set(clauses.map(themeOf).filter((theme) => theme.length >= 2))]
-  if (themes.filter((theme) => themeNeedles(theme).some((needle) => mentions(transcript, needle))).length >= severalNames) {
-    return true
-  }
-  const saidPrices = priceCount(transcript)
-  const hintPrices = priceCount(prompt)
-  if (said === hint && (themes.length >= severalNames || hintPrices >= manyPrices || clauses.length >= severalNames)) {
-    return true
-  }
-  if (hint.includes(said) && saidPrices >= manyPrices && said.length >= 24) return true
-  if (said.includes(hint) && hintPrices >= manyPrices && hint.length >= 24) return true
-  return false
+  if (prompt.split(/[;,]/).filter((part) => part.trim()).length < 2) return false
+  return echoesTranscriptionPrompt(transcript, prompt)
 }
 
 function themePrices(cells: { theme: string; value: number }[], words: boolean): string {
@@ -89,54 +73,6 @@ export function wrapCatalog(body: string): string {
   return wrapped.length <= transcriptionPromptMax ? wrapped : wrapped.slice(0, transcriptionPromptMax)
 }
 
-function catalogClauses(prompt: string): string[] {
-  const stripped = fold(prompt)
-    .replace(/[{}]/g, '')
-    .replace(/^\s*тема и цена\s*:?\s*/, '')
-    .replace(/^\s*тема финала\s*:?\s*/, '')
-    .replace(/\.+\s*$/, '')
-  return stripped
-    .split(';')
-    .map((clause) => clause.trim())
-    .filter((clause) => clause.length > 0)
-}
-
-function themeOf(clause: string): string {
-  const priced = clause.match(/^(.*?)\s+\d{2,5}(?!\d)/)
-  return (priced?.[1] ?? clause).trim()
-}
-
-function themeNeedles(theme: string): string[] {
-  const folded = fold(theme)
-  const words = folded.replace(/\p{Extended_Pictographic}/gu, ' ').replace(/\s+/g, ' ').trim()
-  if (words.length >= 2 && words !== folded) return [folded, words]
-  return [folded]
-}
-
-function canon(text: string): string {
-  return fold(text)
-    .replace(/[{}]/g, ' ')
-    .replace(/^\s*тема и цена\s*:?\s*/, '')
-    .replace(/^\s*тема финала\s*:?\s*/, '')
-    .replace(/[^\p{L}\p{N}\p{Extended_Pictographic}]+/gu, ' ')
-    .replace(/\s+/g, ' ')
-    .trim()
-}
-
-function fold(text: string): string {
-  return text.toLowerCase().replace(/ё/g, 'е').replace(/\s+/g, ' ').trim()
-}
-
-function mentions(haystack: string, phrase: string): boolean {
-  const needle = fold(phrase)
-  if (needle.length < 2) return false
-  const escaped = needle.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
-  return new RegExp(`(?:^|[^\\p{L}\\p{N}])${escaped}(?=$|[^\\p{L}\\p{N}])`, 'u').test(fold(haystack))
-}
-
-function priceCount(text: string): number {
-  return fold(text).match(/(?<![\p{L}\p{N}])\d{2,5}(?![\p{L}\p{N}])/gu)?.length ?? 0
-}
 
 /** Подсказка распознаванию при выборе получателя кота: имена кандидатов, тот же формат и предел длины, что у каталога ячеек. */
 export function playersPrompt(names: string[]): string {

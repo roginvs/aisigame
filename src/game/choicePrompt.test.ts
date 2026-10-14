@@ -54,8 +54,10 @@ describe('choicePrompt', () => {
     const body = prompt.replace(/^\{/, '').replace(/\}$/, '')
     const slice = body.split('; ').slice(0, 4).join('; ')
     expect(echoesChoicePrompt(prompt, prompt)).toBe(true)
-    expect(echoesChoicePrompt(slice, prompt)).toBe(true)
-    expect(echoesChoicePrompt(`Тема и цена: ${body}.`, prompt)).toBe(true)
+    // Только дословный повтор: кусок каталога или честное перечисление тем — не эхо.
+    expect(echoesChoicePrompt(slice, prompt)).toBe(false)
+    expect(echoesChoicePrompt(body, prompt)).toBe(true)
+    expect(echoesChoicePrompt('Реки, Кино, Космос… давайте Космос двести', prompt)).toBe(false)
     expect(echoesChoicePrompt('Супчики сто', prompt)).toBe(false)
     expect(echoesChoicePrompt('Нарисованные афиши 100', prompt)).toBe(false)
     expect(echoesChoicePrompt('Супчики 100 сто', prompt)).toBe(false)
@@ -67,7 +69,7 @@ describe('choicePrompt', () => {
     expect(echoesChoicePrompt(alone, alone)).toBe(false)
   })
 
-  it('не принимает каталог из дампа, даже со старым началом «Тема и цена»', () => {
+  it('каталог из дампа: эхо только при дословном повторе всего каталога', () => {
     const cells = [
       [200, 400, 600, 800, 1000].map((value) => ({ theme: 'ОРДЫ И ХАНЫ', value })),
       [400, 600, 800, 1000].map((value) => ({ theme: 'СВОБОДНАЯ', value })),
@@ -82,8 +84,8 @@ describe('choicePrompt', () => {
     const body = prompt.slice(1, -1)
     expect(echoesChoicePrompt(`Тема и цена: ${body}.`, prompt)).toBe(true)
     expect(echoesChoicePrompt(prompt, prompt)).toBe(true)
-    expect(echoesChoicePrompt(body.split('; ').slice(0, 4).join('; '), prompt)).toBe(true)
-    expect(echoesChoicePrompt('Тема и цена: Свободная 400.', prompt)).toBe(true)
+    expect(echoesChoicePrompt(body.split('; ').slice(0, 4).join('; '), prompt)).toBe(false)
+    expect(echoesChoicePrompt('Тема и цена: Свободная 400.', prompt)).toBe(false)
     expect(echoesChoicePrompt('Свободная 400', prompt)).toBe(false)
     expect(echoesChoicePrompt('Известные фамилии за 500', prompt)).toBe(false)
     expect(echoesChoicePrompt('Пиздец 400', prompt)).toBe(false)

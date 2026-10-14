@@ -1,16 +1,21 @@
-/** Расшифровка повторила текущую подсказку Whisper (в т.ч. buzz/reading), а не речь игрока. */
+/**
+ * Расшифровка дословно повторила подсказку распознавателю, а не речь игрока.
+ * Только точное или почти точное совпадение всего текста подсказки: никаких порогов
+ * «названо три темы — значит эхо», чтобы честное «Реки, Кино, Космос… Космос двести» проходило.
+ */
 export function echoesTranscriptionPrompt(transcript: string, prompt: string): boolean {
-  const said = canon(transcript)
-  const hint = canon(prompt)
-  if (!said || !hint) return false
-  if (said === hint) return true
-  if (hint.length >= 20 && said.startsWith(hint)) return true
-  if (said.length >= 20 && hint.startsWith(said)) return true
-  if (hint.length >= 40 && said.length >= 40 && (said.includes(hint) || hint.includes(said))) return true
-  return false
+  return literalRepeat(canon(transcript), canon(prompt))
 }
 
-function canon(text: string): string {
+/** Почти дословно: одна строка содержит другую, и короткая не меньше 85% длинной. */
+export function literalRepeat(said: string, hint: string): boolean {
+  if (!said || !hint) return false
+  if (said === hint) return true
+  const [short, long] = said.length <= hint.length ? [said, hint] : [hint, said]
+  return short.length >= 12 && long.includes(short) && short.length >= long.length * 0.85
+}
+
+export function canon(text: string): string {
   return text
     .toLowerCase()
     .replace(/ё/g, 'е')

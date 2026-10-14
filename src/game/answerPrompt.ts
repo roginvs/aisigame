@@ -1,3 +1,4 @@
+import { literalRepeat } from './promptEcho.ts'
 const transcriptionPromptMax = 1024
 
 export const answerListeningLead =
@@ -37,18 +38,9 @@ export function echoesAnswerPrompt(transcript: string, prompt: string): boolean 
   const markAt = prompt.indexOf(answerListMark)
   if (markAt < 0) return false
   const said = canon(transcript)
-  const hint = canon(prompt)
-  if (!said || !hint) return false
-  const bodies = listedAnswers(prompt)
-  if (bodies.includes(said)) return false
-  if (said === hint) return true
-  const list = canon(prompt.slice(markAt + answerListMark.length))
-  if (list && said === list) return true
-  const lead = canon(prompt.slice(0, markAt))
-  if (lead.length >= 16 && (said === lead || said.startsWith(lead))) return true
-  if (lead.length >= 16 && lead.startsWith(said) && said.length >= 16) return true
-  if (said.includes(canon(answerListMark))) return true
-  return false
+  // Один эталон — это ответ (короткий/неуверенный перепроверяется отдельно, см. phantomListedAnswer).
+  if (!said || listedAnswers(prompt).includes(said)) return false
+  return [prompt, prompt.slice(0, markAt), prompt.slice(markAt), prompt.slice(markAt + answerListMark.length)].some((part) => literalRepeat(said, canon(part)))
 }
 
 /**
