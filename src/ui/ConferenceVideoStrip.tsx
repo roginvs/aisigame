@@ -38,6 +38,7 @@ export function ConferenceVideoTile(props: {
       className={[
         'video-tile',
         tile.isLocal ? 'local' : '',
+        tile.isLocal && tile.mirror !== false ? 'mirrored' : '',
         tile.micLive ? 'mic-live' : 'mic-off',
         tile.speaking ? 'speaking' : '',
       ]

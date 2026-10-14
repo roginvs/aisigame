@@ -19,7 +19,7 @@ describe('ConferenceVideoTile', () => {
       }),
     )
 
-    expect(html).toContain('video-tile local mic-live speaking')
+    expect(html).toContain('video-tile local mirrored mic-live speaking')
     expect(html).toContain('<video autoPlay="" playsInline="" muted=""')
     expect(html).not.toContain('aria-label="Следующая камера"')
   })

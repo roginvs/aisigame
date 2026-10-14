@@ -9,7 +9,7 @@ import type { ConferenceMessage } from './messages.ts'
 import { isConferenceMessage } from './messages.ts'
 import type { ConferenceTransport } from './transport.ts'
 import { createMicMixer, type MicMixer, type MixerRemote } from './audioMix.ts'
-import { nextCameraDeviceId } from './camera.ts'
+import { cameraFacing, isMobileCameraDevice, nextCameraDeviceId, shouldMirrorVideo, switchFacingCamera, type CameraFacing } from './camera.ts'
 import { createSpeakerActivity } from './speakerActivity.ts'
 import { conferenceAudioStream, createConferenceAudioOutput } from './conferenceAudio.ts'
 import { PACK_CHANNEL_HIGH_WATER_BYTES, PACK_CHANNEL_LOW_WATER_BYTES } from './chunks.ts'
@@ -44,7 +44,7 @@ type JitsiMeetJS = {
     }
   }
   JitsiConnection: new (appId: string | null, token: string | null, options: unknown) => JitsiConnection
-  createLocalTracks: (options: { devices: string[]; cameraDeviceId?: string }) => Promise<JitsiTrack[]>
+  createLocalTracks: (options: { devices: string[]; cameraDeviceId?: string; facingMode?: 'user' | 'environment' }) => Promise<JitsiTrack[]>
   createLocalTracksFromMediaStreams: (streams: { stream: MediaStream; videoType?: string; mediaType?: string }[]) => Promise<JitsiTrack[]>
 }
 
@@ -437,6 +437,8 @@ export async function connectJitsiConference(input: {
   let localMicEndedUnsub: (() => void) | null = null
   let cameraOn = false
   let cameraDeviceId: string | null = null
+  /** Что просили у телефона; если браузер не сообщает facingMode — ориентир для зеркала. */
+  let requestedFacing: CameraFacing | null = null
   const hostTracks: JitsiTrack[] = []
   const remoteNames = new Map<string, string>()
   const remoteVideo = new Map<string, JitsiTrack>()
@@ -485,6 +487,13 @@ export async function connectJitsiConference(input: {
     return false
   }
 
+  function localFacing(): CameraFacing | null {
+    if (!localVideo) return requestedFacing
+    const settings = localVideo.getOriginalStream?.().getVideoTracks()[0]?.getSettings() as { facingMode?: string } | undefined
+    const jitsi = (localVideo as { getCameraFacingMode?: () => string | undefined }).getCameraFacingMode?.()
+    return cameraFacing(settings, jitsi, requestedFacing)
+  }
+
   function emitTiles(): void {
     const tiles: ConferenceTile[] = [
       {
@@ -493,6 +502,7 @@ export async function connectJitsiConference(input: {
         isLocal: true,
         micLive,
         cameraOn,
+        mirror: shouldMirrorVideo(true, localFacing()),
         speaking: speakerActivity.has(localId()),
       },
     ]
@@ -503,6 +513,7 @@ export async function connectJitsiConference(input: {
         id,
         name,
         isLocal: false,
+        mirror: false,
         micLive: remoteAudioOf(id).some((track) => !track.isMuted?.()),
         cameraOn: jitsiVideoLive(remoteVideo.get(id)),
         speaking: speakerActivity.has(id),
@@ -892,6 +903,45 @@ export async function connectJitsiConference(input: {
     },
     async cycleCamera() {
       if (!localVideo || !cameraOn) return
+      if (isMobileCameraDevice(typeof navigator === 'undefined' ? undefined : navigator)) {
+        // Телефон не даёт держать две камеры: отпускаем старую, берём по facingMode, при ошибке — назад.
+        const previous = localVideo
+        const current = localFacing() ?? 'user'
+        const element = videoBindings.get(localId())
+        const result = await switchFacingCamera<JitsiTrack>({
+          current,
+          release: async () => {
+            if (element) previous.detach(element)
+            await conference.removeTrack(previous)
+            previous.dispose()
+            localVideo = null
+          },
+          open: async (facing) => {
+            const tracks = await JitsiMeetJS.createLocalTracks({ devices: ['video'], facingMode: facing })
+            const track = tracks[0]
+            if (!track) throw new Error('Камера недоступна')
+            return track
+          },
+          install: async (track, facing) => {
+            await conference.addTrack(track)
+            localVideo = track
+            requestedFacing = facing
+            cameraDeviceId = track.getOriginalStream?.().getVideoTracks()[0]?.getSettings().deviceId ?? null
+          },
+          dispose: (track) => track.dispose(),
+        }).catch((error: unknown) => {
+          cameraOn = false
+          emitTiles()
+          throw error instanceof Error ? error : new Error('Камера недоступна')
+        })
+        attachVideo(localId())
+        emitTiles()
+        if (result.restored) {
+          pushTrace('note', 'Другая камера не открылась, вернули прежнюю', { error: String(result.error) })
+          throw new Error('Другая камера не открылась, оставили прежнюю')
+        }
+        return
+      }
       const devices = await navigator.mediaDevices.enumerateDevices()
       const cameras = devices.filter((device) => device.kind === 'videoinput' && device.deviceId)
       if (cameras.length <= 1) return

@@ -8,6 +8,8 @@ export type ConferenceTile = {
   micLive: boolean
   cameraOn: boolean
   speaking: boolean
+  /** Зеркалить картинку: только своя фронтальная (или неизвестная своя). */
+  mirror?: boolean
 }
 
 export function isHostJitsiParticipant(id: string, name: string, botParticipantId: string | null): boolean {
