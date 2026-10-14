@@ -29,6 +29,12 @@ it('includes explicit public chat context in lobby cues', () => {
 })
 
 describe('lobbySpeechInstructions', () => {
+  it('правило про «отключился» — только когда об этом говорят', () => {
+    const base = { kind: 'update' as const, packName: 'Демо', packSummary: 'Раундов: 1.', roster: [] }
+    expect(lobbySpeechInstructions(base)).not.toContain('у тебя он на связи')
+    expect(lobbySpeechInstructions({ ...base, publicContext: 'Маша: кажется, Вася отключился' })).toContain('у тебя он на связи')
+  })
+
   it('разрешает коротко участвовать в разговоре игроков без длинного монолога', () => {
     const instructions = lobbySpeechInstructions({
       kind: 'idle',
@@ -37,10 +43,10 @@ describe('lobbySpeechInstructions', () => {
       roster: [],
     })
 
-    expect(instructions).toContain('можешь коротко и естественно его прокомментировать, ответить или поддержать беседу')
-    expect(instructions).toContain('обычно два коротких предложения')
-    expect(instructions).toContain('можно коротко подхватить разговор')
-    expect(instructions).toContain('контекст, не скрипт')
+    expect(instructions).toContain('Можно подхватить недавний разговор')
+    expect(instructions).toContain('одно-два предложения')
+    expect(instructions).not.toContain('мастер')
+    expect(instructions).toContain('без ролей')
     expect(instructions).not.toContain('Не отвечай на разговоры игроков')
   })
 
@@ -63,10 +69,10 @@ describe('lobbySpeechInstructions', () => {
     })
 
     expect(lobbyEveryoneReady(roster)).toBe(false)
-    expect(instructions).toContain('не говори, что можно начинать')
+    expect(instructions).toContain('старт не обещай')
     expect(instructions).toContain('Ещё ждём: Вася.')
     expect(instructions).toContain('качает, 40%, ещё ~2 мин')
-    expect(instructions).not.toContain('Все гости в комнате скачали пакет и готовы')
+    expect(instructions).not.toContain('можно начинать')
   })
 
   it('когда все гости готовы — можно сказать про старт', () => {
@@ -89,7 +95,7 @@ describe('lobbySpeechInstructions', () => {
     })
 
     expect(lobbyEveryoneReady(roster)).toBe(true)
-    expect(instructions).toContain('Все гости в комнате скачали пакет и готовы')
+    expect(instructions).toContain('Все готовы')
     expect(instructions).toContain('можно начинать')
     expect(lobbyRosterStatusLine(roster[1]!)).toContain('пакет сверен, готов')
   })

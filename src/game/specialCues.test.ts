@@ -58,23 +58,36 @@ describe('реплики кота и аукциона', () => {
   })
 })
 
-import { sessionTools, toolPurposes } from '../realtime/tools.ts'
-import { catRecipientInstructions, specialBidInstructions } from './controller.ts'
+import { auctionBidToolFor, finalBetToolFor, selectQuestionToolFor, sessionTools, submitAnswerJudgmentTool, toolPurposes } from '../realtime/tools.ts'
+import { auctionBidInstructions, catRecipientInstructions, catStakeInstructions } from './controller.ts'
 
 describe('инструменты запасного разбора', () => {
   it('у каждого инструмента сессии есть назначение', () => {
     for (const tool of sessionTools) expect(toolPurposes[tool.name], tool.name).toBeTruthy()
     expect(toolPurposes.selectCatRecipient).toBe('catPick')
-    expect(toolPurposes.resolveSpecialBid).toBe('specialBid')
+    expect(toolPurposes.pickCatStake).toBe('specialBid')
+    expect(toolPurposes.auctionBid).toBe('specialBid')
+    expect(toolPurposes.finalBet).toBe('specialBid')
   })
   it('инструкции: только кандидаты и варианты экрана', () => {
     const cat = catRecipientInstructions('Анюте', [{ id: 1, name: 'Анна' }, { id: 3, name: 'Вера' }])
     expect(cat).toContain('1: Анна\n3: Вера')
     expect(cat).toContain('playerId — только id из списка')
-    const bid = specialBidInstructions('пас', [{ kind: 'pass' }, { kind: 'stake', amount: 300 }, { kind: 'allIn', amount: 900 }])
-    expect(bid).toContain('- пас: choice=pass')
-    expect(bid).toContain('- 300: choice=amount, amount=300')
-    expect(bid).toContain('- ва-банк 900: choice=allIn')
+    const bid = auctionBidInstructions('пас', [{ kind: 'pass' }, { kind: 'stake', amount: 300 }, { kind: 'allIn', amount: 900 }])
+    expect(bid).toContain('Варианты на экране: пас, 300, ва-банк 900.')
+    expect(catStakeInstructions('максимум', [100, 500])).toContain('минимум 100 или максимум 500')
+  })
+  it('схемы сужены под ход: id тем, варианты аукциона, потолок финала', () => {
+    expect(selectQuestionToolFor(['t1', 't2', 't1'], [100, 200]).parameters.properties.themeId).toMatchObject({ enum: ['t1', 't2'] })
+    expect(selectQuestionToolFor(['t1'], [100]).parameters.properties.value).toMatchObject({ enum: [0, 100] })
+    const auction = auctionBidToolFor([{ kind: 'stake', amount: 300 }, { kind: 'allIn', amount: 900 }])
+    expect(auction.parameters.properties.choice).toMatchObject({ enum: ['amount', 'allIn', 'unclear'] })
+    expect(auction.parameters.properties.amount).toMatchObject({ enum: [0, 300] })
+    expect(finalBetToolFor(800).parameters.properties.amount).toMatchObject({ minimum: 0, maximum: 800 })
+  })
+  it('судья не возвращает questionId, playerId, attemptId — попытка по запросу', () => {
+    expect(submitAnswerJudgmentTool.parameters.required).toEqual(['status', 'heard', 'reason'])
+    expect(Object.keys(submitAnswerJudgmentTool.parameters.properties)).not.toContain('attemptId')
   })
 })
 

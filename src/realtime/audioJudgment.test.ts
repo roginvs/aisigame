@@ -39,7 +39,7 @@ describe('native audio dispatcher', () => {
     expect(payload.response.conversation).toBe('none')
     expect(payload.response.output_modalities).toEqual(['text'])
     expect(payload.response.tools.map((tool: { name: string }) => tool.name)).toEqual(['submitAnswerJudgment'])
-    expect(payload.response.tools[0].parameters.properties.playerId).toEqual({ type: 'integer' })
+    expect(payload.response.tools[0].parameters.properties.playerId).toBeUndefined()
     expect(payload.response.input).toEqual([
       { type: 'message', role: 'user', content: [{ type: 'input_text', text: 'question + answers' }] },
       { type: 'item_reference', id: 'a' },

@@ -9,7 +9,7 @@ export const selectQuestionTool = {
     properties: {
       themeId: {
         type: 'string',
-        description: 'Id или название темы из переданного списка.',
+        description: 'id темы из переданного списка — именно id, не название.',
       },
       value: {
         type: 'integer',
@@ -38,10 +38,6 @@ export const submitAnswerJudgmentTool = {
     type: 'object',
     additionalProperties: false,
     properties: {
-      questionId: { type: 'string' },
-      // The machine validates the active player; games can have more than three seats.
-      playerId: { type: 'integer' },
-      attemptId: { type: 'integer' },
       status: {
         type: 'string',
         enum: ['correct', 'incorrect', 'needs_clarification', 'unintelligible', 'ambiguous'],
@@ -49,7 +45,7 @@ export const submitAnswerJudgmentTool = {
       heard: { type: 'string', description: 'Что именно сказал игрок, коротко.' },
       reason: { type: 'string', description: 'Почему выставлен этот статус, одна фраза.' },
     },
-    required: ['questionId', 'playerId', 'attemptId', 'status', 'heard', 'reason'],
+    required: ['status', 'heard', 'reason'],
   },
 } as const
 
@@ -70,30 +66,96 @@ export const selectCatRecipientTool = {
   },
 } as const
 
-/** Ставка кота или аукциона: только один из вариантов на экране. */
-export const resolveSpecialBidTool = {
+/** Ставка кота: минимум или максимум. */
+export const pickCatStakeTool = {
   type: 'function',
-  name: 'resolveSpecialBid',
-  description: 'Сопоставляет реплику игрока с одним из вариантов ставки на экране (кот в мешке или аукцион). Если вариант неясен — confident=false и choice="unclear".',
+  name: 'pickCatStake',
+  description: 'Какую ставку за кота в мешке выбрал игрок: минимум или максимум. Если неясно — option="unclear".',
   parameters: {
     type: 'object',
     additionalProperties: false,
     properties: {
-      choice: { type: 'string', enum: ['amount', 'pass', 'allIn', 'unclear'], description: 'amount — названа сумма из вариантов; pass — пас; allIn — ва-банк; unclear — неясно.' },
-      amount: { type: 'integer', description: 'Сумма из списка вариантов при choice=amount, иначе 0.' },
-      confident: { type: 'boolean' },
+      option: { type: 'string', enum: ['min', 'max', 'unclear'] },
       heard: { type: 'string', description: 'Дословно, что сказал игрок.' },
     },
-    required: ['choice', 'amount', 'confident', 'heard'],
+    required: ['option', 'heard'],
   },
 } as const
 
-export const sessionTools = [selectQuestionTool, submitAnswerJudgmentTool, selectCatRecipientTool, resolveSpecialBidTool]
+/** Аукцион: один из вариантов на экране; конкретный список подставляется в схему на каждый запрос. */
+export const auctionBidTool = {
+  type: 'function',
+  name: 'auctionBid',
+  description: 'Какой вариант ставки на экране назвал игрок в аукционе. Если неясно — choice="unclear".',
+  parameters: {
+    type: 'object',
+    additionalProperties: false,
+    properties: {
+      choice: { type: 'string', enum: ['amount', 'pass', 'allIn', 'unclear'], description: 'amount — сумма из вариантов; pass — пас; allIn — ва-банк; unclear — неясно.' },
+      amount: { type: 'integer', description: 'Сумма из вариантов при choice=amount, иначе 0.' },
+      heard: { type: 'string', description: 'Дословно, что сказал игрок.' },
+    },
+    required: ['choice', 'amount', 'heard'],
+  },
+} as const
+
+/** Ставка финала: сумма от 0 до денег игрока или ва-банк; предел подставляется в схему на каждый запрос. */
+export const finalBetTool = {
+  type: 'function',
+  name: 'finalBet',
+  description: 'Какую ставку в финале назвал игрок. Если неясно — unclear=true.',
+  parameters: {
+    type: 'object',
+    additionalProperties: false,
+    properties: {
+      amount: { type: 'integer', minimum: 0, description: 'Названная сумма; при ва-банке или неясности 0.' },
+      allIn: { type: 'boolean', description: 'true, если игрок идёт ва-банк.' },
+      unclear: { type: 'boolean', description: 'true, если ставку не разобрать.' },
+      heard: { type: 'string', description: 'Дословно, что сказал игрок.' },
+    },
+    required: ['amount', 'allIn', 'unclear', 'heard'],
+  },
+} as const
+
+type ToolSchema = { name: string; parameters: { properties: Record<string, object> } }
+
+function narrow<T extends ToolSchema>(tool: T, patch: Record<string, object>): T {
+  const properties = { ...tool.parameters.properties }
+  for (const [key, extra] of Object.entries(patch)) properties[key] = { ...properties[key], ...extra }
+  return { ...tool, parameters: { ...tool.parameters, properties } }
+}
+
+/** selectQuestion только с id открытых тем и их номиналами. */
+export function selectQuestionToolFor(themeIds: string[], values: number[]): typeof selectQuestionTool {
+  return narrow(selectQuestionTool, {
+    themeId: { enum: [...new Set(themeIds)] },
+    value: { enum: [...new Set([0, ...values])] },
+  })
+}
+
+/** auctionBid только с вариантами на экране. */
+export function auctionBidToolFor(options: Array<{ kind: 'pass' | 'stake' | 'allIn'; amount?: number }>): typeof auctionBidTool {
+  const kinds = new Set<string>(options.map((option) => (option.kind === 'stake' ? 'amount' : option.kind)))
+  const amounts = options.filter((option) => option.kind === 'stake').map((option) => option.amount ?? 0)
+  return narrow(auctionBidTool, {
+    choice: { enum: [...['amount', 'pass', 'allIn'].filter((kind) => kinds.has(kind)), 'unclear'] },
+    amount: { enum: [...new Set([0, ...amounts])] },
+  })
+}
+
+/** finalBet с потолком — деньги игрока. */
+export function finalBetToolFor(max: number): typeof finalBetTool {
+  return narrow(finalBetTool, { amount: { minimum: 0, maximum: Math.max(0, max) } })
+}
+
+export const sessionTools = [selectQuestionTool, submitAnswerJudgmentTool, selectCatRecipientTool, pickCatStakeTool, auctionBidTool, finalBetTool]
 
 /** Назначение tool-вызова по имени: так controller узнаёт, кому ответ. */
 export const toolPurposes: Record<string, string> = {
   selectQuestion: 'select',
   submitAnswerJudgment: 'judge',
   selectCatRecipient: 'catPick',
-  resolveSpecialBid: 'specialBid',
+  pickCatStake: 'specialBid',
+  auctionBid: 'specialBid',
+  finalBet: 'specialBid',
 }

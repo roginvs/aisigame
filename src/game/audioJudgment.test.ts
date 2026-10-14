@@ -150,11 +150,11 @@ describe('audio judging gameplay', () => {
     expect(score()).toBe(0)
     expect(lines('Оценка')).toHaveLength(0)
   })
-  it('rejects audio with foreign ids instead of forcing an ASR match', async () => {
+  it('rejects an audio judgment with an invalid status instead of forcing an ASR match; ids come from the request', async () => {
     const client = new DeferredJudge()
     const { score, notes } = await boot(client, 'audio')
     client.hearAudio('пылесосел', 'Бетельгейзе'); await vi.advanceTimersByTimeAsync(80)
-    client.finish({ questionId: 'other' }); await vi.advanceTimersByTimeAsync(100)
+    client.finish({ status: 'maybe' }); await vi.advanceTimersByTimeAsync(100)
     expect(score()).toBe(-100)
     expect(notes().find((e) => e.title === 'audio judgment fallback')?.detail).toMatchObject({ reason: 'invalid-audio-judgment' })
   })

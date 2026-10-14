@@ -127,6 +127,7 @@ export class RealtimeClient {
     purpose: string
     turn: number
     isolated: boolean
+    tool?: { name: string }
   } | null = null
   /** Isolated tool calls use conversation:none — their call_id is not in the session. */
   private lastToolIsolated = false
@@ -635,14 +636,15 @@ export class RealtimeClient {
     if (!sent) this.dropLink('Связь с ведущей прервалась. Начните игру ещё раз.')
   }
 
-  requestTool(purpose: string, turn: number, name: string, instructions: string, isolated = false): void {
+  /** tool — суженная схема на этот запрос (enum открытых тем, вариантов ставки); иначе общая из сессии. */
+  requestTool(purpose: string, turn: number, name: string, instructions: string, isolated = false, tool?: { name: string }): void {
     this.clearSpeechTimers()
     this.clearFlushTimer()
     this.pendingSpeak = null
     this.speech = null
     this.toolMode = 'text'
     this.lastToolIsolated = isolated
-    this.pendingTool = { purpose, turn, name, instructions, isolated }
+    this.pendingTool = { purpose, turn, name, instructions, isolated, tool }
     this.sendToolRequest('text')
   }
 
@@ -767,7 +769,7 @@ export class RealtimeClient {
           purpose: pending.purpose,
           turn: pending.turn,
           mode,
-          tools: sessionTools,
+          tools: pending.tool ? sessionTools.map((tool) => (tool.name === pending.tool?.name ? pending.tool : tool)) : sessionTools,
         })
       : {
           output_modalities: mode === 'text' ? ['text'] : ['audio'],

@@ -1,4 +1,4 @@
-import { appealResultLine } from '../game/appealSpeech.ts'
+import { amountWords, appealResultLine } from '../game/appealSpeech.ts'
 import { AudioItems, type AudioReference, type AudioItemReady } from './audioItems.ts'
 import type { JudgeRequestContext, JudgmentCapabilities } from './judgmentRequest.ts'
 import { livePlayerChatVisible } from './liveSpeech.ts'
@@ -109,6 +109,9 @@ export class MockRealtimeClient implements GameVoice {
   setMicEnabled(enabled: boolean): void {
     this.onLink({ mic: enabled ? 'live' : 'muted' })
   }
+
+  /** Последняя суженная схема инструмента — для тестов. */
+  lastTool: { name: string } | null = null
 
   setOutputMuted(muted: boolean): void {
     if (muted) this.onLink({ host: 'idle' })
@@ -243,13 +246,16 @@ export class MockRealtimeClient implements GameVoice {
     }, wait)
   }
 
-  requestTool(purpose: string, turn: number, name: string, instructions: string, _isolated = false): void {
+  requestTool(purpose: string, turn: number, name: string, instructions: string, _isolated = false, tool?: { name: string }): void {
+    this.lastTool = tool ?? null
     const call: ToolCall = {
       name,
       callId: `mock-call-${++this.callSeq}`,
       arguments: name === 'submitAnswerJudgment' ? judgeArguments(instructions)
         : name === 'selectCatRecipient' ? catRecipientArguments(instructions)
-          : name === 'resolveSpecialBid' ? specialBidArguments(instructions)
+          : name === 'pickCatStake' ? catStakeArguments(instructions)
+            : name === 'auctionBid' ? auctionBidArguments(instructions, tool)
+              : name === 'finalBet' ? finalBetArguments(instructions, tool)
             : selectArguments(instructions),
     }
     window.setTimeout(() => this.onToolCall(call, purpose, turn), speechPauseMs)
@@ -387,7 +393,7 @@ export class MockRealtimeClient implements GameVoice {
 function hostLine(purpose: string, instructions = ''): string {
   if (purpose === 'welcome') return 'Здравствуйте. Выбирайте вопрос.'
   if (purpose === 'lobby') {
-    if (instructions.includes('Игра создана')) return 'Игра создана. Ждём игроков.'
+    if (instructions.includes('Комната только открыта')) return 'Игра создана. Ждём игроков.'
     return ''
   }
   if (purpose === 'clarify') return 'Не расслышала. Назовите тему и стоимость ещё раз.'
@@ -442,9 +448,15 @@ function announceLine(instructions: string): string {
   const folded = instructions.toLowerCase().replaceAll('ё', 'е')
   const quoted = [...instructions.matchAll(/«([^»]+)»/g)].map((match) => match[1]?.trim() ?? '').filter(Boolean)
   // Итог апелляции: заглушка говорит ровно пример из подсказки (итог за этот вопрос числом).
-  const facts = /Факты: апелляция (принята|не принята); игрок: (.+?); за этот вопрос было (-?\d+), словами [^,]+, стало (-?\d+), словами [^;]+; общий счёт (-?\d+)\./.exec(instructions)
-  if (facts) {
-    return appealResultLine({ name: facts[2] ?? '', accepted: facts[1] === 'принята', previous: Number(facts[3]), amount: Number(facts[4]), total: Number(facts[5]) })
+  const appeal = /Апелляция игрока (.+?) (принята|не принята)[^.]*\. За этот вопрос (?:осталось (.+?)|было (.+?), стало (.+?))\. Общий счёт (-?\d+)\./.exec(instructions)
+  if (appeal) {
+    const number = (words: string | undefined) => {
+      for (let n = -5000; n <= 5000; n += 50) if (amountWords(n) === words) return n
+      return 0
+    }
+    const amount = number(appeal[3] ?? appeal[5])
+    const previous = appeal[3] ? amount : number(appeal[4])
+    return appealResultLine({ name: appeal[1] ?? '', accepted: appeal[2] === 'принята', previous, amount, total: Number(appeal[6]) })
   }
   if (folded.includes('произнеси') && quoted[0]) return quoted[0]
   if (folded.includes('исход: молчание')) return 'Ничего не услышала, минус.'
@@ -476,16 +488,38 @@ function catRecipientArguments(instructions: string): Record<string, unknown> {
 }
 
 /** Мок запасной ставки: «по-крупному» — максимум, «поскромнее» — минимум, «до конца» — ва-банк, «отказываюсь» — пас. */
-function specialBidArguments(instructions: string): Record<string, unknown> {
+function catStakeArguments(instructions: string): Record<string, unknown> {
   const heard = quoted(instructions, 'Распознанный текст')
   const text = normalize(heard)
-  const amounts = [...instructions.matchAll(/choice=amount, amount=(\d+)/g)].map((match) => Number(match[1]))
-  const has = (kind: string) => instructions.includes(`choice=${kind}`)
-  if (/отказ|сдаюсь/.test(text) && has('pass')) return { choice: 'pass', amount: 0, confident: true, heard }
-  if (/до конца/.test(text) && has('allIn')) return { choice: 'allIn', amount: 0, confident: true, heard }
-  if (/крупн/.test(text) && amounts.length) return { choice: 'amount', amount: Math.max(...amounts), confident: true, heard }
-  if (/скромн/.test(text) && amounts.length) return { choice: 'amount', amount: Math.min(...amounts), confident: true, heard }
-  return { choice: 'unclear', amount: 0, confident: false, heard }
+  if (/крупн/.test(text)) return { option: 'max', heard }
+  if (/скромн/.test(text)) return { option: 'min', heard }
+  return { option: 'unclear', heard }
+}
+
+function schemaEnum(tool: unknown, key: string): unknown[] {
+  const value = (tool as { parameters?: { properties?: Record<string, { enum?: unknown[] }> } } | undefined)?.parameters?.properties?.[key]?.enum
+  return Array.isArray(value) ? value : []
+}
+
+function auctionBidArguments(instructions: string, tool: unknown): Record<string, unknown> {
+  const heard = quoted(instructions, 'Распознанный текст')
+  const text = normalize(heard)
+  const choices = schemaEnum(tool, 'choice')
+  const amounts = schemaEnum(tool, 'amount').map(Number).filter((amount) => amount > 0)
+  if (/отказ|сдаюсь/.test(text) && choices.includes('pass')) return { choice: 'pass', amount: 0, heard }
+  if (/до конца/.test(text) && choices.includes('allIn')) return { choice: 'allIn', amount: 0, heard }
+  if (/крупн/.test(text) && amounts.length) return { choice: 'amount', amount: Math.max(...amounts), heard }
+  if (/скромн/.test(text) && amounts.length) return { choice: 'amount', amount: Math.min(...amounts), heard }
+  return { choice: 'unclear', amount: 0, heard }
+}
+
+function finalBetArguments(instructions: string, tool: unknown): Record<string, unknown> {
+  const heard = quoted(instructions, 'Распознанный текст')
+  const text = normalize(heard)
+  const max = Number((tool as { parameters?: { properties?: { amount?: { maximum?: number } } } } | undefined)?.parameters?.properties?.amount?.maximum ?? 0)
+  if (/до конца|ва-?банк/.test(text)) return { amount: 0, allIn: true, unclear: false, heard }
+  if (/крупн/.test(text)) return { amount: max, allIn: false, unclear: false, heard }
+  return { amount: 0, allIn: false, unclear: true, heard }
 }
 
 function selectArguments(instructions: string): Record<string, unknown> {
@@ -520,9 +554,6 @@ function judgeArguments(instructions: string): Record<string, unknown> {
   const correct = sharesAnswer(heard, answers)
   const clarify = !correct && nearHomophone(heard, answers)
   return {
-    questionId: field(instructions, 'questionId'),
-    playerId: Number(field(instructions, 'playerId')) || 0,
-    attemptId: Number(field(instructions, 'attemptId')) || 0,
     status: correct ? 'correct' : clarify ? 'needs_clarification' : 'incorrect',
     heard,
     reason: correct

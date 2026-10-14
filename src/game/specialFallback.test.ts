@@ -22,17 +22,17 @@ const pack: QuestionPack = {
 }
 
 class SpyClient extends MockRealtimeClient {
-  tools: Array<{ name: string; instructions: string; turn: number; purpose: string }> = []
+  tools: Array<{ name: string; instructions: string; turn: number; purpose: string; schema?: unknown }> = []
   override?: (call: ToolCall) => ToolCall | null
   silent = false
-  override requestTool(purpose: string, turn: number, name: string, instructions: string, isolated = false): void {
-    this.tools.push({ name, instructions, turn, purpose })
+  override requestTool(purpose: string, turn: number, name: string, instructions: string, isolated = false, tool?: { name: string }): void {
+    this.tools.push({ name, instructions, turn, purpose, schema: tool })
     if (this.silent) return
     if (this.override) {
       const forward = this.onToolCall
       this.onToolCall = (call, p, t) => { this.onToolCall = forward; forward(call && this.override ? this.override(call) : call, p, t) }
     }
-    super.requestTool(purpose, turn, name, instructions, isolated)
+    super.requestTool(purpose, turn, name, instructions, isolated, tool)
   }
 }
 
@@ -130,9 +130,8 @@ describe('запасной разбор моделью в коте и аукци
     await until(actor, 'cat.staking.listening')
     client.hear('давайте по-крупному', 1200)
     await until(actor, 'flashing')
-    const tool = client.tools.find((item) => item.name === 'resolveSpecialBid')!
-    expect(tool.instructions).toContain('choice=amount, amount=100')
-    expect(tool.instructions).toContain('choice=amount, amount=500')
+    const tool = client.tools.find((item) => item.name === 'pickCatStake')!
+    expect(tool.instructions).toContain('минимум 100 или максимум 500')
     expect(actor.getSnapshot().context.activeStake).toBe(500)
     stop(); actor.stop()
   })
@@ -140,7 +139,7 @@ describe('запасной разбор моделью в коте и аукци
   it('аукцион: сумма вне вариантов от модели отвергается; «до конца» — ва-банк', async () => {
     const client = new SpyClient()
     let bogus = true
-    client.override = (call) => bogus ? ({ ...call, arguments: { choice: 'amount', amount: 777, confident: true, heard: '' } }) : call
+    client.override = (call) => bogus ? ({ ...call, arguments: { choice: 'amount', amount: 777, heard: '' } }) : call
     const { actor, stop, seen } = await boot(client, [0, 900, 0])
     actor.send({ type: 'QUESTION_SELECTED', themeId: 'a', value: 100 })
     await until(actor, 'auction.listening')
@@ -158,7 +157,7 @@ describe('запасной разбор моделью в коте и аукци
 })
 
 describe('ставка финала: тот же запасной путь', () => {
-  it('parseBet не понял — resolveSpecialBid с пределом денег, ва-банк принимается', async () => {
+  it('parseBet не понял — finalBet с пределом денег в схеме, ва-банк принимается', async () => {
     const finalPack: QuestionPack = {
       name: 'Ф',
       rounds: [{ index: 0, name: 'Р', kind: 'normal' }, { index: 1, name: 'Финал', kind: 'final' }],
@@ -186,8 +185,9 @@ describe('ставка финала: тот же запасной путь', () 
     expect(statePath(actor.getSnapshot().value)).toBe('finalBets.hearing')
     client.hear('ну я иду до конца', 1200)
     for (let i = 0; i < 40 && actor.getSnapshot().context.bets.length === 0; i += 1) await vi.advanceTimersByTimeAsync(100)
-    const tool = client.tools.find((item) => item.name === 'resolveSpecialBid')!
+    const tool = client.tools.find((item) => item.name === 'finalBet')!
     expect(tool.instructions).toContain('от 0 до 800')
+    expect(tool.schema).toMatchObject({ parameters: { properties: { amount: { minimum: 0, maximum: 800 } } } })
     expect(actor.getSnapshot().context.bets).toEqual([expect.objectContaining({ playerId: 1, amount: 800 })])
     stop(); actor.stop()
   })
