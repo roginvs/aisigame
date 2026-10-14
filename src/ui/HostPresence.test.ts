@@ -173,3 +173,13 @@ describe('значок в углу: слушает / слышит / думает
     expect(render('lobby', 'live', 'idle')).not.toContain('data-ear')
   })
 })
+
+it('подписи переключателей — ОПА и МС, полные названия в aria-label и подсказке', () => {
+  const html = renderToStaticMarkup(createElement(HostPresence, { path: 'listening', link: { host: 'connected', mic: 'live' } as never, status: 'Слушаю', audioJudgment: true, onAudioJudgmentChange: () => {}, hearTurnOnly: true, onHearTurnOnlyChange: () => {} }))
+  expect(html).toContain('>ОПА</span>')
+  expect(html).toContain('>МС</span>')
+  expect(html).toContain('aria-label="Оценивать по аудио"')
+  expect(html).toContain('aria-label="Меньше слышать"')
+  expect(html).toContain('title="ОПА — оценивать по аудио: ')
+  expect(html).toContain('title="МС — меньше слышать: ')
+})

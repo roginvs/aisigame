@@ -1319,7 +1319,7 @@ button.continue-with-file .continue-file {
 }
 
 .host.host-with-hear-less {
-  padding-bottom: 32px;
+  padding-bottom: 8px;
 }
 
 .host-switches {
@@ -2113,4 +2113,17 @@ button.buzzer.chooser:disabled {
 .bubble.from-system {
   background: rgb(92 113 136 / 18%);
   font-size: 0.9em;
+}
+
+/* Аббревиатуры на переключателях ведущей (ОПА, МС): крупнее, тем же цветом. */
+.host-abbr {
+  font-size: 15px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+/* Переключатели в нижнем углу карточки: текст центрируется выше них, отдельный ряд не нужен. */
+.host.host-with-hear-less figcaption {
+  padding-bottom: 26px;
 }

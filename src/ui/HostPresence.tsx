@@ -99,9 +99,9 @@ export function HostPresence(props: {
           {props.onAudioJudgmentChange ? (
             <label
               className={['host-hear-less', props.audioJudgment && props.audioJudgmentSupported !== false ? 'is-on' : '', props.audioJudgmentSupported === false ? 'is-disabled' : ''].filter(Boolean).join(' ')}
-              title={props.audioJudgmentSupported === false ? 'Эта модель не поддерживает оценку по аудио; ответы проверяются по тексту' : 'Включено — оценка по голосу. Выключено — прежняя проверка по распознанному тексту. Изменение действует со следующей попытки ответа.'}
+              title={props.audioJudgmentSupported === false ? 'ОПА — оценивать по аудио: Эта модель не поддерживает оценку по аудио; ответы проверяются по тексту' : 'ОПА — оценивать по аудио: Включено — оценка по голосу. Выключено — прежняя проверка по распознанному тексту. Изменение действует со следующей попытки ответа.'}
             >
-              <span className="host-hear-less-label">Оценивать по аудио</span>
+              <span className="host-hear-less-label host-abbr" aria-label="Оценивать по аудио">ОПА</span>
               <input
                 type="checkbox" className="host-switch-input" role="switch"
                 aria-checked={Boolean(props.audioJudgment && props.audioJudgmentSupported !== false)}
@@ -115,9 +115,9 @@ export function HostPresence(props: {
           {props.onHearTurnOnlyChange ? (
             <label
               className={['host-hear-less', props.hearTurnOnly ? 'is-on' : ''].filter(Boolean).join(' ')}
-              title="В партии вне выбора и ответа модель ничего не слышит; на ходе — только этого игрока"
+              title="МС — меньше слышать: В партии вне выбора и ответа модель ничего не слышит; на ходе — только этого игрока"
             >
-              <span className="host-hear-less-label">Меньше слышать</span>
+              <span className="host-hear-less-label host-abbr" aria-label="Меньше слышать">МС</span>
               <input
                 type="checkbox"
                 className="host-switch-input"
