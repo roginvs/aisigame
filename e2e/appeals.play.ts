@@ -78,6 +78,8 @@ test('стол: после объявления ответа — подтвер�
   await page.getByRole('group', { name: 'Игрок 1: -100' }).getByRole('button', { name: 'Апелляция' }).click()
   await page.getByRole('button', { name: 'Да, я ответил правильно' }).click()
   await expect(page.getByRole('group', { name: 'Игрок 1: 100' })).toBeVisible()
+  // Подписи «Апелляции: …» под табло нет — она сдвигала вёрстку.
+  await expect(page.getByText(/^Апелляции:/)).toHaveCount(0)
   await expect(page.getByText('Апелляция принята: за этот вопрос у игрока Игрок 1 теперь плюс сто вместо минус ста.', { exact: false }).first()).toBeVisible()
   await expect(page.locator('.answerer', { hasText: 'Отвечает игрок 1' })).toHaveCount(0)
   await page.getByRole('group', { name: 'Игрок 2: -100' }).getByRole('button', { name: 'Апелляция' }).click()

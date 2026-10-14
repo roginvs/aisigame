@@ -20,7 +20,7 @@ describe('answerIsPublic', () => {
 })
 
 describe('publicAnswerHasPlayable', () => {
-  it('нужен публичный эталон и звук или ролик ответа', () => {
+  it('звук/ролик — после публичного эталона, картинка — и после верного, ячейка закрыта', () => {
     expect(
       publicAnswerHasPlayable({
         kind: 'nobody',
@@ -41,6 +41,13 @@ describe('publicAnswerHasPlayable', () => {
         cellClosed: true,
         answerMedia: [{ kind: 'image', name: 'art.png', url: 'blob:3' }],
       }),
+    ).toBe(true)
+    // Картинку ответа показываем и после верного ответа; звук — нет.
+    expect(
+      publicAnswerHasPlayable({ kind: 'correct', cellClosed: true, answerMedia: [{ kind: 'image', name: 'art.png', url: 'blob:3' }] }),
+    ).toBe(true)
+    expect(
+      publicAnswerHasPlayable({ kind: 'incorrect', cellClosed: false, answerMedia: [{ kind: 'image', name: 'art.png', url: 'blob:3' }] }),
     ).toBe(false)
     expect(
       publicAnswerHasPlayable({

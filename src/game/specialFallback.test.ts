@@ -129,7 +129,7 @@ describe('запасной разбор моделью в коте и аукци
     client.hear('отдаю Вере', 1200)
     await until(actor, 'cat.staking.listening')
     client.hear('давайте по-крупному', 1200)
-    await until(actor, 'flashing')
+    await until(actor, 'reading.sealed')
     const tool = client.tools.find((item) => item.name === 'pickCatStake')!
     expect(tool.instructions).toContain('минимум 100 или максимум 500')
     expect(actor.getSnapshot().context.activeStake).toBe(500)
@@ -150,7 +150,7 @@ describe('запасной разбор моделью в коте и аукци
     bogus = false
     await until(actor, 'auction.listening')
     client.hear('ну я иду до конца', 1200)
-    await until(actor, 'flashing')
+    await until(actor, 'reading.sealed')
     expect(actor.getSnapshot().context.special).toMatchObject({ leaderId: 2, allIn: true, bid: 900 })
     stop(); actor.stop()
   })

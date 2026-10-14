@@ -1517,7 +1517,8 @@ export const gameMachine = setup({
         autoStaked: {
           on: { HOST_AUDIO_FINISHED: { guard: heardPurpose('idleAuto'), target: 'placed' } },
         },
-        placed: { always: { target: '#game.flashing', actions: 'placeSpecial' } },
+        // Ячейка уже мигала при выборе кота: сразу к чтению, без второго показа табло.
+        placed: { always: { target: '#game.reading', actions: ['placeSpecial', 'armEarlyClock'] } },
         /** Восстановление и RESUME: получатель уже есть — к ставке, иначе снова объявление. */
         resume: {
           always: [
@@ -1581,7 +1582,7 @@ export const gameMachine = setup({
           ],
         },
         won: {
-          on: { HOST_AUDIO_FINISHED: { guard: heardPurpose('auctionWon'), target: '#game.flashing', actions: 'placeSpecial' } },
+          on: { HOST_AUDIO_FINISHED: { guard: heardPurpose('auctionWon'), target: '#game.reading', actions: ['placeSpecial', 'armEarlyClock'] } },
         },
         resume: {
           always: [

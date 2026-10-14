@@ -11,7 +11,7 @@ import { buttonsLive, earlyPickOpen, falseStartCooling, falseStartOpen, gameMach
 import { falseStartMs } from '../options.ts'
 import { currentRound, nextInCell, questionById, roundPrices, roundThemes } from '../game/pack.ts'
 import { choiceIsAnswer } from '../game/choices.ts'
-import { answerIsPublic, stageMedia } from '../game/reveal.ts'
+import { answerIsPublic, stageMedia, answerImageVisible } from '../game/reveal.ts'
 import type { LinkStatus } from '../realtime/client.ts'
 import { voiceById, voiceModels } from '../realtime/models.ts'
 import { billedTokens, formatTokens, getUsageSnapshot, subscribeUsage, type UsageTotals } from '../realtime/usage.ts'
@@ -338,7 +338,14 @@ export function GameScreen(props: {
   )
   const questionMedia = question?.media
   const answerMedia = question?.answerMedia
-  const staged = stageMedia(questionMedia ?? [], answerMedia ?? [], showAnswer)
+  // После верного ответа эталон текстом не пишем, но картинку ответа показываем (ячейка уже закрыта).
+  const showAnswerImage = Boolean(
+    question && !showAnswer && answerRevealed &&
+      answerImageVisible(context.announceKind, context.playedIds.includes(question.id)),
+  )
+  const staged = showAnswerImage
+    ? stageMedia(questionMedia ?? [], (answerMedia ?? []).filter((item) => item.kind === 'image'), true)
+    : stageMedia(questionMedia ?? [], answerMedia ?? [], showAnswer)
   const held = paused || stopped
   const questionLive = questionClipPlaying({
     path,
@@ -653,9 +660,6 @@ export function GameScreen(props: {
         )}
         </div>
 
-      {context.appeal?.activePlayerId && context.appeal.stage === 'closed' ? (
-        <p className="status-line" role="status">Апелляции: {[context.appeal.activePlayerId, ...context.appeal.queue].map((id) => context.players.find((p) => p.id === id)?.name).join(' → ')}</p>
-      ) : null}
       {appealError ? <p role="status" className="status-line">{appealError}</p> : null}
       {conference?.layout ? (
         <ConferencePlayersRow

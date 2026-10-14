@@ -40,7 +40,8 @@ function judge(actor: Actor, status: 'correct' | 'incorrect') {
   actor.send({ type: 'ANSWER_JUDGED', judgment: { questionId: c.activeQuestionId!, playerId: c.activePlayerId!, attemptId: c.attemptId, status, heard: 'x', reason: '' } })
 }
 function readAndAnswer(actor: Actor) {
-  expect(path(actor)).toBe('flashing')
+  // После ставки кота/аукциона — сразу чтение, без второго мигания табло (`flashing`).
+  expect(path(actor)).toBe('reading.sealed')
   // Кнопок нет: фальстарт не засчитывается.
   actor.send({ type: 'BUZZER_PRESSED', playerId: 2 })
   expect(ctx(actor).falseStarts[2]).toBeUndefined()

@@ -178,7 +178,7 @@ describe('молчание в коте', () => {
     expect(ctx(actor).special!.stake).toBe(100)
     expect(idleAutoCue(ctx(actor))).toContain('100')
     actor.send({ type: 'HOST_AUDIO_FINISHED', purpose: 'idleAuto' })
-    expect(path(actor)).toBe('flashing')
+    expect(path(actor)).toBe('reading.sealed')
     expect(ctx(actor).activeStake).toBe(100)
   })
 })

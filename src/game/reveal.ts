@@ -6,16 +6,23 @@ export function answerIsPublic(kind: AnnounceKind | null, cellClosed: boolean): 
   return kind === 'nobody' || kind === 'incorrect' || kind === 'silence' || kind === 'unclear' || kind === 'away'
 }
 
-/** Звук или ролик ответа на табло после публичного эталона — их нужно доиграть. */
+/** Картинку ответа показываем и после верного ответа: ячейка закрыта, она лишь иллюстрирует. */
+export function answerImageVisible(kind: AnnounceKind | null, cellClosed: boolean): boolean {
+  return cellClosed && (answerIsPublic(kind, cellClosed) || kind === 'correct')
+}
+
+/**
+ * Медиа ответа, ради которых табло не открывается досрочно и после речи есть удержание `answerMediaHoldMs`:
+ * звук/ролик после публичного эталона — доиграть; картинка — чтобы её успели увидеть.
+ */
 export function publicAnswerHasPlayable(input: {
   kind: AnnounceKind | null
   cellClosed: boolean
   answerMedia?: readonly QuestionMedia[]
 }): boolean {
-  if (!answerIsPublic(input.kind, input.cellClosed)) return false
-  return (input.answerMedia ?? []).some(
-    (item) => (item.kind === 'audio' || item.kind === 'video') && Boolean(item.url),
-  )
+  const media = (input.answerMedia ?? []).filter((item) => Boolean(item.url))
+  if (answerIsPublic(input.kind, input.cellClosed) && media.some((item) => item.kind === 'audio' || item.kind === 'video')) return true
+  return answerImageVisible(input.kind, input.cellClosed) && media.some((item) => item.kind === 'image')
 }
 
 export type StageMedia = {
