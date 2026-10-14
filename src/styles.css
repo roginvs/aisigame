@@ -1453,9 +1453,9 @@ button.continue-with-file .continue-file {
 .host-buzz strong { color: #ffc14d; }
 .host-think { border-color: #7eb6e8; }
 .host-think strong { color: #b9d7f5; }
-.host-hear { border-color: #5ff0b0; box-shadow: 0 0 0 3px rgba(61, 220, 151, 0.22), 0 0 26px rgba(61, 220, 151, 0.7); }
+/* «Слышу…»: без рамки и свечения вокруг плашки — только значок волны в углу. */
+.host-hear { border-color: transparent; box-shadow: none; }
 .host-hear strong { color: #a6ffd6; }
-.host-hear img { box-shadow: 0 0 0 3px #5ff0b0; }
 .host-process { border-color: #7eb6e8; box-shadow: 0 0 18px rgba(126, 182, 232, 0.5); }
 .host-process strong { color: #b9d7f5; }
 .host-portrait { position: relative; line-height: 0; }

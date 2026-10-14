@@ -140,3 +140,13 @@ it('places the audio switch beside the hear-less switch and disables unsupported
   expect(unsupported).toContain('aria-checked="false"')
   expect(unsupported).not.toContain('Меньше слышать')
 })
+
+import { readFileSync } from 'node:fs'
+describe('стиль «Слышу…»', () => {
+  it('без рамки и свечения, значок волны остаётся', () => {
+    const css = readFileSync(new URL('../styles.css', import.meta.url), 'utf8')
+    expect(css).toMatch(/\.host-hear \{ border-color: transparent; box-shadow: none; \}/)
+    expect(css).not.toMatch(/\.host-hear img \{/)
+    expect(css).toContain('.host-badge-hear i')
+  })
+})
