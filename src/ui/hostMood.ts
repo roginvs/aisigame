@@ -25,7 +25,7 @@ export function hostMood(path: string, link: Pick<LinkStatus, 'host' | 'mic'>, e
   if (link.host === 'speaking') return 'speak'
   if (path.startsWith('buzzing')) return 'buzz'
   const base = baseMood(path, link)
-  if (base === 'speak' || ear === 'idle' || ear === 'listening') return ear === 'listening' && base === 'think' && link.host !== 'speaking' ? 'listen' : base
+  if (base === 'speak' || ear === 'idle' || ear === 'listening') return ear === 'listening' && base === 'think' ? 'listen' : base
   return ear === 'hearing' ? 'hear' : 'process'
 }
 
