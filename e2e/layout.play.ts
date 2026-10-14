@@ -24,10 +24,9 @@ test('экран вопроса без скроллбаров и с нормал
   await hear(page, 'Аранжировать')
   await expect(page.locator('.bubble.from-host', { hasText: 'Какого цвета круг' })).toBeVisible()
   await page.getByRole('button', { name: 'Игрок 2', exact: true }).click()
-  await expect(page.locator('.answerer')).toHaveText('Отвечает игрок 2')
-  // Состояние ответа ограничено таймером: сохраняем геометрию до серии
-  // последующих проверок, а не ждём тот же transient-элемент в самом конце.
-  const answererBox = await page.locator('.answerer').boundingBox()
+  // «Отвечает …» — только строкой в «Разговоре», на главном экране её нет.
+  await expect(page.locator('.bubble.from-system', { hasText: 'Отвечает Игрок 2' }).first()).toBeVisible()
+  await expect(page.locator('.question .answerer')).toHaveCount(0)
 
   await page.screenshot({ path: 'test-results/layout-question.png' })
 
@@ -80,11 +79,9 @@ test('экран вопроса без скроллбаров и с нормал
   const imageBox = await image.boundingBox()
   expect(questionBox).not.toBeNull()
   expect(imageBox).not.toBeNull()
-  expect(answererBox).not.toBeNull()
-  if (!questionBox || !imageBox || !answererBox) return
+  if (!questionBox || !imageBox) return
   expect(imageBox.y).toBeGreaterThanOrEqual(questionBox.y - 1)
   expect(imageBox.y + imageBox.height).toBeLessThanOrEqual(questionBox.y + questionBox.height + 2)
-  expect(answererBox.y + answererBox.height).toBeLessThanOrEqual(questionBox.y + questionBox.height + 2)
   const imageFit = await image.evaluate((node) => {
     const media = node.closest('.question-media')
     const style = getComputedStyle(node)

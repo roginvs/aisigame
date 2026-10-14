@@ -8,7 +8,7 @@ import { advanceIdle, enterIdle, idleDelay, idleIsFinal, idleThresholds, pauseId
 import { questionSpeech } from './choices.ts'
 import { earlyBuzzerMsFor } from './earlyBuzzer.ts'
 import { findQuestion, nextPlayableRound, questionById, questionsInRound } from './pack.ts'
-import { defaultPlayers, openingChooser } from './players.ts'
+import { answererStatus, defaultPlayers, openingChooser } from './players.ts'
 import { demoPack } from './questions.ts'
 import { answerHasClip, publicAnswerHasPlayable } from './reveal.ts'
 import { answerMediaMaxMs, answerMediaMinMs } from '../options.ts'
@@ -733,8 +733,8 @@ export const gameMachine = setup({
       activePlayerId: ({ event }) => (event.type === 'BUZZER_PRESSED' ? event.playerId : null),
       attemptId: ({ context }) => context.attemptId + 1,
       clarifications: () => 0,
-      statusLine: ({ event }) =>
-        event.type === 'BUZZER_PRESSED' ? `Отвечает игрок ${event.playerId}` : 'Отвечает игрок',
+      statusLine: ({ context, event }) =>
+        event.type === 'BUZZER_PRESSED' ? answererStatus(context, event.playerId) : 'Отвечает игрок',
       phaseStartedAt: () => null,
       phaseDurationMs: () => null,
     }),
@@ -774,7 +774,7 @@ export const gameMachine = setup({
     }),
     beginSpecialAnswer: assign(({ context }) => ({
       attemptId: context.attemptId + 1, clarifications: 0, heard: '', judgmentReason: '', judgmentStatus: null, announceKind: null,
-      statusLine: `Отвечает игрок ${playerName(context, context.activePlayerId)}`,
+      statusLine: answererStatus(context, context.activePlayerId),
     })),
     startAuction: assign(({ context }) => {
       const question = questionById(context.questions, context.activeQuestionId)
@@ -924,7 +924,7 @@ export const gameMachine = setup({
       judgmentReason: () => '',
       judgmentStatus: () => null,
       announceKind: () => null,
-      statusLine: ({ context }) => `Отвечает игрок ${context.activePlayerId ?? ''}`,
+      statusLine: ({ context }) => answererStatus(context, context.activePlayerId),
       phaseStartedAt: () => Date.now(),
       phaseDurationMs: () => gameConfig.clarifyMs,
     }),
@@ -1109,7 +1109,7 @@ export const gameMachine = setup({
       judgmentReason: () => '',
       judgmentStatus: () => null,
       announceKind: () => null,
-      statusLine: ({ context }) => `Отвечает игрок ${currentFinalist(context) ?? ''}`,
+      statusLine: ({ context }) => answererStatus(context, currentFinalist(context)),
       phaseStartedAt: () => null,
       phaseDurationMs: () => null,
     }),

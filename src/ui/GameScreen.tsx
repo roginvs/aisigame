@@ -570,7 +570,6 @@ export function GameScreen(props: {
               onAnswerEnded={onAnswerMediaEnded}
               answerUrls={new Set(staged.answerVisual.map((item) => item.url))}
             />
-            {context.activePlayerId ? <p className="answerer">Отвечает игрок {context.activePlayerId}</p> : null}
             {showTimer && context.phaseStartedAt !== null && context.phaseDurationMs !== null ? (
               <Countdown startedAt={context.phaseStartedAt} durationMs={context.phaseDurationMs} />
             ) : null}

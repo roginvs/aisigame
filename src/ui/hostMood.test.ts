@@ -77,7 +77,7 @@ describe('hostCaption', () => {
     })
     expect(hostCaption({ ...think, status: '' }).lines).toEqual(['Ведущая думает'])
     expect(hostCaption({ ...speak, status: 'Верно' }).lines).toEqual(['Верно'])
-    expect(hostCaption({ ...listen, status: 'Отвечает игрок 2' }).lines).toEqual(['Отвечает игрок 2'])
+    expect(hostCaption({ ...listen, status: 'Отвечает Маша' }).lines).toEqual(['Отвечает Маша'])
   })
 
   it('does not repeat pause or stop, and allows a second detail when it is a different fact', () => {

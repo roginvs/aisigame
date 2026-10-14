@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { buzzKeyLabel, isKeyboardPlayer, playerFromBuzzKey } from '../ui/buzzKeys.ts'
-import { defaultPlayerNames, defaultPlayers, openingChooser, playersFromNames } from './players.ts'
+import { answererStatus, buzzAnswererLine, defaultPlayerNames, defaultPlayers, openingChooser, playersFromNames } from './players.ts'
 
 const plain = { alt: false, ctrl: false, meta: false, shift: false }
 
@@ -38,5 +38,19 @@ describe('playersFromNames', () => {
   it('в начале раунда выбирает второго, а одного игрока — его самого', () => {
     expect(openingChooser(playersFromNames('А\nБ\nВ'))).toBe(2)
     expect(openingChooser(playersFromNames('Один'))).toBe(1)
+  })
+})
+
+describe('answererStatus / buzzAnswererLine', () => {
+  const players = [{ id: 1, name: 'Вася', score: 0 }, { id: 2, name: 'Маша', score: 0 }] as never
+  it('пишет имя, а не id', () => {
+    expect(answererStatus({ players }, 2)).toBe('Отвечает Маша')
+    expect(answererStatus({ players }, 9)).toBe('Отвечает игрок')
+  })
+  it('строка в чат только при нажатии кнопки', () => {
+    expect(buzzAnswererLine('buzzing.open', 'answering.waiting', players, 1)).toBe('Отвечает Вася')
+    expect(buzzAnswererLine('reading.armed', 'answering.waiting', players, 2)).toBe('Отвечает Маша')
+    expect(buzzAnswererLine('judging', 'answering.waiting', players, 1)).toBeNull()
+    expect(buzzAnswererLine('buzzing.open', 'announcing', players, 1)).toBeNull()
   })
 })

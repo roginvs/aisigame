@@ -2,7 +2,7 @@ import type { ConferenceMessageRing } from '../conference/messages.ts'
 import { messageRingFromLegacyChat, readMessageRing } from '../conference/messageRing.ts'
 import { appealMsLeft, readAppeal, readOutcomes } from './appeals.ts'
 import { questionById } from './pack.ts'
-import { openingChooser } from './players.ts'
+import { answererStatus, openingChooser } from './players.ts'
 import { readSpecialState } from './specialState.ts'
 import type {
   AnnounceKind,
@@ -390,7 +390,7 @@ export function restoredMatch(pack: QuestionPack, saved: SavedMatch): Pick<
     judgmentStatus: phase === 'announcing' ? saved.judgmentStatus : null,
     special: openQuestion ? special : null,
     resumePath: phase,
-    statusLine: statusFor(phase, pack.name, round?.name ?? 'Раунд', round?.kind === 'final', saved.activePlayerId),
+    statusLine: statusFor(phase, pack.name, round?.name ?? 'Раунд', round?.kind === 'final', answererStatus(saved, saved.activePlayerId)),
   }
 }
 
@@ -498,7 +498,7 @@ function statusFor(
   packName: string,
   roundName: string,
   finalRound: boolean,
-  playerId: PlayerId | null,
+  answerer: string,
 ): string {
   if (phase === 'welcoming') return `Пакет «${packName}»`
   if (phase === 'choosing.listening') {
@@ -507,7 +507,7 @@ function statusFor(
   if (phase === 'finished') return 'Игра закончена'
   if (phase === 'buzzing.open' || phase === 'reading.armed') return 'Жмите свою кнопку'
   if (phase === 'falseStartCue') return 'Фальстарт'
-  if (phase === 'answering.waiting') return `Отвечает игрок ${playerId ?? ''}`.trim()
+  if (phase === 'answering.waiting') return answerer
   if (phase === 'announcing') return 'Объявление'
   if (phase === 'bridging') return roundName
   if (phase === 'finalBets.asking') return 'Назовите ставку'

@@ -10,7 +10,7 @@ import { matchSpokenPlayer, spokenPlayers } from './nameMatch.ts'
 import type { JudgmentInputMode, JudgmentSource, JudgeRequestContext } from '../realtime/judgmentRequest.ts'
 import { JudgmentClock } from './judgmentClock.ts'
 import { gameConfig } from '../config.ts'
-import { noteLink, pushJudgeLine, pushPlayerLine, pushTrace } from '../debug/trace.ts'
+import { noteLink, pushJudgeLine, pushPlayerLine, pushSystemLine, pushTrace } from '../debug/trace.ts'
 import type { GameVoice, LinkStatus, ToolCall } from '../realtime/client.ts'
 import { spokenPayload, verbatimSpeech, withPlayNote } from '../realtime/speechMatch.ts'
 import { echoesTranscriptionPrompt } from './promptEcho.ts'
@@ -36,7 +36,7 @@ import {
   phoneticRetryReason,
   statePath,
 } from './machine.ts'
-import { openingChooser, playerName } from './players.ts'
+import { buzzAnswererLine, openingChooser, playerName } from './players.ts'
 import { spokenAnswerCue } from './spokenAnswer.ts'
 import type { AnnounceKind, AuctionOption, GameContext, JudgmentStatus, PlayerId, SpeechPurpose } from './types.ts'
 
@@ -451,6 +451,8 @@ export function attachController(options: {
     previousPath = path
     previousRound = round
     pushTrace('state', path, machineView(snapshot.context))
+    const answererLine = buzzAnswererLine(from, path, snapshot.context.players, snapshot.context.activePlayerId)
+    if (answererLine) pushSystemLine(answererLine)
     if (!hostEarSurvives(path, from)) clearHostEar()
     enter(path, snapshot, from, fromRound)
   })

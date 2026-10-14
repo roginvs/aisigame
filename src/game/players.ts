@@ -32,3 +32,15 @@ export function playerName(players: readonly Player[], id: PlayerId | null): str
   return players.find((player) => player.id === id)?.name ?? ''
 }
 
+/** «Отвечает Вася»: по имени игрока, а не по его id. */
+export function answererStatus(context: { readonly players: readonly Player[] }, id: PlayerId | null | undefined): string {
+  const name = context.players.find((player) => player.id === id)?.name?.trim()
+  return name ? `Отвечает ${name}` : 'Отвечает игрок'
+}
+
+/** Строка в «Разговор» после нажатия кнопки: только при входе в ответ из чтения/кнопок. */
+export function buzzAnswererLine(from: string, path: string, players: readonly Player[], activePlayerId: PlayerId | null): string | null {
+  if (!path.startsWith('answering') || activePlayerId === null) return null
+  if (!(from.startsWith('reading') || from.startsWith('buzzing') || from === 'falseStartCue')) return null
+  return answererStatus({ players }, activePlayerId)
+}

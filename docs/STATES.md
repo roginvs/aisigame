@@ -279,7 +279,7 @@ stateDiagram-v2
 
 ### Окно кнопки и ответ
 
-56. `buzzing` + `BUZZER_PRESSED` с guard пункта 49 → `answering`. Полоска гаснет. Отвечает нажавший.
+56. `buzzing` + `BUZZER_PRESSED` с guard пункта 49 → `answering`. Полоска гаснет. Отвечает нажавший. На главном экране подписи «Отвечает …» нет — нажавшего выделяет толстая рамка карточки; в «Разговор» уходит служебная строка `Отвечает <имя>` (например, «Отвечает Вася»; `buzzAnswererLine` в `players.ts`), она же — `statusLine`.
 57. `buzzing` + `UNBUTTONED_TALK` → остаётся. `spokeWithoutButton`. Часы идут дальше. Короткий шум контроллер сюда не шлёт.
 58. `buzzing` + `TALKED_OVER` → остаётся. `talkedDuringRead`.
 59. `buzzing.open`, вышло окно (`buzzerLeft`: остаток полоски, а если старта не было — вся длительность) → `announcing`, повод `nobody`. Ячейка закрыта. Очки те же.

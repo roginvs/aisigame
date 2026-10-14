@@ -1157,7 +1157,6 @@ button.continue-with-file .continue-file {
 
 .question .eyebrow,
 .question .choices,
-.question .answerer,
 .question .etalon,
 .question .timer-bar,
 .question > p {
@@ -1492,7 +1491,6 @@ button.continue-with-file .continue-file {
   .host-listen, .cell.flash, .air-down, .host-badge i { animation: none; }
 }
 
-.answerer { color: #e2c27a; font-size: 1.2rem; }
 
 .etalon { color: #b7c4d2; }
 
