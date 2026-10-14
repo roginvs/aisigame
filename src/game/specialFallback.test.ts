@@ -5,7 +5,8 @@ import { MockRealtimeClient } from '../realtime/mockClient.ts'
 vi.mock('../audio/beep.ts', () => ({ playTimeoutBeep: vi.fn(), unlockAudio: vi.fn() }))
 import { gameConfig } from '../config.ts'
 import { pushHostLine } from '../debug/trace.ts'
-import { attachController } from './controller.ts'
+import { LOBBY_BARGE_IN_MIN_MS, attachController } from './controller.ts'
+import { choosingReminderMs } from '../options.ts'
 import { gameMachine, statePath } from './machine.ts'
 import type { Player, Question, QuestionPack } from './types.ts'
 
@@ -238,6 +239,22 @@ describe('ранний слух: запрос уже на табло, ведущ
     await vi.advanceTimersByTimeAsync(3000)
     expect(actor.getSnapshot().context.special?.bid).toBeNull()
     expect(client.tools.find((item) => item.name === 'auctionBid')).toBeUndefined()
+    stop(); actor.stop()
+  })
+})
+
+describe('напоминание на выборе можно перебить', () => {
+  it('игрок заговорил поверх напоминания — ведущая замолкает', async () => {
+    const client = new SpyClient()
+    const { actor, stop } = await boot(client)
+    client.setSpeechMs(10_000)
+    const interrupt = vi.spyOn(client, 'interruptSpeech')
+    await vi.advanceTimersByTimeAsync(choosingReminderMs + 50)
+    expect(actor.getSnapshot().context.idleNudges).toBe(1)
+    interrupt.mockClear()
+    client.hearSlow('Обычная за пятьсот', 2000, 0)
+    await vi.advanceTimersByTimeAsync(LOBBY_BARGE_IN_MIN_MS + 100)
+    expect(interrupt).toHaveBeenCalled()
     stop(); actor.stop()
   })
 })

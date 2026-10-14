@@ -4,7 +4,7 @@ import { autoCatRecipient, nextInCircle } from './cat.ts'
 import { appealMsLeft, appealRequestError, appealStake, appealWindowMs, eligibleAppealPlayers, settleOutcome } from './appeals.ts'
 import { gameConfig } from '../config.ts'
 import { catAwayWaitMs } from '../options.ts'
-import { advanceIdle, enterIdle, idleDelay, idleIsFinal, pauseIdle, type IdleKind } from './idle.ts'
+import { advanceIdle, enterIdle, idleDelay, idleIsFinal, idleThresholds, pauseIdle, type IdleKind } from './idle.ts'
 import { questionSpeech } from './choices.ts'
 import { earlyBuzzerMsFor } from './earlyBuzzer.ts'
 import { findQuestion, nextPlayableRound, questionById, questionsInRound } from './pack.ts'
@@ -385,9 +385,16 @@ export const gameMachine = setup({
       const reset = event.type === 'IDLE_SPEECH' && event.active
       return { idle: pauseIdle(context.idle, Date.now(), reset) }
     }),
-    idleNudge: assign(({ context }) => context.idle
-      ? { idle: advanceIdle(context.idle, Date.now()), idleNudges: (context.idleNudges ?? 0) + 1 }
-      : {}),
+    idleNudge: assign(({ context }) => {
+      if (!context.idle) return {}
+      let idle = advanceIdle(context.idle, Date.now())
+      // Один игрок: передавать ход некому — напоминаем дальше с тем же шагом.
+      if (idle.kind === 'choosing' && context.players.length <= 1 && idleIsFinal(idle)) {
+        const steps = idleThresholds('choosing')
+        idle = { ...idle, stage: steps.length - 2, elapsedMs: steps[steps.length - 3] ?? 0 }
+      }
+      return { idle, idleNudges: (context.idleNudges ?? 0) + 1 }
+    }),
     idlePassChooser: assign(({ context }) => {
       const fromId = context.chooserId
       const toId = context.players.length > 1 ? nextInCircle(context.players, fromId) ?? fromId : fromId
@@ -1108,7 +1115,7 @@ export const gameMachine = setup({
     }),
   },
   guards: {
-    idleNudgeDue: ({ context }) => !idleIsFinal(context.idle),
+    idleNudgeDue: ({ context }) => !idleIsFinal(context.idle) || (context.idle?.kind === 'choosing' && context.players.length <= 1),
     validAppeal: ({ context, event }) => event.type === 'APPEAL_REQUESTED' &&
       appealRequestError(context, context.appeal?.activePlayerId !== null && context.appeal?.stage === 'closed' ? 'answering.waiting' : context.appeal?.stage === 'open' ? 'buzzing.open' : 'choosing.listening', event) === null,
     closedAppeal: ({ context }) => context.appeal?.stage === 'closed' && context.appeal.activePlayerId !== null,

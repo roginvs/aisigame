@@ -1,7 +1,7 @@
 import { createActor } from 'xstate'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { idleSteps } from '../options.ts'
-import { idleAutoCue, idleNudgeCue, chooserHandoffCue, catStakeCue, auctionAskCue } from './controller.ts'
+import { choosingReminderMs, idleSteps } from '../options.ts'
+import { idleAutoCue, idleNudgeCue, chooserHandoffCue, catStakeCue, auctionAskCue, choosingReminderCue, choosingReminderDice, offerSelectionNote, pickChoosingReminder } from './controller.ts'
 import { setIdleScale } from './idle.ts'
 import { gameMachine, statePath } from './machine.ts'
 import type { Player, Question, QuestionPack } from './types.ts'
@@ -36,7 +36,7 @@ beforeEach(() => { vi.useFakeTimers(); setIdleScale(1) })
 afterEach(() => { vi.useRealTimers(); setIdleScale(1) })
 
 describe('молчание на выборе вопроса', () => {
-  it('15 с — позвать, 30 с — поторопить, 40 с — ход следующему по кругу', () => {
+  it('20 с и 40 с — напоминания, 60 с — ход следующему по кругу', () => {
     const actor = start(['Аня', 'Боря', 'Вася'])
     expect(path(actor)).toBe('choosing.listening')
     const first = ctx(actor).chooserId
@@ -44,10 +44,8 @@ describe('молчание на выборе вопроса', () => {
     expect(nudges(actor)).toBe(0)
     tick(1)
     expect(nudges(actor)).toBe(1)
-    expect(idleNudgeCue('choosing.listening', ctx(actor))).toContain('Молчит уже около 15 с')
     tick(idleSteps.choosing[1] - idleSteps.choosing[0])
     expect(nudges(actor)).toBe(2)
-    expect(idleNudgeCue('choosing.listening', ctx(actor))).toContain('Поторопи')
     tick(idleSteps.choosing[2] - idleSteps.choosing[1])
     expect(path(actor)).toBe('chooserHandoff')
     const next = ctx(actor).chooserId
@@ -63,27 +61,29 @@ describe('молчание на выборе вопроса', () => {
     expect(nudges(actor)).toBe(3)
   })
 
-  it('один игрок: выбор остаётся у него, отсчёт заново', () => {
+  it('шаг напоминаний — choosingReminderMs', () => {
+    expect(idleSteps.choosing).toEqual([choosingReminderMs, choosingReminderMs * 2, choosingReminderMs * 3])
+    expect(choosingReminderMs).toBe(20_000)
+  })
+
+  it('один игрок: ход не передаётся, напоминания каждые 20 с', () => {
     const actor = start(['Аня'])
-    tick(idleSteps.choosing[2])
-    expect(path(actor)).toBe('chooserHandoff')
+    for (let i = 1; i <= 5; i += 1) {
+      tick(choosingReminderMs)
+      expect(nudges(actor)).toBe(i)
+      expect(path(actor)).toBe('choosing.listening')
+    }
     expect(ctx(actor).chooserId).toBe(1)
-    expect(chooserHandoffCue(ctx(actor))).toContain('выбирает снова')
-    actor.send({ type: 'HOST_AUDIO_FINISHED', purpose: 'chooserHandoff' })
-    tick(idleSteps.choosing[0] - 1)
-    expect(nudges(actor)).toBe(2)
-    tick(1)
-    expect(nudges(actor)).toBe(3)
   })
 
   it('речь игрока сбрасывает и останавливает отсчёт', () => {
     const actor = start(['Аня', 'Боря'])
-    tick(14_000)
+    tick(idleSteps.choosing[0] - 1000)
     actor.send({ type: 'IDLE_SPEECH', active: true })
     tick(60_000)
     expect(nudges(actor)).toBe(0)
     actor.send({ type: 'IDLE_SPEECH', active: false })
-    tick(14_999)
+    tick(idleSteps.choosing[0] - 1)
     expect(nudges(actor)).toBe(0)
     tick(1)
     expect(nudges(actor)).toBe(1)
@@ -96,7 +96,7 @@ describe('молчание на выборе вопроса', () => {
     tick(60_000)
     expect(nudges(actor)).toBe(0)
     actor.send({ type: 'HOST_TALKING', active: false })
-    tick(4_999)
+    tick(idleSteps.choosing[0] - 10_001)
     expect(nudges(actor)).toBe(0)
     tick(1)
     expect(nudges(actor)).toBe(1)
@@ -117,14 +117,14 @@ describe('молчание на выборе вопроса', () => {
 
   it('разбор останавливает; после уточнения ведущей — отсчёт заново', () => {
     const actor = start(['Аня', 'Боря'])
-    tick(14_000)
+    tick(idleSteps.choosing[0] - 1000)
     actor.send({ type: 'PLAYER_SPEECH_FINISHED' })
     expect(path(actor)).toBe('choosing.resolving')
     tick(10_000)
     expect(nudges(actor)).toBe(0)
     actor.send({ type: 'QUESTION_UNCLEAR', reason: 'x' })
     actor.send({ type: 'HOST_AUDIO_FINISHED', purpose: 'clarify' })
-    tick(14_999)
+    tick(idleSteps.choosing[0] - 1)
     expect(nudges(actor)).toBe(0)
     tick(1)
     expect(nudges(actor)).toBe(1)
@@ -133,9 +133,9 @@ describe('молчание на выборе вопроса', () => {
   it('ускорение для демо', () => {
     setIdleScale(0.1)
     const actor = start(['Аня', 'Боря'])
-    tick(1_500)
+    tick(idleSteps.choosing[0] / 10)
     expect(nudges(actor)).toBe(1)
-    tick(2_500)
+    tick((idleSteps.choosing[2] - idleSteps.choosing[0]) / 10)
     expect(path(actor)).toBe('chooserHandoff')
   })
 })
@@ -225,5 +225,41 @@ describe('молчание: контроллер', () => {
     expect(speech.mock.calls.filter(([purpose]) => purpose === 'idleNudge')).toHaveLength(1)
     expect(ctx(actor).talk?.host).toBe(false)
     stop()
+  })
+})
+
+describe('напоминания на выборе: темы или предложение ячейки', () => {
+  it('список: реальные темы и оставшиеся номиналы с табло, по имени', () => {
+    const actor = start(['Аня', 'Боря'])
+    const cue = choosingReminderCue(ctx(actor), { kind: 'list' })
+    expect(cue).toContain('- Обычная: 100')
+    expect(cue).toContain('- Кот: 200')
+    expect(cue).toContain('- Торги: 100')
+    expect(cue).toContain(ctx(actor).players.find((p) => p.id === ctx(actor).chooserId)!.name)
+  })
+
+  it('предложение: одна случайная открытая ячейка по имени темы и номиналу', () => {
+    const actor = start(['Аня', 'Боря'])
+    const rolls = [0.9, 0.0]
+    choosingReminderDice.roll = () => rolls.shift() ?? 0
+    const pick = pickChoosingReminder(ctx(actor))
+    expect(pick.kind).toBe('offer')
+    expect(pick.offer).toMatchObject({ themeId: 't', themeName: 'Обычная', value: 100 })
+    const cue = choosingReminderCue(ctx(actor), pick)
+    expect(cue).toContain('тема «Обычная», номинал 100')
+    expect(cue).toContain('Другие ячейки не называй')
+    choosingReminderDice.roll = () => 0.1
+    expect(pickChoosingReminder(ctx(actor))).toMatchObject({ kind: 'list', offer: null })
+    choosingReminderDice.roll = () => Math.random()
+  })
+
+  it('после предложения модель берёт ячейку на любое согласие по смыслу', () => {
+    const note = offerSelectionNote({ themeId: 't', themeName: 'Обычная', value: 100 })
+    for (const yes of ['да', 'давай', 'конечно', 'супер', 'ага', 'угу', 'го', 'погнали', 'беру', 'хочу', 'ок', 'окей', 'можно', 'идёт', 'согласен', 'давай его', 'почему бы и нет']) {
+      expect(note).toContain(yes)
+    }
+    expect(note).toContain('по смыслу')
+    expect(note).toContain('themeId=t, value=100, confident=true')
+    expect(note).toContain('Отказ')
   })
 })

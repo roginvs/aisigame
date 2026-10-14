@@ -250,6 +250,7 @@ export function attachController(options: {
       return
     }
     if (path.startsWith('choosing')) lastChooserSpeechAt = Date.now()
+    if (path === 'choosing.listening' && hostTalking && hostPurpose === 'idleNudge') armBargeIn(itemId, () => statePath(actor.getSnapshot().value) === 'choosing.listening')
     if (path.startsWith('answering')) lastAnswerSpeechAt = Date.now()
     if (isReadingPath(path) || path === 'falseStartCue') {
       overRead = true
@@ -371,6 +372,10 @@ export function attachController(options: {
     if (purpose === 'catPick' || purpose === 'specialBid') handleSpecialTool(call, turn)
   }
 
+  /** Назначение последней реплики ведущей (для перебивания напоминаний). */
+  let hostPurpose = ''
+  /** Предложенная в напоминании ячейка; сгорает на следующем напоминании, ответе или выходе из выбора. */
+  let choosingOffer: ChoosingOffer | null = null
   // Лобби: игрок заговорил поверх ведущей — после короткого порога обрываем её и слушаем.
   let lobbyBargeTimer = 0
   function clearLobbyBargeIn(): void {
@@ -378,17 +383,21 @@ export function attachController(options: {
     lobbyBargeTimer = 0
   }
   function armLobbyBargeIn(itemId: string | null): void {
+    armBargeIn(itemId, () => statePath(actor.getSnapshot().value) === 'startMenu' && Boolean(keepVoiceSession?.()), 'лобби')
+  }
+  /** Игрок говорит дольше порога поверх ведущей — обрываем её (лобби, напоминания выбора). */
+  function armBargeIn(itemId: string | null, still: () => boolean, where = 'выбор'): void {
     clearLobbyBargeIn()
     lobbyBargeTimer = window.setTimeout(() => {
       lobbyBargeTimer = 0
-      if (statePath(actor.getSnapshot().value) !== 'startMenu' || !keepVoiceSession?.() || !hostTalking) return
+      if (!still() || !hostTalking) return
       if (itemId && openSpeechItemId !== itemId) return
       const live = getLivePlayerLine()?.text ?? ''
       if (live && echoesHost(live)) {
-        pushTrace('note', 'лобби: эхо ведущей, не перебиваем')
+        pushTrace('note', `${where}: эхо ведущей, не перебиваем`)
         return
       }
-      pushTrace('note', 'лобби: игрок перебил ведущую — замолкаем и слушаем')
+      pushTrace('note', `${where}: игрок перебил ведущую — замолкаем и слушаем`)
       client.interruptSpeech()
     }, LOBBY_BARGE_IN_MIN_MS)
   }
@@ -411,7 +420,14 @@ export function attachController(options: {
     const nudges = snapshot.context.idleNudges ?? 0
     if (nudges !== lastIdleNudges) {
       lastIdleNudges = nudges
-      if (path === previousPath && isIdlePath(path)) speakWhileListening('idleNudge', idleNudgeCue(path, snapshot.context))
+      if (path === previousPath && isIdlePath(path)) {
+        if (path === 'choosing.listening') {
+          const reminder = pickChoosingReminder(snapshot.context)
+          choosingOffer = reminder.offer
+          client.setTranscriptionPrompt(listeningPrompt(snapshot.context, choosingOffer))
+          speakWhileListening('idleNudge', choosingReminderCue(snapshot.context, reminder))
+        } else speakWhileListening('idleNudge', idleNudgeCue(path, snapshot.context))
+      }
     }
     if (path === previousPath && round === previousRound) return
     const from = previousPath
@@ -594,10 +610,11 @@ export function attachController(options: {
     if (path === 'choosing.listening' || path === 'choosing.clarifying' || path === 'chooserHandoff') {
       expectingToolTurn = null
     }
+    if (!path.startsWith('choosing')) choosingOffer = null
     if (path === 'choosing.listening') {
       choiceEpoch += 1
       client.setSpeechSpeed(gameConfig.speechSpeed)
-      client.setTranscriptionPrompt(listeningPrompt(context))
+      client.setTranscriptionPrompt(listeningPrompt(context, choosingOffer))
       client.setMicEnabled(true)
     }
     if (path === 'choosing.resolving') {
@@ -749,6 +766,7 @@ export function attachController(options: {
   function speakWhileListening(purpose: SpeechPurpose, instructions: string, expect?: string): void {
     speechTurn += 1
     lastHostSpoken = expect ?? spokenPayload(instructions)
+    hostPurpose = purpose
     // conversation:none — подсказка про микрофон и уточнение выбора не продолжают лобби/партию.
     client.requestSpeech(purpose, speechTurn, expect ? instructions : withCommentary(instructions, actor.getSnapshot().context, publicHistory()), expect, true)
     client.setMicEnabled(true)
@@ -782,6 +800,7 @@ export function attachController(options: {
   ): void {
     speechTurn += 1
     lastHostSpoken = expect ?? spokenPayload(instructions)
+    hostPurpose = purpose
     client.setMicEnabled(false)
     client.requestSpeech(purpose, speechTurn, expect ? instructions : withCommentary(instructions, actor.getSnapshot().context, publicHistory()), expect, isolated || !expect, chatNote)
   }
@@ -790,7 +809,9 @@ export function attachController(options: {
     toolTurn += 1
     expectingToolTurn = toolTurn
     const cells = openChoiceCells(context)
-    client.requestTool('select', toolTurn, 'selectQuestion', selectionInstructions(context, choiceHeard), true,
+    const offer = choosingOffer
+    choosingOffer = null
+    client.requestTool('select', toolTurn, 'selectQuestion', selectionInstructions(context, choiceHeard, offer), true,
       selectQuestionToolFor(cells.map((cell) => cell.themeId), cells.map((cell) => cell.value)))
   }
 
@@ -805,7 +826,8 @@ export function attachController(options: {
     }
     if (!heard.arrived) pushPlayerLine('речь не распознана')
     const round = currentRound(actor.getSnapshot().context, actor.getSnapshot().context.roundIndex)
-    const gate = choiceGate(heard.text, durationMs, round?.kind === 'final' ? 2 : 4)
+    // После предложения ячейки короткое «да», «го», «ок» — тоже ответ: решает модель.
+    const gate = choosingOffer && heard.text.trim() ? 'select' : choiceGate(heard.text, durationMs, round?.kind === 'final' ? 2 : 4)
     const shown = heard.text || 'речь не распознана'
     if (gate === 'ignore') {
       pushTrace('note', `короткий звук ${durationMs} мс, ячейку не открываю: ${shown}`)
@@ -1477,12 +1499,54 @@ function availableLines(context: GameContext): string {
   return lines.join('\n')
 }
 
-function listeningPrompt(context: GameContext): string {
+function listeningPrompt(context: GameContext, offer: ChoosingOffer | null = null): string {
   const round = currentRound(context, context.roundIndex)
   const cells = context.questions
     .filter((question) => question.roundIndex === context.roundIndex && !context.playedIds.includes(question.id))
     .map((question) => ({ theme: question.themeName, value: question.value }))
-  return choicePrompt(round?.kind === 'final' ? 'final' : 'normal', cells)
+  const base = choicePrompt(round?.kind === 'final' ? 'final' : 'normal', cells)
+  // Только подсказка распознавателю, не сопоставление строк.
+  return offer ? `${base} Да, давай, конечно, ага, беру.` : base
+}
+
+/** Примеры согласия для модели; список не исчерпывающий, решает смысл. */
+export const OFFER_YES_EXAMPLES = ['да', 'давай', 'конечно', 'супер', 'ага', 'угу', 'го', 'погнали', 'беру', 'хочу', 'ок', 'окей', 'можно', 'идёт', 'согласен', 'давай его', 'почему бы и нет']
+
+export type ChoosingOffer = { themeId: string; themeName: string; value: number }
+export type ChoosingReminder = { kind: 'list' } | { kind: 'offer'; offer: ChoosingOffer }
+
+/** Монетка напоминания выбора; тесты подменяют. */
+export const choosingReminderDice = { roll: () => Math.random() }
+
+export function pickChoosingReminder(context: GameContext): ChoosingReminder & { offer: ChoosingOffer | null } {
+  const final = currentRound(context, context.roundIndex)?.kind === 'final'
+  const cells = openChoiceCells(context)
+  if (final || cells.length === 0 || choosingReminderDice.roll() < 0.5) return { kind: 'list', offer: null }
+  const cell = cells[Math.min(cells.length - 1, Math.floor(choosingReminderDice.roll() * cells.length))]
+  return { kind: 'offer', offer: cell }
+}
+
+/** Напоминание на выборе: темы с оставшимися номиналами или предложение одной ячейки. */
+export function choosingReminderCue(context: GameContext, reminder: ChoosingReminder): string {
+  const who = playerName(context.players, context.chooserId) || 'Игрок'
+  const style = 'Своими словами, каждый раз по-новому; коротко.'
+  if (reminder.kind === 'offer') {
+    const { themeName, value } = reminder.offer
+    return hostCue({
+      situation: `Выбирает вопрос игрок: ${who}. Давно молчит или не удалось понять выбор. Предлагаешь ему ячейку: тема «${themeName}», номинал ${value}.`,
+      goal: `Обратись к игроку по имени и предложи именно эту ячейку вопросом, например «${who}, хочешь «${themeName}» за ${value}?».`,
+      constraints: ['Другие ячейки не называй. Ячейку сама не открывай — ждёшь ответа игрока.', style],
+    })
+  }
+  const final = currentRound(context, context.roundIndex)?.kind === 'final'
+  const byTheme = new Map<string, number[]>()
+  for (const cell of openChoiceCells(context)) byTheme.set(cell.themeName, [...(byTheme.get(cell.themeName) ?? []), cell.value])
+  const board = [...byTheme].map(([theme, values]) => final ? `- ${theme}` : `- ${theme}: ${values.sort((a, b) => a - b).join(', ')}`).join('\n')
+  return hostCue({
+    situation: `Выбирает ${final ? 'тему финала' : 'вопрос'} игрок: ${who}. Давно молчит или не удалось понять выбор. На табло осталось:\n${board}`,
+    goal: `Обратись к игроку по имени и напомни, что осталось: темы${final ? '' : ' и их номиналы'} по списку выше; затем попроси выбрать.`,
+    constraints: ['Только темы и номиналы из списка, ничего не добавляй. Ячейку сама не выбирай.', style],
+  })
 }
 
 function openChoiceCells(context: GameContext) {
@@ -1648,7 +1712,7 @@ function turnInstructions(context: GameContext): string {
   })
 }
 
-function selectionInstructions(context: GameContext, heard: string): string {
+function selectionInstructions(context: GameContext, heard: string, offer: ChoosingOffer | null = null): string {
   const round = currentRound(context, context.roundIndex)
   if (round?.kind === 'final') {
     const themes = roundThemes(context.questions, context.roundIndex)
@@ -1674,7 +1738,15 @@ confident=true и value равен номиналу, только если в р
 Во всех остальных случаях — кашель, междометие, только тема или только номинал — confident=false и value=0.
 Не угадывай ячейку. heard — дословно, что сказал игрок.
 Если в названии темы стоят точки или многоточие, это та же тема, сказанная без точек.
+${offer ? offerSelectionNote(offer) : ''}
 `.trim()
+}
+
+/** Ведущая предложила ячейку: любое согласие по смыслу берёт её. */
+export function offerSelectionNote(offer: ChoosingOffer): string {
+  return `Перед этой репликой ведущая предложила ячейку: ${offer.themeId} — ${offer.themeName}, ${offer.value}.
+Если реплика по смыслу — согласие на это предложение (любое: ${OFFER_YES_EXAMPLES.join(', ')} и т.п.), вызови selectQuestion с themeId=${offer.themeId}, value=${offer.value}, confident=true.
+Отказ («нет», «не хочу», «другое») — confident=false и value=0. Названа другая ячейка — оцени её по общим правилам.`
 }
 
 function clarifyInstructions(context: GameContext): string {
