@@ -108,6 +108,8 @@ export function grokInbound(event: object, turn: GrokTurn): { turn: GrokTurn; ev
 function grokSession(session: Loose): object {
   const speed = numberAt(session, ['audio', 'output', 'speed'])
   const prompt = textAt(session, ['audio', 'input', 'transcription', 'prompt'])
+  // Пустая строка — явная очистка подсказки: старые keyterms не должны дожить до чтения вопроса.
+  const promptSet = typeof ((session.audio as { input?: { transcription?: { prompt?: unknown } } } | undefined)?.input?.transcription?.prompt) === 'string'
   const instructions = text(session.instructions) || undefined
   const tools = Array.isArray(session.tools) ? session.tools : undefined
   const full = Boolean(instructions)
@@ -129,21 +131,21 @@ function grokSession(session: Loose): object {
     }
     return { type: 'session.update', session: next }
   }
-  if (speed !== null || prompt) {
+  if (speed !== null || promptSet) {
     next.audio = {
       ...(speed !== null ? { output: { speed } } : {}),
-      ...(prompt ? { input: { transcription: transcription(prompt) } } : {}),
+      ...(promptSet ? { input: { transcription: transcription(prompt, true) } } : {}),
     }
   }
   return { type: 'session.update', session: next }
 }
 
-function transcription(prompt: string): Loose {
+function transcription(prompt: string, clear = false): Loose {
   const terms = keyterms(prompt)
   return {
     model: 'grok-transcribe',
     language_hint: 'ru',
-    ...(terms.length ? { keyterms: terms } : {}),
+    ...(terms.length || clear ? { keyterms: terms } : {}),
   }
 }
 

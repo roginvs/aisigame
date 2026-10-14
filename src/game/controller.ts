@@ -575,7 +575,8 @@ export function attachController(options: {
       const question = questionById(context.questions, context.activeQuestionId)
       const text = question ? questionSpeech(question) : ''
       speak('read', readInstructions(text), text)
-      client.setTranscriptionPrompt('Пока ведущая читает вопрос, в комнате могут говорить. Это не ответ и не выбор ячейки.')
+      // Подсказка распознавателю — образец текста, не команда: при чтении пусто.
+      client.setTranscriptionPrompt('')
       client.setMicEnabled(true)
     }
     if (path === 'reading.armed') {
@@ -637,7 +638,8 @@ export function attachController(options: {
 
   function openBuzzerEar(): void {
     buzzerEarAt = Date.now()
-    client.setTranscriptionPrompt('Человек говорит, пока нужно нажать кнопку. Это ещё не ответ на вопрос.')
+    // В окне кнопки тоже пусто: команды в подсказке распознаватель выдаёт как «речь».
+    client.setTranscriptionPrompt('')
     client.setMicEnabled(true)
   }
 

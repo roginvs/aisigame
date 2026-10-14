@@ -74,3 +74,10 @@ function asOutput(event: object): unknown[] {
   const response = (event as { response?: { output?: unknown[] } }).response
   return response?.output ?? []
 }
+
+describe('grok: пустая подсказка распознавателю', () => {
+  it('очищает keyterms, а не оставляет прошлые', () => {
+    const events = grokOutbound({ type: 'session.update', session: { type: 'realtime', audio: { input: { transcription: { prompt: '' } } } } } as never)
+    expect(JSON.stringify(events)).toContain('"keyterms":[]')
+  })
+})

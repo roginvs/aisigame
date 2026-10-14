@@ -134,6 +134,9 @@ describe('attachController choice', () => {
     expect(read?.[3]).toBe('Кто написал «Онегина»?')
     const seen = JSON.stringify([speech.mock.calls, tools.mock.calls, prompts.mock.calls])
     expect(seen).not.toContain(secret)
+    // Чтение вопроса: подсказка распознавателю пустая, без фраз-команд.
+    expect(prompts.mock.calls.at(-1)?.[0]).toBe('')
+    expect(JSON.stringify(prompts.mock.calls)).not.toContain('Пока ведущая читает')
     stop()
   })
 
@@ -627,7 +630,7 @@ describe('attachController answer listening', () => {
     await vi.advanceTimersByTimeAsync(gameConfig.cellFlashMs + 80)
     expect(statePath(actor.getSnapshot().value)).toBe('buzzing.open')
     const buzzer = client.prompts.at(-1) ?? ''
-    expect(buzzer).toContain('кнопку')
+    expect(buzzer).toBe('')
     expect(buzzer).not.toContain('Пылесосел')
     expect(buzzer).not.toContain('Утюгусь')
 
