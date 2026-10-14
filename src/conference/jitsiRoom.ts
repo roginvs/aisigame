@@ -353,6 +353,8 @@ export async function connectJitsiConference(input: {
   displayName: string
   bot?: boolean
   createHostParticipant?: boolean
+  /** Мастер: участник «Звуки игры» не подключился или отпал. */
+  onSoundsLost?: (message: string) => void
   onError?: (message: string) => void
 }): Promise<ConferenceHandle> {
   const base = input.jitsiBase.replace(/\/+$/, '')
@@ -1083,7 +1085,7 @@ export async function connectJitsiConference(input: {
   }
 
   if (input.createHostParticipant) {
-    // Не обязателен: без него мастер играет эффекты локально, как в одиночной игре.
+    // Сбой не роняет комнату, но и локально эффекты не играем — App показывает ошибку.
     try {
       soundsHandle = await connectJitsiConference({
         jitsiBase: input.jitsiBase,
@@ -1091,12 +1093,16 @@ export async function connectJitsiConference(input: {
         displayName: SOUNDS_JITSI_NAME,
         bot: true,
         // Обрыв служебного участника не роняет комнату: эффекты вернутся в динамик (App).
-        onError: (message) => pushTrace('note', `«Звуки игры»: ${message}`),
+        onError: (message) => {
+          pushTrace('note', `«Звуки игры»: ${message}`)
+          input.onSoundsLost?.(message)
+        },
       })
       emitTiles()
     } catch (error) {
-      pushTrace('note', 'Участник «Звуки игры» не подключился, эффекты играем локально', { error: String(error) })
+      pushTrace('note', 'Участник «Звуки игры» не подключился', { error: String(error) })
       soundsHandle = null
+      input.onSoundsLost?.(error instanceof Error ? error.message : String(error))
     }
   }
 

@@ -12,7 +12,7 @@ export function conversationLineFromTrace(entry: TraceEntry): ConferenceConversa
 function chatRole(detail: unknown): ChatRole {
   if (detail && typeof detail === 'object' && 'role' in detail) {
     const role = (detail as { role?: unknown }).role
-    if (role === 'host' || role === 'player' || role === 'judge') return role
+    if (role === 'host' || role === 'player' || role === 'judge' || role === 'error') return role
   }
   return 'host'
 }

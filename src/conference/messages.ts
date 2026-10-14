@@ -8,7 +8,7 @@ import type { AppealFields, AppealRequest, AnnounceKind, JudgmentStatus, Special
 export const CONFERENCE_HISTORY_LIMIT = 200
 
 export type ConferenceConversationLine = {
-  role: 'host' | 'player' | 'judge'
+  role: 'host' | 'player' | 'judge' | 'error'
   text: string
   note?: string
   /** ISO-время для общего хронологического потока с текстовым чатом. */
@@ -555,7 +555,7 @@ function validPresence(value: unknown): boolean {
 }
 
 function validConversationLine(value: unknown): boolean {
-  return isRecord(value) && (value.role === 'host' || value.role === 'player' || value.role === 'judge') &&
+  return isRecord(value) && (value.role === 'host' || value.role === 'player' || value.role === 'judge' || value.role === 'error') &&
     typeof value.text === 'string' && value.text.length <= 20_000 &&
     (value.note === undefined || (typeof value.note === 'string' && value.note.length <= 20_000)) &&
     (value.at === undefined || shortString(value.at, 40))

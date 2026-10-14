@@ -2,8 +2,9 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import { setIdleScale } from './game/idle.ts'
 import { setAppealScale } from './game/appeals.ts'
 import { useMachine } from '@xstate/react'
-import { gameSoundRoute, gameSoundStream, playAuctionDing, playCatMeow, playTimeoutBeep, setGameSoundRoute, unlockAudio } from './audio/beep.ts'
-import { pushTrace } from './debug/trace.ts'
+import { gameSoundRoute, gameSoundStream, markGameSoundsBroken, playAuctionDing, playCatMeow, playTimeoutBeep, setGameSoundRoute, unlockAudio } from './audio/beep.ts'
+import { pushErrorLine, pushTrace } from './debug/trace.ts'
+import { gameSoundsErrorText } from './conference/media.ts'
 import { buildInviteUrl, parseInvite } from './conference/invite.ts'
 import { JoinerSession } from './conference/joinerSession.ts'
 import { MasterSession } from './conference/masterSession.ts'
@@ -681,6 +682,13 @@ export default function App() {
     }
   }
 
+  /** Без локального запасного пути: молчим и один раз на сбой пишем ошибку в «Разговор». */
+  function gameSoundsLost(reason: string): void {
+    if (!conferenceHandleRef.current || !markGameSoundsBroken()) return
+    pushTrace('note', 'Звуки игры не проигрываются', { reason })
+    pushErrorLine(gameSoundsErrorText)
+  }
+
   function conferenceConnectionFailed(message: string): void {
     setConferenceError(message)
     if (conferenceHandleRef.current) {
@@ -786,13 +794,13 @@ export default function App() {
         displayName: roomMasterName,
         publishHost: true,
         onError: conferenceConnectionFailed,
+        onSoundsLost: gameSoundsLost,
       })
       attachConferenceHandle(handle)
       if (!useBroadcast && handle.publishSoundsStream) {
         // Эффекты игры — через скрытого участника «Звуки игры»: у всех тот же путь и громкость, что у ведущей.
         handle.publishSoundsStream(gameSoundStream()).catch((error: unknown) => {
-          pushTrace('note', 'Звуки игры не опубликованы, играем локально', { error: String(error) })
-          setGameSoundRoute('local')
+          gameSoundsLost(error instanceof Error ? error.message : String(error))
         })
       }
       setJoiningStatus('Подключаем ведущую…')

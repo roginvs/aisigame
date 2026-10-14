@@ -2103,3 +2103,8 @@ button.buzzer.chooser:disabled {
   opacity: 0.75;
   font-size: 0.9rem;
 }
+
+.bubble.from-error {
+  border-left: 3px solid #e05a4f;
+  background: rgb(224 90 79 / 14%);
+}

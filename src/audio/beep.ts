@@ -7,10 +7,11 @@ let audioContext: AudioContext | null = null
  * Куда идут звуковые эффекты игры.
  * - `local` — в динамик (одиночная игра, broadcast-конференция);
  * - `stream` — мастер Jitsi: в MediaStream скрытого участника «Звуки игры», слышно всем из конференции;
- * - `remote` — joiner Jitsi: локально не играем, эффект придёт из конференции.
+ * - `remote` — joiner Jitsi: локально не играем, эффект придёт из конференции;
+ * - `broken` — мастер Jitsi, участник «Звуки игры» не подключился или отпал: молчим, локального запасного пути нет.
  * Тайминги игры от этого не зависят: длительности заданы константами, а не событием `ended`.
  */
-export type GameSoundRoute = 'local' | 'stream' | 'remote'
+export type GameSoundRoute = 'local' | 'stream' | 'remote' | 'broken'
 let soundRoute: GameSoundRoute = 'local'
 let soundSink: MediaStreamAudioDestinationNode | null = null
 
@@ -26,14 +27,21 @@ export function gameSoundStream(): MediaStream {
   return soundSink.stream
 }
 
-export function setGameSoundRoute(route: 'local' | 'remote'): void {
+export function setGameSoundRoute(route: 'local' | 'remote' | 'broken'): void {
   soundRoute = route
+}
+
+/** Сбой «Звуков игры»: `true` только при первом сбое (ошибку показать один раз); снова — после `local`/нового потока. */
+export function markGameSoundsBroken(): boolean {
+  if (soundRoute === 'broken') return false
+  soundRoute = 'broken'
+  return true
 }
 
 /** Выход эффекта; `null` — локально не играть. */
 function soundOutput(ctx: AudioContext): AudioNode | null {
-  if (soundRoute === 'remote') return null
-  if (soundRoute === 'stream' && soundSink && soundSink.context === ctx) return soundSink
+  if (soundRoute === 'remote' || soundRoute === 'broken') return null
+  if (soundRoute === 'stream') return soundSink && soundSink.context === ctx ? soundSink : null
   return ctx.destination
 }
 

@@ -32,8 +32,8 @@ export type MockControls = {
   setAppealScale?: (scale: number) => void
   /** Только конференция на заглушке: портит байт пакета у joiner. */
   flipPackByte?: () => void
-  /** Демо: сыграть эффект игры; возвращает маршрут (`local` / `stream` — через «Звуки игры» / `remote`). */
-  playGameSound?: (kind: 'beep' | 'cat' | 'auction') => 'local' | 'stream' | 'remote'
+  /** Демо: сыграть эффект игры; возвращает маршрут (`local` / `stream` — через «Звуки игры» / `remote` / `broken` — участник не подключён, тишина). */
+  playGameSound?: (kind: 'beep' | 'cat' | 'auction') => 'local' | 'stream' | 'remote' | 'broken'
 }
 
 declare global {

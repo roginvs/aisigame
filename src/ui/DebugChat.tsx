@@ -194,13 +194,14 @@ function BubbleHead(props: { label: string; at?: string }) {
 function bubbleClass(role: ChatRole): string {
   if (role === 'player') return 'from-player'
   if (role === 'judge') return 'from-judge'
+  if (role === 'error') return 'from-error'
   return 'from-host'
 }
 
 function chatRole(detail: unknown): ChatRole {
   if (detail && typeof detail === 'object' && 'role' in detail) {
     const role = detail.role
-    if (role === 'host' || role === 'player' || role === 'judge') return role
+    if (role === 'host' || role === 'player' || role === 'judge' || role === 'error') return role
   }
   return 'host'
 }
@@ -222,5 +223,6 @@ function chatNote(detail: unknown): string {
 function roleLabel(role: ChatRole): string {
   if (role === 'player') return 'Услышано'
   if (role === 'judge') return 'Оценка'
+  if (role === 'error') return 'Ошибка'
   return 'Ведущая'
 }

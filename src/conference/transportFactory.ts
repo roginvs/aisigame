@@ -9,6 +9,7 @@ export async function createConferenceTransport(input: {
   /** Только мастер публикует отдельного участника с голосом модели. */
   publishHost?: boolean
   onError?: (message: string) => void
+  onSoundsLost?: (message: string) => void
 }): Promise<ConferenceHandle> {
   const displayName = input.displayName ?? 'Игрок'
   if (input.useBroadcast) {
@@ -44,5 +45,6 @@ export async function createConferenceTransport(input: {
     displayName,
     createHostParticipant: input.publishHost === true,
     onError: input.onError,
+    onSoundsLost: input.onSoundsLost,
   })
 }

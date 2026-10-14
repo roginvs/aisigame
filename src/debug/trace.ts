@@ -3,7 +3,7 @@ import { buildCommit, pageOrigin } from '../buildInfo.ts'
 
 export type TraceKind = 'in' | 'out' | 'state' | 'chat' | 'note'
 
-export type ChatRole = 'host' | 'player' | 'judge'
+export type ChatRole = 'host' | 'player' | 'judge' | 'error'
 
 export type TraceEntry = {
   id: number
@@ -128,6 +128,13 @@ export function pushJudgeLine(text: string): void {
   const clean = text.trim()
   if (!clean) return
   pushTrace('chat', 'Оценка', { role: 'judge' satisfies ChatRole, text: clean })
+}
+
+/** Видимая ошибка в «Разговоре» (у всех в конференции). Модель её не получает. */
+export function pushErrorLine(text: string): void {
+  const clean = text.trim()
+  if (!clean) return
+  pushTrace('chat', 'Ошибка', { role: 'error' satisfies ChatRole, text: clean })
 }
 
 export function getTrace(): TraceEntry[] {
