@@ -2108,3 +2108,8 @@ button.buzzer.chooser:disabled {
   border-left: 3px solid #e05a4f;
   background: rgb(224 90 79 / 14%);
 }
+
+.bubble.from-system {
+  background: rgb(92 113 136 / 18%);
+  font-size: 0.9em;
+}

@@ -21,6 +21,8 @@ export const SOUNDS_JITSI_NAME = 'Звуки игры'
 
 export const gameSoundsErrorText = 'Ошибка: звук игры не проигрывается — участник «Звуки игры» не подключился.'
 
+export { gameSoundsRestoredText } from './gameSoundsRetry.ts'
+
 export function isSoundsJitsiParticipant(id: string, name: string, soundsParticipantId: string | null): boolean {
   if (soundsParticipantId && id === soundsParticipantId) return true
   return name === SOUNDS_JITSI_NAME

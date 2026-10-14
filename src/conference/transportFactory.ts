@@ -10,6 +10,7 @@ export async function createConferenceTransport(input: {
   publishHost?: boolean
   onError?: (message: string) => void
   onSoundsLost?: (message: string) => void
+  onSoundsRestored?: () => void
 }): Promise<ConferenceHandle> {
   const displayName = input.displayName ?? 'Игрок'
   if (input.useBroadcast) {
@@ -46,5 +47,6 @@ export async function createConferenceTransport(input: {
     createHostParticipant: input.publishHost === true,
     onError: input.onError,
     onSoundsLost: input.onSoundsLost,
+    onSoundsRestored: input.onSoundsRestored,
   })
 }

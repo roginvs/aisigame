@@ -33,11 +33,6 @@ export const matchTimings = {
   buzzerBeepMs: 1_000,
   /** Пауза перед речью, когда сигнал звучит уже после закрытия окна ответа. */
   timeoutBeepMs: 1_000,
-  /**
-   * После объявления ответа пакета, если у ячейки есть звук или ролик ответа:
-   * столько ещё держим табло, чтобы клип успел прозвучать.
-   */
-  answerMediaHoldMs: 4_000,
   /** Кот в мешке: пауза на «мяу» перед первой фразой ведущей. */
   catMeowMs: 1_100,
   /** Аукцион: пауза на «динь-динь-динь» перед первой фразой. */
@@ -66,7 +61,6 @@ export const {
   buzzerWarningMs,
   buzzerBeepMs,
   timeoutBeepMs,
-  answerMediaHoldMs,
   catMeowMs,
   auctionDingMs,
   catAwayWaitMs,
@@ -109,3 +103,14 @@ export const commentaryHistoryMessages = 10
  * с запасом. Не для дословного чтения вопроса и не для вызова функций.
  */
 export const freeReplyMaxOutputTokens = 800
+
+/**
+ * Медиа ответа (картинка, звук, ролик) — при любом исходе с закрытой ячейкой, и после верного ответа тоже.
+ * Видны всё объявление и пока играет звук/ролик, но не меньше min и не больше max с момента показа
+ * (длинный клип обрезается на max).
+ */
+export const answerMediaMinMs = 3000
+export const answerMediaMaxMs = 10_000
+
+/** Паузы перед повторным подключением участника «Звуки игры» (мс): 1 с, 2 с, 5 с, потом каждые 10 с. */
+export const gameSoundsRetryDelaysMs = [1000, 2000, 5000, 10_000] as const

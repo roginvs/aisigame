@@ -20,7 +20,7 @@ describe('answerIsPublic', () => {
 })
 
 describe('publicAnswerHasPlayable', () => {
-  it('звук/ролик — после публичного эталона, картинка — и после верного, ячейка закрыта', () => {
+  it('любое медиа ответа при закрытой ячейке, и после верного тоже', () => {
     expect(
       publicAnswerHasPlayable({
         kind: 'nobody',
@@ -42,19 +42,14 @@ describe('publicAnswerHasPlayable', () => {
         answerMedia: [{ kind: 'image', name: 'art.png', url: 'blob:3' }],
       }),
     ).toBe(true)
-    // Картинку ответа показываем и после верного ответа; звук — нет.
     expect(
       publicAnswerHasPlayable({ kind: 'correct', cellClosed: true, answerMedia: [{ kind: 'image', name: 'art.png', url: 'blob:3' }] }),
     ).toBe(true)
     expect(
-      publicAnswerHasPlayable({ kind: 'incorrect', cellClosed: false, answerMedia: [{ kind: 'image', name: 'art.png', url: 'blob:3' }] }),
-    ).toBe(false)
+      publicAnswerHasPlayable({ kind: 'correct', cellClosed: true, answerMedia: [{ kind: 'audio', name: 'song.mp3', url: 'blob:1' }] }),
+    ).toBe(true)
     expect(
-      publicAnswerHasPlayable({
-        kind: 'correct',
-        cellClosed: true,
-        answerMedia: [{ kind: 'audio', name: 'song.mp3', url: 'blob:1' }],
-      }),
+      publicAnswerHasPlayable({ kind: 'incorrect', cellClosed: false, answerMedia: [{ kind: 'image', name: 'art.png', url: 'blob:3' }] }),
     ).toBe(false)
   })
 })

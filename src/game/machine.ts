@@ -10,7 +10,8 @@ import { earlyBuzzerMsFor } from './earlyBuzzer.ts'
 import { findQuestion, nextPlayableRound, questionById, questionsInRound } from './pack.ts'
 import { defaultPlayers, openingChooser } from './players.ts'
 import { demoPack } from './questions.ts'
-import { publicAnswerHasPlayable } from './reveal.ts'
+import { answerHasClip, publicAnswerHasPlayable } from './reveal.ts'
+import { answerMediaMaxMs, answerMediaMinMs } from '../options.ts'
 import { restoredMatch } from './savedGame.ts'
 import type { AnnounceKind, GameContext, GameEvent, JudgmentStatus, Player, PlayerId, QuestionPack, SpecialState } from './types.ts'
 
@@ -285,6 +286,15 @@ export function isReadingPath(path: string): boolean {
  * комментирует итог, табло уже на экране и выбирающий может открыть следующий
  * вопрос (выбор обрывает речь). Не во время апелляции, повтора и медиа ответа.
  */
+/** Сколько ещё держать медиа ответа после речи ведущей. */
+export function answerHoldLeft(context: GameContext, now: number): number {
+  const elapsed = now - (context.answerShownAt ?? now)
+  const question = questionById(context.questions, context.activeQuestionId)
+  const waitingClip = answerHasClip(question?.answerMedia) && !context.answerClipEnded
+  const until = waitingClip ? answerMediaMaxMs : answerMediaMinMs
+  return Math.max(0, Math.min(until, answerMediaMaxMs) - elapsed)
+}
+
 export function earlyPickOpen(path: string, context: GameContext): boolean {
   if (path !== 'announcing.speaking' && path !== 'announcing') return false
   if (isFinal(context) || context.announceKind === 'repeat') return false
@@ -353,7 +363,8 @@ export const gameMachine = setup({
     judgeMs: gameConfig.judgeMs,
     cellFlashMs: gameConfig.cellFlashMs,
     earlyLeft: ({ context }) => context.earlyLeftMs ?? gameConfig.earlyBuzzerMs,
-    answerMediaHoldMs: gameConfig.answerMediaHoldMs,
+    // С момента показа: пока играет звук/ролик — до max; потом (или без клипа) — добрать до min.
+    answerHoldLeft: ({ context }) => answerHoldLeft(context, Date.now()),
     catAwayWaitMs: catAwayWaitMs,
     idleStep: ({ context }) => idleDelay(context.idle),
   },
@@ -456,6 +467,8 @@ export const gameMachine = setup({
         judgmentReason: 'Апелляция: игрок подтвердил верный ответ', statusLine: 'Апелляция принята' }
     }),
     /** Минус только что получен — апелляция доступна сразу, ещё во время реплики ведущей. */
+    markAnswerShown: assign(() => ({ answerShownAt: Date.now(), answerClipEnded: false })),
+    markAnswerClipEnded: assign(() => ({ answerClipEnded: true })),
     openAppealNow: assign(({ context }) => {
       if (isFinal(context) || context.appeal?.activePlayerId != null || context.announceKind === 'repeat') return {}
       const questionId = context.activeQuestionId
@@ -1813,7 +1826,7 @@ export const gameMachine = setup({
     },
     announcing: {
       initial: 'speaking',
-      entry: ['clearTimer', 'openAppealNow'],
+      entry: ['clearTimer', 'openAppealNow', 'markAnswerShown'],
       states: {
         speaking: {
           on: {
@@ -1836,14 +1849,32 @@ export const gameMachine = setup({
           },
         },
         holding: {
-          after: {
-            answerMediaHoldMs: [
-              { guard: 'normalRound', target: '#game.afterQuestion' },
-              { guard: 'roundDoneHasNext', target: '#game.bridging', actions: 'advanceRound' },
-              { guard: 'roundDoneNoNext', target: '#game.finished' },
-              { target: '#game.choosing' },
+          on: {
+            ANSWER_MEDIA_ENDED: [
+              {
+                guard: ({ context }) => !context.answerClipEnded && answerHoldLeft({ ...context, answerClipEnded: true }, Date.now()) <= 0,
+                actions: 'markAnswerClipEnded',
+                target: 'leavingHold',
+              },
+              {
+                guard: ({ context }) => !context.answerClipEnded,
+                actions: 'markAnswerClipEnded',
+                target: 'holding',
+                reenter: true,
+              },
             ],
           },
+          after: {
+            answerHoldLeft: { target: 'leavingHold' },
+          },
+        },
+        leavingHold: {
+          always: [
+            { guard: 'normalRound', target: '#game.afterQuestion' },
+            { guard: 'roundDoneHasNext', target: '#game.bridging', actions: 'advanceRound' },
+            { guard: 'roundDoneNoNext', target: '#game.finished' },
+            { target: '#game.choosing' },
+          ],
         },
       },
     },

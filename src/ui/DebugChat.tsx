@@ -195,13 +195,14 @@ function bubbleClass(role: ChatRole): string {
   if (role === 'player') return 'from-player'
   if (role === 'judge') return 'from-judge'
   if (role === 'error') return 'from-error'
+  if (role === 'system') return 'from-system'
   return 'from-host'
 }
 
 function chatRole(detail: unknown): ChatRole {
   if (detail && typeof detail === 'object' && 'role' in detail) {
     const role = detail.role
-    if (role === 'host' || role === 'player' || role === 'judge' || role === 'error') return role
+    if (role === 'host' || role === 'player' || role === 'judge' || role === 'error' || role === 'system') return role
   }
   return 'host'
 }
@@ -224,5 +225,6 @@ function roleLabel(role: ChatRole): string {
   if (role === 'player') return 'Услышано'
   if (role === 'judge') return 'Оценка'
   if (role === 'error') return 'Ошибка'
+  if (role === 'system') return 'Игра'
   return 'Ведущая'
 }

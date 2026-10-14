@@ -3,7 +3,7 @@ import { buildCommit, pageOrigin } from '../buildInfo.ts'
 
 export type TraceKind = 'in' | 'out' | 'state' | 'chat' | 'note'
 
-export type ChatRole = 'host' | 'player' | 'judge' | 'error'
+export type ChatRole = 'host' | 'player' | 'judge' | 'error' | 'system'
 
 export type TraceEntry = {
   id: number
@@ -135,6 +135,13 @@ export function pushErrorLine(text: string): void {
   const clean = text.trim()
   if (!clean) return
   pushTrace('chat', 'Ошибка', { role: 'error' satisfies ChatRole, text: clean })
+}
+
+/** Короткая служебная строка в «Разговоре» (у всех). Модель её не получает. */
+export function pushSystemLine(text: string): void {
+  const clean = text.trim()
+  if (!clean) return
+  pushTrace('chat', 'Игра', { role: 'system' satisfies ChatRole, text: clean })
 }
 
 export function getTrace(): TraceEntry[] {

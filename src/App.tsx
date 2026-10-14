@@ -3,8 +3,8 @@ import { setIdleScale } from './game/idle.ts'
 import { setAppealScale } from './game/appeals.ts'
 import { useMachine } from '@xstate/react'
 import { gameSoundRoute, gameSoundStream, markGameSoundsBroken, playAuctionDing, playCatMeow, playTimeoutBeep, setGameSoundRoute, unlockAudio } from './audio/beep.ts'
-import { pushErrorLine, pushTrace } from './debug/trace.ts'
-import { gameSoundsErrorText } from './conference/media.ts'
+import { pushErrorLine, pushSystemLine, pushTrace } from './debug/trace.ts'
+import { gameSoundsErrorText, gameSoundsRestoredText } from './conference/media.ts'
 import { buildInviteUrl, parseInvite } from './conference/invite.ts'
 import { JoinerSession } from './conference/joinerSession.ts'
 import { MasterSession } from './conference/masterSession.ts'
@@ -689,6 +689,14 @@ export default function App() {
     pushErrorLine(gameSoundsErrorText)
   }
 
+  /** Повтор удался: снова в поток «Звуков игры» и короткая строка, только если был сбой. */
+  function gameSoundsRestored(): void {
+    if (gameSoundRoute() !== 'broken') return
+    gameSoundStream()
+    pushTrace('note', 'Звуки игры восстановлены')
+    pushSystemLine(gameSoundsRestoredText)
+  }
+
   function conferenceConnectionFailed(message: string): void {
     setConferenceError(message)
     if (conferenceHandleRef.current) {
@@ -795,6 +803,7 @@ export default function App() {
         publishHost: true,
         onError: conferenceConnectionFailed,
         onSoundsLost: gameSoundsLost,
+        onSoundsRestored: gameSoundsRestored,
       })
       attachConferenceHandle(handle)
       if (!useBroadcast && handle.publishSoundsStream) {
@@ -1371,6 +1380,7 @@ export default function App() {
       onStop={() => send({ type: 'STOP' })}
       onReset={exitToMenu}
       onNextRound={() => send({ type: 'NEXT_ROUND' })}
+      onAnswerMediaEnded={conferenceRole === 'joiner' ? undefined : () => send({ type: 'ANSWER_MEDIA_ENDED' })}
       modelMeter={conferenceRole === 'master' ? modelMeter : undefined}
       modelId={modelId}
       onModel={switchModel}

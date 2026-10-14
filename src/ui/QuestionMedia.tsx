@@ -11,8 +11,10 @@ export function QuestionMedia(props: {
   answer?: boolean
   /** Картинка и ролик ответа лежат в той же стопке, что и оставшийся звук вопроса. */
   answerUrls?: ReadonlySet<string>
+  /** Клип ответа доиграл до конца (клип ответа не зацикливается). */
+  onAnswerEnded?: () => void
 }) {
-  const { media, play, quiet, answer = false, answerUrls } = props
+  const { media, play, quiet, answer = false, answerUrls, onAnswerEnded } = props
   if (!media.length) return null
   return (
     <div className="question-media">
@@ -22,7 +24,8 @@ export function QuestionMedia(props: {
         const reveal = answer || Boolean(item.url && answerUrls?.has(item.url))
         if (item.kind === 'image') return <img key={item.url} src={item.url} alt={mediaLabel('image', reveal)} />
         return (
-          <QuestionClip key={item.url} kind={item.kind} url={item.url} live={live} label={mediaLabel(item.kind, reveal)} />
+          <QuestionClip key={item.url} kind={item.kind} url={item.url} live={live} label={mediaLabel(item.kind, reveal)}
+            once={reveal} onEnded={reveal ? onAnswerEnded : undefined} />
         )
       })}
     </div>
@@ -30,8 +33,13 @@ export function QuestionMedia(props: {
 }
 
 /** Звук или ролик без кнопок плеера: сам стартует и крутится, пока `live`. */
-export function QuestionClip(props: { kind: 'audio' | 'video'; url: string; live: boolean; label: string }) {
-  const { kind, url, live, label } = props
+export function QuestionClip(props: {
+  kind: 'audio' | 'video'; url: string; live: boolean; label: string
+  /** Клип ответа: играет один раз, конец сообщает `onEnded`. */
+  once?: boolean
+  onEnded?: () => void
+}) {
+  const { kind, url, live, label, once = false, onEnded } = props
   const nodeRef = useRef<HTMLMediaElement | null>(null)
   const [node, setNode] = useState<HTMLMediaElement | null>(null)
   const [audioOnlyVideo, setAudioOnlyVideo] = useState(false)
@@ -67,14 +75,15 @@ export function QuestionClip(props: { kind: 'audio' | 'video'; url: string; live
   return (
     <div className={showMeter ? 'question-clip has-meter' : 'question-clip'} role="group" aria-label={label}>
       {kind === 'audio' ? (
-        <audio ref={takeNode} src={url} data-live={live ? '1' : '0'} autoPlay={live} loop={live} preload="auto" />
+        <audio ref={takeNode} src={url} data-live={live ? '1' : '0'} autoPlay={live} loop={live && !once} preload="auto" onEnded={onEnded} />
       ) : (
         <video
           ref={takeNode}
           src={url}
           data-live={live ? '1' : '0'}
           autoPlay={live}
-          loop={live}
+          loop={live && !once}
+          onEnded={onEnded}
           playsInline
           preload="auto"
         />

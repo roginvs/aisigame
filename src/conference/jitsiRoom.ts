@@ -1,3 +1,4 @@
+import { gameSoundsRetryDelayMs } from './gameSoundsRetry.ts'
 import {
   HOST_JITSI_NAME,
   SOUNDS_JITSI_NAME,
@@ -355,6 +356,8 @@ export async function connectJitsiConference(input: {
   createHostParticipant?: boolean
   /** Мастер: участник «Звуки игры» не подключился или отпал. */
   onSoundsLost?: (message: string) => void
+  /** После успешного повторного подключения «Звуков игры». */
+  onSoundsRestored?: () => void
   onError?: (message: string) => void
 }): Promise<ConferenceHandle> {
   const base = input.jitsiBase.replace(/\/+$/, '')
@@ -464,6 +467,10 @@ export async function connectJitsiConference(input: {
   const localId = () => conference.myUserId() || 'local'
   let botHandle: ConferenceHandle | null = null
   let soundsHandle: ConferenceHandle | null = null
+  let soundsStream: MediaStream | null = null
+  let soundsRetryAttempt = 0
+  let soundsRetryTimer: number | null = null
+  let soundsConnecting = false
   const speakerActivity = createSpeakerActivity(() => emitTiles())
 
   function botParticipantId(): string | null {
@@ -825,8 +832,18 @@ export async function connectJitsiConference(input: {
     transport,
     ...(input.createHostParticipant ? {
       async publishSoundsStream(stream: MediaStream) {
-        if (!soundsHandle) throw new Error('Участник «Звуки игры» не подключён')
-        await soundsHandle.publishHostStream(stream)
+        soundsStream = stream
+        if (!soundsHandle) {
+          // Участника нет — попытки идут; поток опубликуем при успехе. App показывает ошибку.
+          input.onSoundsLost?.('не подключён')
+          scheduleSoundsRetry('ожидание участника')
+          return
+        }
+        try {
+          await soundsHandle.publishHostStream(stream)
+        } catch (error) {
+          dropSounds(error instanceof Error ? error.message : String(error))
+        }
       },
     } : {}),
     async publishHostStream(stream: MediaStream) {
@@ -1035,6 +1052,9 @@ export async function connectJitsiConference(input: {
       stopWatchingLocalMic()
       botHandle?.dispose()
       botHandle = null
+      if (soundsRetryTimer) window.clearTimeout(soundsRetryTimer)
+      soundsRetryTimer = null
+      soundsStream = null
       soundsHandle?.dispose()
       soundsHandle = null
       transport.close()
@@ -1084,25 +1104,81 @@ export async function connectJitsiConference(input: {
     }
   }
 
-  if (input.createHostParticipant) {
-    // Сбой не роняет комнату, но и локально эффекты не играем — App показывает ошибку.
+  async function connectSoundsBot(): Promise<boolean> {
+    if (disposed || soundsHandle || soundsConnecting) return Boolean(soundsHandle)
+    soundsConnecting = true
     try {
-      soundsHandle = await connectJitsiConference({
+      const next = await connectJitsiConference({
         jitsiBase: input.jitsiBase,
         roomName: input.roomName,
         displayName: SOUNDS_JITSI_NAME,
         bot: true,
-        // Обрыв служебного участника не роняет комнату: эффекты вернутся в динамик (App).
         onError: (message) => {
           pushTrace('note', `«Звуки игры»: ${message}`)
-          input.onSoundsLost?.(message)
+          dropSounds(message)
         },
       })
+      if (disposed) {
+        next.dispose()
+        return false
+      }
+      // Не плодим второго: если успели подключить параллельно — лишний отпускаем.
+      if (soundsHandle) {
+        next.dispose()
+        return true
+      }
+      soundsHandle = next
+      soundsRetryAttempt = 0
+      if (soundsRetryTimer) {
+        window.clearTimeout(soundsRetryTimer)
+        soundsRetryTimer = null
+      }
       emitTiles()
+      if (soundsStream) {
+        try {
+          await next.publishHostStream(soundsStream)
+        } catch (error) {
+          dropSounds(error instanceof Error ? error.message : String(error))
+          return false
+        }
+      }
+      input.onSoundsRestored?.()
+      return true
     } catch (error) {
       pushTrace('note', 'Участник «Звуки игры» не подключился', { error: String(error) })
-      soundsHandle = null
-      input.onSoundsLost?.(error instanceof Error ? error.message : String(error))
+      return false
+    } finally {
+      soundsConnecting = false
+    }
+  }
+
+  function dropSounds(reason: string): void {
+    if (disposed) return
+    soundsHandle?.dispose()
+    soundsHandle = null
+    input.onSoundsLost?.(reason)
+    // Повторяем, пока жива конференция.
+    scheduleSoundsRetry(reason)
+  }
+
+  function scheduleSoundsRetry(reason: string): void {
+    if (disposed || soundsHandle || soundsRetryTimer || soundsConnecting) return
+    const delay = gameSoundsRetryDelayMs(soundsRetryAttempt)
+    soundsRetryAttempt += 1
+    pushTrace('note', 'Повтор «Звуки игры»', { reason, delayMs: delay, attempt: soundsRetryAttempt })
+    soundsRetryTimer = window.setTimeout(() => {
+      soundsRetryTimer = null
+      void connectSoundsBot().then((ok) => {
+        if (!ok) scheduleSoundsRetry('повтор не удался')
+      })
+    }, delay)
+  }
+
+  if (input.createHostParticipant) {
+    const ok = await connectSoundsBot()
+    if (!ok) {
+      input.onSoundsLost?.('не подключился')
+      scheduleSoundsRetry('не подключился')
     }
   }
 

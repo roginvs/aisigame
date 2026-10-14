@@ -11,7 +11,7 @@ import { buttonsLive, earlyPickOpen, falseStartCooling, falseStartOpen, gameMach
 import { falseStartMs } from '../options.ts'
 import { currentRound, nextInCell, questionById, roundPrices, roundThemes } from '../game/pack.ts'
 import { choiceIsAnswer } from '../game/choices.ts'
-import { answerIsPublic, stageMedia, answerImageVisible } from '../game/reveal.ts'
+import { answerIsPublic, stageMedia, answerMediaVisible } from '../game/reveal.ts'
 import type { LinkStatus } from '../realtime/client.ts'
 import { voiceById, voiceModels } from '../realtime/models.ts'
 import { billedTokens, formatTokens, getUsageSnapshot, subscribeUsage, type UsageTotals } from '../realtime/usage.ts'
@@ -127,6 +127,8 @@ export function GameScreen(props: {
   onStop: () => void
   onReset: () => void
   onNextRound: () => void
+  /** Звук/ролик ответа доиграл (только у того, кто ведёт машину). */
+  onAnswerMediaEnded?: () => void
   modelId: string
   onModel: (id: string) => void
   audioJudgment?: boolean
@@ -169,7 +171,7 @@ export function GameScreen(props: {
     onHearTurnOnlyChange?: (value: boolean) => void
   }
 }) {
-  const { snapshot, link, onBuzz, onPick, onPause, onReset, onNextRound, modelId, onModel, conference } = props
+  const { snapshot, link, onBuzz, onPick, onPause, onReset, onNextRound, modelId, onModel, conference, onAnswerMediaEnded } = props
   const liveSnapshot = conference?.remoteContext
     ? { ...snapshot, context: conference.remoteContext, value: conference.remotePath ?? snapshot.value }
     : snapshot
@@ -338,14 +340,11 @@ export function GameScreen(props: {
   )
   const questionMedia = question?.media
   const answerMedia = question?.answerMedia
-  // После верного ответа эталон текстом не пишем, но картинку ответа показываем (ячейка уже закрыта).
-  const showAnswerImage = Boolean(
-    question && !showAnswer && answerRevealed &&
-      answerImageVisible(context.announceKind, context.playedIds.includes(question.id)),
+  // Медиа ответа — при любом исходе с закрытой ячейкой, и после верного (эталон текстом тогда не пишем).
+  const showAnswerMedia = Boolean(
+    question && answerRevealed && answerMediaVisible(context.announceKind, context.playedIds.includes(question.id)),
   )
-  const staged = showAnswerImage
-    ? stageMedia(questionMedia ?? [], (answerMedia ?? []).filter((item) => item.kind === 'image'), true)
-    : stageMedia(questionMedia ?? [], answerMedia ?? [], showAnswer)
+  const staged = stageMedia(questionMedia ?? [], answerMedia ?? [], showAnswerMedia)
   const held = paused || stopped
   const questionLive = questionClipPlaying({
     path,
@@ -355,10 +354,10 @@ export function GameScreen(props: {
   })
   /** Звук и ролик ответа — после речи ведущей, пока `announcing.holding`. */
   const answerLive =
-    showAnswer &&
+    showAnswerMedia &&
     !held &&
     (path === 'announcing.holding' || (paused && context.resumePath === 'announcing.holding'))
-  const quietQuestion = showAnswer
+  const quietQuestion = showAnswerMedia
     ? new Set(
         (questionMedia ?? [])
           .filter((item) => (item.kind === 'audio' || item.kind === 'video') && item.url)
@@ -566,8 +565,9 @@ export function GameScreen(props: {
             ) : null}
             <QuestionMedia
               media={staged.slot}
-              play={showAnswer ? answerLive : questionLive}
+              play={showAnswerMedia ? answerLive : questionLive}
               quiet={quietQuestion}
+              onAnswerEnded={onAnswerMediaEnded}
               answerUrls={new Set(staged.answerVisual.map((item) => item.url))}
             />
             {context.activePlayerId ? <p className="answerer">Отвечает игрок {context.activePlayerId}</p> : null}
@@ -578,9 +578,9 @@ export function GameScreen(props: {
             {showAnswer ? (
               <>
                 <p className="etalon">Правильный ответ: {question.answers.join(', ')}</p>
-                <QuestionMedia media={staged.answerAudio} play={answerLive} answer />
               </>
             ) : null}
+            {showAnswerMedia ? <QuestionMedia media={staged.answerAudio} play={answerLive} answer onAnswerEnded={onAnswerMediaEnded} /> : null}
           </article>
         ) : conference?.lobby ? (
           <ConferenceLobbyStatus

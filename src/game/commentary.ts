@@ -9,7 +9,7 @@ const maxHistoryChars = 24_000
 export function commentaryContext(context: GameContext | null, history: readonly ConferenceHistoryMessage[]): string {
   const rows: object[] = []
   let size = 0
-  for (const message of history.filter((item) => item.kind !== 'conversation' || item.role !== 'error').slice(-commentaryHistoryMessages).reverse()) {
+  for (const message of history.filter((item) => item.kind !== 'conversation' || (item.role !== 'error' && item.role !== 'system')).slice(-commentaryHistoryMessages).reverse()) {
     const row = message.kind === 'chat'
       ? { kind: 'chat', name: message.name.slice(0, 100), text: message.text.slice(0, 2000) }
       : { kind: message.role, text: message.text.slice(0, 2000), note: message.note?.slice(0, 1000) }

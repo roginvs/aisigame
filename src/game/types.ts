@@ -237,6 +237,7 @@ export type GameEvent =
   | { type: 'RESUME' }
   | { type: 'STOP' }
   | { type: 'NEXT_ROUND' }
+  | { type: 'ANSWER_MEDIA_ENDED' }
   | { type: 'RESET_GAME' }
   | { type: 'ADD_PLAYER'; player: Player }
   | { type: 'CAT_RECIPIENT'; playerId: PlayerId }
@@ -292,6 +293,10 @@ export type GameContext = AppealFields & {
   /** Остаток до ранней кнопки на чтении. Пауза хранит его, полоска таймера его не показывает. */
   earlyLeftMs: number | null
   earlyStartedAt: number | null
+  /** Когда начали объявлять исход (с этого момента видна картинка ответа). */
+  answerShownAt?: number | null
+  /** Звук/ролик ответа доиграл (или его нет): дальше держим только до минимума. */
+  answerClipEnded?: boolean
   /** Момент паузы. Пока игра стоит, штраф фальстарта от этой метки не тикает. */
   pauseStartedAt: number | null
   /** Время фальстарта игрока на этом вопросе. Вспышка и запрет кнопки длятся falseStartMs от этой метки. */
