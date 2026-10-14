@@ -2,7 +2,7 @@ import { auctionBidToolFor, finalBetToolFor, selectQuestionToolFor } from '../re
 import type { Actor, SnapshotFrom } from 'xstate'
 import { clearHostEar, getHostEar, subscribeHostEar, hostEarHearing, hostEarHostSpoke, hostEarMicClosed, hostEarProcessing, hostEarShown, hostEarSurvives, settleHostEar } from './hostEar.ts'
 import { playTimeoutBeep } from '../audio/beep.ts'
-import { auctionDingMs, audioJudgmentTimings, catMeowMs, lateTranscriptMs, transcriptWaitMs } from '../options.ts'
+import { mutedChooserMaxReminders, auctionDingMs, audioJudgmentTimings, catMeowMs, lateTranscriptMs, transcriptWaitMs } from '../options.ts'
 import { matchAuctionSpeech, optionLabel } from './auction.ts'
 import { matchCatStake, nextInCircle } from './cat.ts'
 import { idleThresholds } from './idle.ts'
@@ -47,7 +47,8 @@ type GameActor = Actor<typeof gameMachine>
 export type GameControllerActions = {
   remindMutedAnswerer: (playerName: string) => void
   /** Выбор вопроса: модель сама формулирует короткую фразу, каждый раз новую. */
-  remindMutedChooser: (playerName: string) => void
+  /** Мастер: микрофон выбирающего стабильно выключен (true) или включился (false). */
+  setChooserMicOff: (off: boolean) => void
 }
 
 const judgmentStatuses: JudgmentStatus[] = [
@@ -148,7 +149,6 @@ export function attachController(options: {
 
   let buzzerEarAt = 0
   /** Свежая речь на выборе / ответе — не долбить подсказкой «мик выкл.». */
-  let lastChooserSpeechAt = 0
   let lastAnswerSpeechAt = 0
   let overRead = false
   const held: Array<() => void> = []
@@ -253,7 +253,6 @@ export function attachController(options: {
       if (keepVoiceSession?.() && hostTalking) armLobbyBargeIn(itemId)
       return
     }
-    if (path.startsWith('choosing')) lastChooserSpeechAt = Date.now()
     if (earlyAnswerCue(path) && hostTalking) {
       armBargeIn(itemId, () => statePath(actor.getSnapshot().value) === path, 'ответ', () => {
         earlyAnswer = true
@@ -261,7 +260,7 @@ export function attachController(options: {
       })
       return
     }
-    if (path === 'choosing.listening' && hostTalking && hostPurpose === 'idleNudge') armBargeIn(itemId, () => statePath(actor.getSnapshot().value) === 'choosing.listening')
+    if (path === 'choosing.listening' && hostTalking && (hostPurpose === 'idleNudge' || hostPurpose === 'micWarning')) armBargeIn(itemId, () => statePath(actor.getSnapshot().value) === 'choosing.listening')
     if (path.startsWith('answering')) lastAnswerSpeechAt = Date.now()
     if (isReadingPath(path) || path === 'falseStartCue') {
       overRead = true
@@ -352,7 +351,6 @@ export function attachController(options: {
       actor.send({ type: 'PLAYER_SPEECH_STARTED' })
     }
     if (statePath(actor.getSnapshot().value) === 'choosing.listening') {
-      lastChooserSpeechAt = Date.now()
       settle(considerChoice(durationMs, itemId))
       return
     }
@@ -432,6 +430,12 @@ export function attachController(options: {
     actor.send({ type: 'IDLE_SPEECH', active })
   })
   let lastIdleNudges = actor.getSnapshot().context.idleNudges ?? 0
+  /** Микрофон выбирающего (от мастера, уже со стабилизацией) и сколько раз за его ход напомнили. */
+  let chooserMic: { chooserId: PlayerId | null; off: boolean; reminded: number } = { chooserId: null, off: false, reminded: 0 }
+  function chooserMicOffNow(context: GameContext): boolean {
+    if (chooserMic.chooserId !== context.chooserId) chooserMic = { chooserId: context.chooserId, off: false, reminded: 0 }
+    return chooserMic.off && chooserMic.reminded < mutedChooserMaxReminders
+  }
 
   let previousRound = actor.getSnapshot().context.roundIndex
   const subscription = actor.subscribe((snapshot) => {
@@ -441,7 +445,12 @@ export function attachController(options: {
     if (nudges !== lastIdleNudges) {
       lastIdleNudges = nudges
       if (path === previousPath && isIdlePath(path)) {
-        if (path === 'choosing.listening') {
+        if (path === 'choosing.listening' && chooserMicOffNow(snapshot.context)) {
+          // Микрофон выбирающего выключен: обычное напоминание говорит про микрофон (не больше N раз за ход).
+          chooserMic = { ...chooserMic, reminded: chooserMic.reminded + 1 }
+          choosingOffer = null
+          speakWhileListening('micWarning', mutedMicCue(playerName(snapshot.context.players, snapshot.context.chooserId)))
+        } else if (path === 'choosing.listening') {
           const reminder = pickChoosingReminder(snapshot.context)
           choosingOffer = reminder.offer
           client.setTranscriptionPrompt(listeningPrompt(snapshot.context, choosingOffer))
@@ -1474,10 +1483,11 @@ export function attachController(options: {
       if (Date.now() - lastAnswerSpeechAt < gameConfig.mutedAnswerReminderMs) return
       speakWhileListening('micWarning', mutedAnswerMicCue(playerName))
     },
-    remindMutedChooser(playerName) {
-      if (statePath(actor.getSnapshot().value) !== 'choosing.listening') return
-      if (Date.now() - lastChooserSpeechAt < gameConfig.mutedAnswerReminderMs) return
-      speakWhileListening('micWarning', mutedMicCue(playerName))
+    setChooserMicOff(off) {
+      const chooserId = actor.getSnapshot().context.chooserId
+      if (!off) { chooserMic = { chooserId, off: false, reminded: 0 }; return }
+      // Повторное «выключен» того же выбирающего счётчик не сбрасывает.
+      chooserMic = chooserMic.chooserId === chooserId ? { ...chooserMic, off: true } : { chooserId, off: true, reminded: 0 }
     },
   })
 

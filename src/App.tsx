@@ -75,7 +75,7 @@ import { GameScreen } from './ui/GameScreen.tsx'
 import { JoinConfirmScreen } from './ui/JoinConfirmScreen.tsx'
 import { StartScreen } from './ui/StartScreen.tsx'
 import type { GameVoice } from './realtime/client.ts'
-import { mutedAnswerReminderMs, mutedChooserRepeatMs } from './options.ts'
+import { mutedAnswerReminderMs, mutedMicStableMs } from './options.ts'
 
 const initialLink: LinkStatus = { connection: 'idle', mic: 'idle', host: 'idle' }
 const pageParams = new URLSearchParams(window.location.search)
@@ -349,7 +349,6 @@ export default function App() {
     : undefined
   const chooserMicLive = chooserTile?.micLive
   const chooserId = chooser?.id ?? null
-  const chooserName = chooser?.name ?? ''
   hostSpeakingRef.current = link.host
   const answerAttemptKey = answerer
     ? `${snapshot.context.activeQuestionId ?? ''}:${snapshot.context.attemptId}:${answerer.id}`
@@ -410,42 +409,21 @@ export default function App() {
     snapshot.context.attemptId,
   ])
 
+  // Микрофон выбирающего: «выключен» передаём контроллеру, только если он выключен mutedMicStableMs подряд
+  // (мигание дорожки при переподключении не в счёт); «включён» — сразу. Напоминание говорит обычный
+  // 20-секундный цикл выбора, не чаще mutedChooserMaxReminders раз за ход.
   useEffect(() => {
-    if (
-      conferenceRole !== 'master' ||
-      path !== 'choosing.listening' ||
-      chooserId === null ||
-      !chooserParticipantId ||
-      chooserMicLive !== false
-    ) {
+    const actions = controllerActionsRef.current
+    if (conferenceRole !== 'master' || chooserId === null || !chooserParticipantId || chooserMicLive !== false) {
+      actions?.setChooserMicOff(false)
       return
     }
-    let stopped = false
-    let timer = 0
-    const tick = () => {
-      if (stopped) return
-      const current = actor.getSnapshot()
-      if (statePath(current.value) !== 'choosing.listening' || current.context.chooserId !== chooserId) return
+    const timer = window.setTimeout(() => {
       const liveTile = conferenceTilesRef.current.find((tile) => tile.id === chooserParticipantId)
-      if (!liveTile || liveTile.micLive) return
-      if (hostSpeakingRef.current === 'speaking') {
-        timer = window.setTimeout(tick, 400)
-        return
-      }
-      const actions = controllerActionsRef.current
-      if (!actions) {
-        timer = window.setTimeout(tick, 400)
-        return
-      }
-      actions.remindMutedChooser(chooserName)
-      timer = window.setTimeout(tick, mutedChooserRepeatMs)
-    }
-    timer = window.setTimeout(tick, mutedAnswerReminderMs)
-    return () => {
-      stopped = true
-      window.clearTimeout(timer)
-    }
-  }, [actor, chooserId, chooserMicLive, chooserName, chooserParticipantId, conferenceRole, path])
+      if (liveTile && !liveTile.micLive) controllerActionsRef.current?.setChooserMicOff(true)
+    }, mutedMicStableMs)
+    return () => window.clearTimeout(timer)
+  }, [chooserId, chooserMicLive, chooserParticipantId, conferenceRole])
 
   useEffect(() => {
     if (suppressSave.current) {

@@ -7,7 +7,6 @@ export const matchTimings = {
   /** В конференции столько ждём перед подсказкой о выключенном микрофоне. */
   mutedAnswerReminderMs: 3_000,
   /** Пока выбирают вопрос, ту же подсказку повторяем с этим интервалом. */
-  mutedChooserRepeatMs: 5_000,
   clarifyMs: 10_000,
   judgeMs: 20_000,
   cellFlashMs: 1080,
@@ -46,7 +45,6 @@ export const {
   stealBuzzerMs,
   answerMs,
   mutedAnswerReminderMs,
-  mutedChooserRepeatMs,
   clarifyMs,
   judgeMs,
   cellFlashMs,
@@ -138,3 +136,9 @@ export function transcriptWaitMs(durationMs: number): number {
   return Math.min(transcriptWait.maxMs, Math.round(transcriptWait.baseMs + transcriptWait.perSpeechMs * spoken))
 }
 
+
+/** Микрофон считается выключенным, только если он выключен столько подряд (мигание дорожки не в счёт). */
+export const mutedMicStableMs = 2_500
+
+/** Сколько раз за ход выбирающего обычное напоминание говорит про выключенный микрофон. */
+export const mutedChooserMaxReminders = 2

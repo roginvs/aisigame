@@ -286,7 +286,7 @@ describe('attachController answer listening', () => {
     actor.send({ type: 'BUZZER_PRESSED', playerId: 1 })
     expect(statePath(actor.getSnapshot().value)).toBe('answering.waiting')
 
-    actions().remindMutedChooser('Маша')
+    actions().setChooserMicOff(true)
     expect(statePath(actor.getSnapshot().value)).toBe('answering.waiting')
 
     actions().remindMutedAnswerer('Игрок 1')
@@ -304,22 +304,35 @@ describe('attachController answer listening', () => {
     actor.stop()
   })
 
-  it('на выборе вопроса просит модель самой сказать про микрофон и не уходит из выбора', async () => {
+  it('микрофон выбирающего выключен: обычное напоминание говорит про микрофон, не больше двух раз за ход', async () => {
     const client = new MockRealtimeClient()
     const requestSpeech = vi.spyOn(client, 'requestSpeech')
     const { actor, stop, actions } = await boot(client)
-    expect(statePath(actor.getSnapshot().value)).toBe('choosing.listening')
-
-    actions().remindMutedChooser('Маша')
-    const cue = String(requestSpeech.mock.calls.at(-1)?.[2] ?? '')
-    expect(requestSpeech).toHaveBeenLastCalledWith('micWarning', expect.any(Number), cue, undefined, true)
-    expect(cue).toContain('Маша')
+    await toChoosing(actor)
+    actions().setChooserMicOff(true)
+    requestSpeech.mockClear()
+    // Три напоминания подряд (20/40/60 с): два про микрофон, третье обычное.
+    for (let i = 0; i < 3; i += 1) {
+      const nudges = actor.getSnapshot().context.idleNudges ?? 0
+      for (let t = 0; t < 400 && (actor.getSnapshot().context.idleNudges ?? 0) === nudges && statePath(actor.getSnapshot().value) === 'choosing.listening'; t += 1) await vi.advanceTimersByTimeAsync(100)
+    }
+    expect(requestSpeech.mock.calls.filter((call) => call[0] === 'micWarning')).toHaveLength(2)
+    const cue = String(requestSpeech.mock.calls.find((call) => call[0] === 'micWarning')?.[2] ?? '')
     expect(cue).toContain('Ситуация:')
     expect(cue).toContain('новыми словами')
-    expect(cue).not.toContain('микрофон-то выключен')
-    await vi.advanceTimersByTimeAsync(80)
-    expect(statePath(actor.getSnapshot().value)).toBe('choosing.listening')
+    stop()
+    actor.stop()
+  })
 
+  it('отдельного цикла про микрофон нет: до напоминания выбора тишина', async () => {
+    const client = new MockRealtimeClient()
+    const requestSpeech = vi.spyOn(client, 'requestSpeech')
+    const { actor, stop, actions } = await boot(client)
+    await toChoosing(actor)
+    actions().setChooserMicOff(true)
+    requestSpeech.mockClear()
+    await vi.advanceTimersByTimeAsync(10_000)
+    expect(requestSpeech.mock.calls.filter((call) => call[0] === 'micWarning')).toHaveLength(0)
     stop()
     actor.stop()
   })
@@ -330,7 +343,7 @@ describe('attachController answer listening', () => {
     const { actor, stop, actions } = await boot(client)
     expect(statePath(actor.getSnapshot().value)).toBe('choosing.listening')
 
-    actions().remindMutedChooser('Маша')
+    actions().setChooserMicOff(true)
     actor.send({ type: 'PAUSE', path: 'choosing.listening' })
     expect(statePath(actor.getSnapshot().value)).toBe('paused')
     await vi.advanceTimersByTimeAsync(80)
@@ -583,24 +596,6 @@ describe('attachController answer listening', () => {
       getTrace().some((entry) => entry.kind === 'note' && String(entry.title).includes('поздняя речь ответа')),
     ).toBe(true)
     expect(statePath(actor.getSnapshot().value)).toBe('answering.waiting')
-
-    stop()
-    actor.stop()
-  })
-
-  it('не напоминает про микрофон сразу после свежей речи на выборе', async () => {
-    const client = new MockRealtimeClient()
-    const requestSpeech = vi.spyOn(client, 'requestSpeech')
-    const { actor, stop, actions } = await boot(client)
-    expect(statePath(actor.getSnapshot().value)).toBe('choosing.listening')
-
-    // Короткий звук остаётся в listening, но помечает свежую речь.
-    client.hear('кх', 400)
-    await vi.advanceTimersByTimeAsync(80)
-    expect(statePath(actor.getSnapshot().value)).toBe('choosing.listening')
-    requestSpeech.mockClear()
-    actions().remindMutedChooser('Bella')
-    expect(requestSpeech).not.toHaveBeenCalled()
 
     stop()
     actor.stop()
