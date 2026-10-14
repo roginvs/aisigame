@@ -23,7 +23,8 @@ test('картинка ответа видна, когда никто не на�
   await page.getByRole('button', { name: 'Показ, 100', exact: true }).click()
   await expect(page.getByRole('img', image)).toBeVisible({ timeout: 30_000 })
   await expectLoaded(page)
-  await expect(page.getByRole('article')).toContainText('Правильный ответ')
+  await expect(page.getByRole('article')).not.toContainText('Правильный ответ')
+  await expect(page.getByRole('complementary', { name: 'Разговор' }).getByText(/Правильный ответ:/).first()).toBeVisible()
 })
 
 test('конференция: картинка ответа у мастера и у игрока', async ({ browser }) => {

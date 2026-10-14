@@ -1157,7 +1157,6 @@ button.continue-with-file .continue-file {
 
 .question .eyebrow,
 .question .choices,
-.question .etalon,
 .question .timer-bar,
 .question > p {
   flex: 0 0 auto;
@@ -1492,7 +1491,6 @@ button.continue-with-file .continue-file {
 }
 
 
-.etalon { color: #b7c4d2; }
 
 .players {
   display: grid;

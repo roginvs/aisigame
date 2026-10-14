@@ -38,7 +38,9 @@ test('верный ответ голосом', async ({ page }) => {
   await hear(page, 'Август')
   await expect(page.getByText('Верно.')).toBeVisible()
   await expect(page.getByRole('group', { name: 'Игрок 1: 100' })).toBeVisible()
-  await expect(page.getByText(/Правильный ответ:/)).toBeVisible()
+  await expect(page.getByRole('complementary', { name: 'Разговор' }).getByText(/Правильный ответ:/).first()).toBeVisible()
+  // Эталон, «Разобрала» и «Отвечает …» — только в «Разговоре», не на карточке вопроса.
+  await expect(page.locator('.question', { hasText: /Правильный ответ|Разобрала|Отвечает/ })).toHaveCount(0)
   await board(page)
   await expect(page.getByRole('grid', { name: 'Игровое поле' })).not.toContainText('Правильный ответ')
   await expect(page.getByRole('button', { name: 'Текст, 100, сыграно' })).toBeDisabled()
@@ -72,9 +74,7 @@ test('никто не нажал: сигнал и ответ пакета, сч�
       { timeout: 12_000 },
     )
     .toBe(true)
-  // The answer shows on the card («Правильный ответ: …») and in the host bubble of «Разговор». Which of
-  // them is on screen depends on timing: on a slow run the card has already gone back to the board.
-  // Either one proves the pack answer was published; strict getByText would see two matches.
+  // The answer shows in «Разговор» (host bubble and the «Правильный ответ: …» note); strict getByText would see two matches.
   await expect(page.getByText('Герман Титов').first()).toBeVisible({ timeout: 8_000 })
   await expect(page.getByRole('button', { name: 'Космос, 100, сыграно' })).toBeDisabled()
   await expect(page.getByRole('group', { name: 'Игрок 1: 0' })).toBeVisible()
@@ -196,7 +196,8 @@ test('картинка, звук, ролик, выбор, вопрос без т
   })
   await buzz(page, 'Игрок 3')
   await hear(page, 'мимо')
-  await expect(page.getByRole('article')).toContainText('Правильный ответ')
+  await expect(page.getByRole('article')).not.toContainText('Правильный ответ')
+  await expect(page.getByRole('complementary', { name: 'Разговор' }).getByText(/Правильный ответ:/).first()).toBeVisible()
   await expect(page.getByRole('img', { name: 'Иллюстрация к ответу' })).toBeVisible()
 })
 

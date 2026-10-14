@@ -573,12 +573,6 @@ export function GameScreen(props: {
             {showTimer && context.phaseStartedAt !== null && context.phaseDurationMs !== null ? (
               <Countdown startedAt={context.phaseStartedAt} durationMs={context.phaseDurationMs} />
             ) : null}
-            {context.heard ? <p>Разобрала: {context.heard}</p> : null}
-            {showAnswer ? (
-              <>
-                <p className="etalon">Правильный ответ: {question.answers.join(', ')}</p>
-              </>
-            ) : null}
             {showAnswerMedia ? <QuestionMedia media={staged.answerAudio} play={answerLive} answer onAnswerEnded={onAnswerMediaEnded} /> : null}
           </article>
         ) : conference?.lobby ? (
