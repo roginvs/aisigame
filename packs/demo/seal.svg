@@ -1,5 +1,5 @@
 <svg xmlns="http://www.w3.org/2000/svg" width="240" height="240" viewBox="0 0 240 240">
   <circle cx="120" cy="120" r="96" fill="#e2c27a"/>
   <circle cx="120" cy="120" r="72" fill="none" stroke="#121920" stroke-width="6"/>
-  <text x="120" y="132" text-anchor="middle" font-size="42" font-family="sans-serif" fill="#121920"></text>
+  <text x="120" y="132" text-anchor="middle" font-size="42" font-family="sans-serif" fill="#121920">П</text>
 </svg>

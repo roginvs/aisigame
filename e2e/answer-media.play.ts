@@ -12,6 +12,7 @@ test('картинка ответа видна после верного отв�
   await hear(page, 'печать')
   await expect(page.getByRole('group', { name: 'Игрок 1: 100' })).toBeVisible()
   await expect(page.getByRole('img', image)).toBeVisible()
+  await expectLoaded(page)
   // Не мелькает: держится и после конца речи (удержание answerMediaHoldMs).
   await page.waitForTimeout(2500)
   await expect(page.getByRole('img', image)).toBeVisible()
@@ -21,6 +22,7 @@ test('картинка ответа видна, когда никто не на�
   await startDemo(page)
   await page.getByRole('button', { name: 'Показ, 100', exact: true }).click()
   await expect(page.getByRole('img', image)).toBeVisible({ timeout: 30_000 })
+  await expectLoaded(page)
   await expect(page.getByRole('article')).toContainText('Правильный ответ')
 })
 
@@ -94,4 +96,9 @@ function localInviteUrl(invite: string, masterUrl: string): string {
   url.protocol = master.protocol
   url.host = master.host
   return url.href
+}
+
+/** Картинка не «битая»: браузер её декодировал. */
+async function expectLoaded(page: Page): Promise<void> {
+  await expect.poll(() => page.getByRole('img', image).evaluate((node) => (node as HTMLImageElement).naturalWidth)).toBeGreaterThan(0)
 }
