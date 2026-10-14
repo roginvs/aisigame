@@ -323,7 +323,7 @@ export function attachController(options: {
     }
     if (path === 'finalBets.asking' || path === 'finalBets.hearing') {
       actor.send({ type: 'PLAYER_SPEECH_FINISHED' })
-      settle(considerBet(itemId))
+      settle(considerBet(itemId, durationMs))
       return
     }
     if (specialListening(path)) {
@@ -1124,9 +1124,9 @@ export function attachController(options: {
     actor.send({ type: 'BET_PLACED', playerId, amount })
   }
 
-  async function considerBet(itemId: string | null): Promise<void> {
+  async function considerBet(itemId: string | null, durationMs: number): Promise<void> {
     const epoch = betEpoch
-    const heard = await client.waitForTranscript(itemId, 2200)
+    const heard = await client.waitForTranscript(itemId, transcriptWaitMs(durationMs))
     if (epoch !== betEpoch) return
     const snapshot = actor.getSnapshot()
     if (statePath(snapshot.value) !== 'finalBets.resolving') return
@@ -1245,8 +1245,10 @@ export function attachController(options: {
 
   async function requestTextJudgment(run: NonNullable<typeof judgeRun>): Promise<void> {
     const { context, itemId } = run
+    // Та же формула, что везде (transcriptWaitMs), но не дольше оставшегося окна оценки.
+    const answerWait = Math.min(transcriptWaitMs(answerDurationMs), run.clock.remaining())
     const heard = itemId
-      ? await run.clock.within(() => client.waitForTranscript(itemId, Math.min(2200, run.clock.remaining())), Math.min(2200, run.clock.remaining()))
+      ? await run.clock.within(() => client.waitForTranscript(itemId, answerWait), answerWait)
       : { text: '', arrived: false, confidence: null as number | null }
     await run.clock.active()
     if (!judgeLive(run) || run.clock.remaining() <= 0) return

@@ -810,3 +810,24 @@ describe('спорный ответ: модели — объяснение си�
     stop(); actor.stop()
   })
 })
+
+describe('оценка ждёт расшифровку по общей формуле transcriptWaitMs', () => {
+  afterEach(() => { vi.useRealTimers(); vi.unstubAllGlobals() })
+
+  it('длинный ответ: расшифровка через 3,5 с (больше прежних 2,2 с) ещё попадает в оценку', async () => {
+    const client = new MockRealtimeClient()
+    const tool = vi.spyOn(client, 'requestTool')
+    const { actor, stop } = await boot(client)
+    await toChoosing(actor)
+    actor.send({ type: 'QUESTION_SELECTED', themeId: 'v', value: 200 })
+    for (let i = 0; i < 40 && statePath(actor.getSnapshot().value) !== 'buzzing.open'; i += 1) await vi.advanceTimersByTimeAsync(100)
+    actor.send({ type: 'BUZZER_PRESSED', playerId: 1 })
+    const item = client.hearDeferred(5000)
+    await vi.advanceTimersByTimeAsync(3500)
+    client.deliverTranscript(item, 'мой ответ')
+    await vi.advanceTimersByTimeAsync(100)
+    const judge = tool.mock.calls.find((call) => call[0] === 'judge')
+    expect(judge?.[3]).toContain('Реплика игрока: «мой ответ»')
+    stop(); actor.stop()
+  })
+})
