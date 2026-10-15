@@ -208,3 +208,11 @@ export const buzzNudge = {
   cooldownMs: 5000,
   sampleMs: 50,
 } as const
+
+/** Метрики экрана в дебаг-логе (`src/debug/displayMetrics.ts`, docs/DEBUG.md «[экран]»). */
+export const displayMetricsLog = {
+  /** Пауза после последнего resize/поворота/смены DPR перед записью: одна строка на серию. */
+  debounceMs: 800,
+  /** Повтор той же записи: мастер хранит лишь хвост лога игрока, стартовая строка может вытесниться. */
+  repeatMs: 5 * 60_000,
+}

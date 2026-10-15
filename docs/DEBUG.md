@@ -38,3 +38,10 @@
 - `микрофон выбирающего выключен (стабильно)` / `включён`; `напоминание выбирающему…`; `напоминание отвечающему…` или почему пропущено.
 - `ведущая говорит и слушает (можно перебить): <цель>`; `речь поверх обращения ведущей — ждём, не эхо ли`.
 - Открытие/закрытие микрофона модели — строки `связь …, микрофон live/muted`.
+
+## [экран] — метрики экрана
+
+Каждая вкладка (мастер, игрок, общий стол) пишет `[экран] метрики экрана: <причина>` (`src/debug/displayMetrics.ts`, ставится в `main.tsx`): `screen` (width/height/avail*), `window` (inner*/outer*), `document.clientWidth/Height`, `visualViewport` (width/height/scale), `devicePixelRatio`, `zoomEstimate` (оценка зума браузера: outerWidth/innerWidth; на телефонах обычно 1 и не значит ничего), `screen.orientation`, userAgent/platform, касание (`maxTouchPoints`, `pointer: coarse`, `hover`), `prefers-reduced-motion`, тёмная/светлая тема.
+Причины: `старт`; `размер окна`, `поворот`, `visualViewport (зум/клавиатура)`, `devicePixelRatio (зум/другой монитор)` — после серии событий с паузой `displayMetricsLog.debounceMs` (800 мс), только если что-то изменилось; `повтор` — раз в `repeatMs` (5 мин), потому что мастер хранит лишь 160 последних записей игрока и стартовая строка может вытесниться.
+У игрока строки уходят мастеру вместе с остальным логом (`debugLog`) и видны в дампе мастера в `## remote player trace`; полный набор — в дампе самого игрока.
+Воспроизвести: Playwright `viewport = window.inner*`, `deviceScaleFactor = devicePixelRatio`.
