@@ -25,6 +25,7 @@ import { ConferenceLobbyStatus } from './ConferenceLobbyStatus.tsx'
 import { ConferenceMediaControls } from './ConferenceVideoStrip.tsx'
 import { ConferencePlayersRow } from './ConferencePlayersRow.tsx'
 import { AirStatus } from './airStatus.tsx'
+import { buzzerLabel } from './buzzerLabel.ts'
 import { buzzKeyLabel, isKeyboardPlayer, playerFromBuzzKey } from './buzzKeys.ts'
 import { ConversationChat } from './DebugChat.tsx'
 import { packProgressLabel } from '../conference/packProgress.ts'
@@ -723,7 +724,7 @@ export function GameScreen(props: {
                   disabled={appealState ? !appealState.enabled : cooling || ((missed || !buttonsOpen) && !canFalseStart)}
                   {...tapPressProps(() => onPlayerAction(playerId))}
                 >
-                  {appealState?.label ?? (chooses ? 'выбирайте вопрос' : missed ? 'Уже отвечал' : player.name)}
+                  {buzzerLabel({ appealLabel: appealState?.label, cooling, normal: chooses ? 'выбирайте вопрос' : missed ? 'Уже отвечал' : player.name })}
                   {earlyLive ? <span className="visually-hidden">, вопрос ещё читается</span> : null}
                 </button>
                 )}

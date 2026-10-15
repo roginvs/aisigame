@@ -64,6 +64,18 @@ function shared(html: string): string {
 describe('мастер и гость рисуют один и тот же снимок одинаково', () => {
   afterEach(() => resetTimerAnchor())
 
+  it('фальстарт другого игрока: «Фальстарт» на его кнопке у мастера и у гостя', () => {
+    const actor = start()
+    actor.send({ type: 'QUESTION_SELECTED', themeId: 't', value: 200 })
+    actor.send({ type: 'BUZZER_PRESSED', playerId: 1 })
+    expect(actor.getSnapshot().context.falseStarts[1]).toBeDefined()
+    const master = render(actor, true)
+    const joiner = render(actor, false) // гость — игрок 2, фальстарт у игрока 1 (мастера)
+    expect(master).toContain('>Фальстарт<')
+    expect(joiner).toContain('>Фальстарт<')
+    expect(shared(joiner)).toBe(shared(master))
+  })
+
   it('выбор, вопрос и пауза: экран совпадает кроме панели мастера', () => {
     const actor = start()
     const phases: string[] = []

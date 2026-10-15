@@ -1,6 +1,7 @@
 import { AppealConfirm } from './AppealConfirm.tsx'
 import { packProgressLabel } from '../conference/packProgress.ts'
 import { tapPressProps } from './tapPress.ts'
+import { buzzerLabel } from './buzzerLabel.ts'
 import type { ConferenceTile } from '../conference/media.ts'
 import type { RosterEntry } from '../conference/roster.ts'
 import type { Player, PlayerId } from '../game/types.ts'
@@ -188,13 +189,11 @@ export function ConferencePlayersRow(props: {
                 disabled={displayOnly || (appealState ? !appealState.enabled : cooling || ((missed || !buttonsOpen) && !canFalseStart))}
                 {...tapPressProps(() => onBuzz(playerId))}
               >
-                {appealState ? appealState.label : chooses
-                  ? 'выбирайте вопрос'
-                  : missed
-                    ? 'Уже отвечал'
-                    : buttonsOpen || canFalseStart
-                      ? 'Жмите'
-                      : '\u00a0'}
+                {buzzerLabel({
+                  appealLabel: appealState?.label,
+                  cooling,
+                  normal: chooses ? 'выбирайте вопрос' : missed ? 'Уже отвечал' : buttonsOpen || canFalseStart ? 'Жмите' : '\u00a0',
+                })}
                 {earlyLive ? <span className="visually-hidden">, вопрос ещё читается</span> : null}
               </button>
               )}
