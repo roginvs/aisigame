@@ -9,7 +9,14 @@ export function resetTimerAnchor(): void {
   timerAnchor = null
 }
 
-export function anchoredPhaseStart(snapshot: ConferenceSnapshot, now = Date.now()): number | null {
+/** Когда снимок пришёл: остаток таймера верен на этот момент, а не на момент перерисовки. */
+const receivedAt = new WeakMap<ConferenceSnapshot, number>()
+
+export function anchoredPhaseStart(snapshot: ConferenceSnapshot, renderNow = Date.now()): number | null {
+  // Экран перерисовывается и без нового снимка (плитки, чат); если брать «сейчас» рендера, старый
+  // остаток сдвигает начало фазы вперёд на возраст снимка — полоска прыгает назад, затем вперёд.
+  const now = receivedAt.get(snapshot) ?? renderNow
+  if (!receivedAt.has(snapshot)) receivedAt.set(snapshot, now)
   if (snapshot.timerRemainingMs === null || snapshot.phaseDurationMs === null || snapshot.phase === 'paused') {
     timerAnchor = null
     return null
@@ -88,4 +95,9 @@ function statusForPhase(phase: string): string {
   if (phase.startsWith('buzzing') || phase.startsWith('answering')) return 'Жмите кнопку'
   if (phase.startsWith('reading')) return 'Ведущая читает вопрос'
   return 'Партия идёт'
+}
+
+/** Мастер: точное начало фазы из своей машины, когда снимок о той же фазе. */
+export function withExactPhaseStart(context: GameContext, phaseStartedAt: number | null | undefined): GameContext {
+  return phaseStartedAt === undefined ? context : { ...context, phaseStartedAt }
 }

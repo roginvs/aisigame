@@ -255,7 +255,7 @@ XState сначала **не добавляет фаз**: registry readiness в�
 
 Фактически изменены `client.ts`, `speechMatch.ts`, `mockClient.ts`, `tools.ts`, `controller.ts`, `judgment.ts`, `App.tsx`, `options.ts`, `trace.ts`. Добавлены `audioItems.ts`, `judgmentRequest.ts`, `judgmentClock.ts` и тесты. Capability хранится в judgmentRequest.ts и дополнительно проверяет отсутствие стороннего wire; провода Grok/Gemini, фабрика, машина, saved game и протокол конференции изменений не требуют. Source/refs/budgets остаются runtime-данными, в историю идёт только одна принятая строка heard. В function schema playerId теперь integer без ограничения тремя игроками: допустимость id по-прежнему проверяет машина.
 
-Для текущей сессии в «Скопировать дебаг» искать `judgment mode`, `audio judgment result`, `audio judgment fallback`, `judgment shadow result`, `judgment shadow comparison`. Метки содержат requested/actual mode, модель, попытку, источник, задержку и причину. Сырой audio/base64 дополнительно вычищается из trace. Сравнение shadow не публикуется игрокам и не исправляет очки.
+Для текущей сессии в «Скачать дебаг» искать `judgment mode`, `audio judgment result`, `audio judgment fallback`, `judgment shadow result`, `judgment shadow comparison`. Метки содержат requested/actual mode, модель, попытку, источник, задержку и причину. Сырой audio/base64 дополнительно вычищается из trace. Сравнение shadow не публикуется игрокам и не исправляет очки.
 
 Автоматические проверки: `npm test`, `npm run build`, `npm run look -- e2e/audio-judgment.play.ts e2e/match.play.ts e2e/resume.play.ts e2e/conference.play.ts`. Unit покрывают и реальные JSON-события OpenAI; они не являются записанным live fixture.
 

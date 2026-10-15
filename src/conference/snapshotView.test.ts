@@ -52,3 +52,21 @@ describe('гость рисует паузу и ошибку как мастер
     expect(guest.error).toBe('Ведущая отключилась')
   })
 })
+
+describe('полоска таймера не дёргается от перерисовок', () => {
+  it('тот же снимок при поздней перерисовке даёт то же начало фазы', async () => {
+    const { anchoredPhaseStart, resetTimerAnchor } = await import('./snapshotView.ts')
+    resetTimerAnchor()
+    const snap = { phase: 'buzzing.open', phaseDurationMs: 5000, timerRemainingMs: 4000, activeQuestionId: 'q', attemptId: 1 } as never
+    const first = anchoredPhaseStart(snap, 10_000)
+    expect(anchoredPhaseStart(snap, 11_500)).toBe(first)
+    const next = { ...(snap as object), timerRemainingMs: 2500 } as never
+    expect(anchoredPhaseStart(next, 11_500)).toBe(first)
+  })
+  it('мастер берёт точное начало фазы', async () => {
+    const { withExactPhaseStart } = await import('./snapshotView.ts')
+    const ctx = { phaseStartedAt: 1 } as never
+    expect(withExactPhaseStart(ctx, 42)).toMatchObject({ phaseStartedAt: 42 })
+    expect(withExactPhaseStart(ctx, undefined)).toBe(ctx)
+  })
+})

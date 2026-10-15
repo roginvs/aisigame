@@ -99,13 +99,17 @@ test('экран вопроса без скроллбаров и с нормал
 
   await expect(page.locator('.tech-column')).toHaveCount(0)
   const copyDebug = page.locator('.debug-copy')
-  await expect(copyDebug).toHaveAccessibleName('Скопировать дебаг')
+  await expect(copyDebug).toHaveAccessibleName('Скачать дебаг')
   await expect(copyDebug).toBeVisible()
   const copyWidth = (await copyDebug.boundingBox())?.width
+  const downloadPromise = page.waitForEvent('download')
   await copyDebug.click()
-  await expect(copyDebug).toHaveAccessibleName(/Скопировано ~[\d,]+ (КБ|МБ)/)
+  const download = await downloadPromise
+  expect(download.suggestedFilename()).toMatch(/^aisigame-debug-\d{4}-\d{2}-\d{2}_\d{2}-\d{2}-\d{2}\.txt$/)
+  expect(await download.path().then((file) => import('node:fs').then((fs) => fs.readFileSync(file, 'utf8')))).toContain('# AI SI Game debug')
+  await expect(copyDebug).toHaveAccessibleName(/Скачано ~[\d,]+ (КБ|МБ)/)
   expect((await copyDebug.boundingBox())?.width).toBe(copyWidth)
-  await expect(copyDebug).toHaveAccessibleName('Скопировать дебаг', { timeout: 3_000 })
+  await expect(copyDebug).toHaveAccessibleName('Скачать дебаг', { timeout: 3_000 })
   expect((await copyDebug.boundingBox())?.width).toBe(copyWidth)
   await expect(page.getByRole('button', { name: 'Пропустить раунд' })).toBeVisible()
   expect(logs.some((line) => line.includes('[aisigame'))).toBe(true)

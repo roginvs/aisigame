@@ -31,3 +31,10 @@ describe('diag', () => {
     expect(typeof env.android).toBe('boolean')
   })
 })
+
+describe('debugFileName', () => {
+  it('местное время, безопасное для файлов имя', async () => {
+    const { debugFileName } = await import('./trace.ts')
+    expect(debugFileName(new Date(2026, 9, 15, 22, 55, 3))).toBe('aisigame-debug-2026-10-15_22-55-03.txt')
+  })
+})

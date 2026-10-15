@@ -18,7 +18,7 @@ import { billedTokens, formatTokens, getUsageSnapshot, subscribeUsage, type Usag
 import type { AppealRequest, GameContext, PlayerId } from '../game/types.ts'
 import type { ConferenceMessageRing, ConferenceSnapshot } from '../conference/messages.ts'
 import type { RosterEntry } from '../conference/roster.ts'
-import { copyDebugDump, formatDebugSize } from '../debug/trace.ts'
+import { downloadDebugDump, formatDebugSize } from '../debug/trace.ts'
 import type { ConferenceTile } from '../conference/media.ts'
 import { ConferenceLobbyStatus } from './ConferenceLobbyStatus.tsx'
 import { ConferenceMediaControls } from './ConferenceVideoStrip.tsx'
@@ -235,9 +235,9 @@ export function GameScreen(props: {
   const confirmYes = () => { if (confirmingId === null) return; setConfirmAppeal(null); sendAppeal(confirmingId) }
   const confirmNo = () => setConfirmAppeal(null)
 
-  async function copyDebug() {
-    const result = await copyDebugDump({ path, context })
-    setCopyFeedback(result.ok ? `Скопировано ${formatDebugSize(result.bytes)}` : 'Не скопировалось')
+  function copyDebug() {
+    const result = downloadDebugDump({ path, context })
+    setCopyFeedback(result.ok ? `Скачано ${formatDebugSize(result.bytes)}` : 'Не скачалось')
     window.clearTimeout(copyResetRef.current)
     copyResetRef.current = window.setTimeout(() => setCopyFeedback(null), 2_000)
   }
@@ -476,17 +476,17 @@ export function GameScreen(props: {
           <button
             type="button"
             className="ghost debug-copy"
-            aria-label={copyFeedback ?? 'Скопировать дебаг'}
-            title={copyFeedback ?? 'Скопировать дебаг'}
-            onClick={() => void copyDebug()}
+            aria-label={copyFeedback ?? 'Скачать дебаг'}
+            title={copyFeedback ?? 'Скачать дебаг'}
+            onClick={copyDebug}
           >
             <span aria-hidden="true">🔧</span>
             <span className="debug-copy-label btn-label" aria-hidden="true">
-              <span className={copyFeedback ? 'debug-copy-hidden' : undefined}>Скопировать дебаг</span>
+              <span className={copyFeedback ? 'debug-copy-hidden' : undefined}>Скачать дебаг</span>
               <span className={copyFeedback ? undefined : 'debug-copy-hidden'}>
-                {copyFeedback ?? 'Скопировано ~0 КБ'}
+                {copyFeedback ?? 'Скачано ~0 КБ'}
               </span>
-              <span className="debug-copy-reserve">Скопировано ~999 МБ</span>
+              <span className="debug-copy-reserve">Скачано ~999 МБ</span>
             </span>
           </button>
           {conference && !conference.isMaster ? null : (

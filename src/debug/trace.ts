@@ -262,33 +262,39 @@ export function formatDebugDump(extra: { path: string; context: unknown }): stri
   return lines.join('\n')
 }
 
-export type CopyDebugResult = { ok: boolean; bytes: number }
+export type DownloadDebugResult = { ok: boolean; bytes: number; fileName: string }
 
-export async function copyDebugDump(extra: { path: string; context: unknown }): Promise<CopyDebugResult> {
+/** Имя файла дампа по местному времени: aisigame-debug-2026-10-15_22-55-03.txt. */
+export function debugFileName(date = new Date()): string {
+  const two = (value: number) => String(value).padStart(2, '0')
+  const day = `${date.getFullYear()}-${two(date.getMonth() + 1)}-${two(date.getDate())}`
+  const time = `${two(date.getHours())}-${two(date.getMinutes())}-${two(date.getSeconds())}`
+  return `aisigame-debug-${day}_${time}.txt`
+}
+
+/**
+ * Скачивает дамп файлом: Blob + `<a download>` (работает и в Chrome на Android,
+ * в отличие от буфера обмена с большим текстом).
+ */
+export function downloadDebugDump(extra: { path: string; context: unknown }, now = new Date()): DownloadDebugResult {
   const text = formatDebugDump(extra)
-  const bytes = new TextEncoder().encode(text).byteLength
+  const blob = new Blob([text], { type: 'text/plain;charset=utf-8' })
+  const fileName = debugFileName(now)
   try {
-    await navigator.clipboard.writeText(text)
-    return { ok: true, bytes }
+    const url = URL.createObjectURL(blob)
+    const link = document.createElement('a')
+    link.href = url
+    link.download = fileName
+    link.rel = 'noopener'
+    link.style.display = 'none'
+    document.body.append(link)
+    link.click()
+    link.remove()
+    // Отзываем не сразу: Android Chrome начинает загрузку асинхронно.
+    window.setTimeout(() => URL.revokeObjectURL(url), 30_000)
+    return { ok: true, bytes: blob.size, fileName }
   } catch {
-    const area = document.createElement('textarea')
-    area.value = text
-    area.setAttribute('readonly', 'true')
-    area.style.position = 'fixed'
-    area.style.top = '0'
-    area.style.left = '0'
-    document.body.append(area)
-    area.focus()
-    area.select()
-    area.setSelectionRange(0, text.length)
-    let copied = false
-    try {
-      copied = document.execCommand('copy')
-    } catch {
-      copied = false
-    }
-    area.remove()
-    return { ok: copied, bytes }
+    return { ok: false, bytes: blob.size, fileName }
   }
 }
 
