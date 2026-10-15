@@ -63,10 +63,4 @@ describe('полоска таймера не дёргается от перер�
     const next = { ...(snap as object), timerRemainingMs: 2500 } as never
     expect(anchoredPhaseStart(next, 11_500)).toBe(first)
   })
-  it('мастер берёт точное начало фазы', async () => {
-    const { withExactPhaseStart } = await import('./snapshotView.ts')
-    const ctx = { phaseStartedAt: 1 } as never
-    expect(withExactPhaseStart(ctx, 42)).toMatchObject({ phaseStartedAt: 42 })
-    expect(withExactPhaseStart(ctx, undefined)).toBe(ctx)
-  })
 })

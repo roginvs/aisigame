@@ -23,7 +23,7 @@ import {
   writeStartMatchMode,
   type MatchMode,
 } from './conference/prefs.ts'
-import { contextFromSnapshot, withExactPhaseStart } from './conference/snapshotView.ts'
+import { contextFromSnapshot } from './conference/snapshotView.ts'
 import { jitsiHostFromBase, stripInviteParams } from './conference/stripInvite.ts'
 import { focusedModelParticipantId } from './conference/audioMix.ts'
 import type { ConferenceHandle, ConferenceTile } from './conference/media.ts'
@@ -1291,10 +1291,8 @@ export default function App() {
           )
         : null
   // Мастер и гость рисуют экран из одного снимка: у мастера — из того, что он разослал.
-  // Мастер знает точное начало фазы из своей машины: якорь по остатку — только у гостей.
-  const masterViewContext = conferenceRole === 'master' && masterSnapshot && pack
-    ? withExactPhaseStart(contextFromSnapshot(masterSnapshot, pack), masterSnapshot.phase === path ? snapshot.context.phaseStartedAt : undefined)
-    : null
+  // Экран мастера — тот же путь, что у гостей (снимок, якорь по моменту получения; у мастера задержка ≈0).
+  const masterViewContext = conferenceRole === 'master' && masterSnapshot && pack ? contextFromSnapshot(masterSnapshot, pack) : null
   const viewSnapshot = conferenceRole === 'master' ? (masterViewContext ? masterSnapshot : null) : joinerSnapshot
   const viewContext = conferenceRole === 'master' ? masterViewContext : joinerViewContext
   const joinerSelfId = conferenceRole === 'joiner' ? readJoinClientId() : masterClientId

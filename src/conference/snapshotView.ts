@@ -97,7 +97,3 @@ function statusForPhase(phase: string): string {
   return 'Партия идёт'
 }
 
-/** Мастер: точное начало фазы из своей машины, когда снимок о той же фазе. */
-export function withExactPhaseStart(context: GameContext, phaseStartedAt: number | null | undefined): GameContext {
-  return phaseStartedAt === undefined ? context : { ...context, phaseStartedAt }
-}

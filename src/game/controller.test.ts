@@ -1,3 +1,4 @@
+import { focusedModelParticipantId } from '../conference/audioMix.ts'
 import { createActor } from 'xstate'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { gameConfig } from '../config.ts'
@@ -187,6 +188,7 @@ describe('attachController choice', () => {
     const speech = vi.spyOn(client, 'requestSpeech')
     const interrupt = vi.spyOn(client, 'interruptSpeech')
     const tools = vi.spyOn(client, 'requestTool')
+    const mic = vi.spyOn(client, 'setMicEnabled')
     const { actor, stop } = await boot(client, pack, () => [])
     actor.send({ type: 'HOST_AUDIO_FINISHED', purpose: 'welcome' })
     actor.send({ type: 'QUESTION_SELECTED', themeId: 's', value: 400 })
@@ -200,11 +202,17 @@ describe('attachController choice', () => {
     expect(call?.[2]).toContain(actor.getSnapshot().context.players[0]!.name)
     expect(call?.[2]).toContain('Каждый раз формулируй иначе')
     expect(call?.[2]).not.toMatch(/«[^»]*отвечайте/i)
+    // Слух открыт до начала обращения, а не после него.
+    const callOrder = speech.mock.invocationCallOrder[speech.mock.calls.findIndex(([purpose]) => purpose === 'buzzCall')]!
+    expect(mic.mock.calls.some(([on], i) => on === true && mic.mock.invocationCallOrder[i]! < callOrder)).toBe(true)
+    expect(focusedModelParticipantId(statePath(actor.getSnapshot().value), null, 'p-answerer')).toBe('p-answerer')
     const before = interrupt.mock.calls.length
     client.hear('мой ответ', 1200)
     await vi.advanceTimersByTimeAsync(100)
     expect(interrupt.mock.calls.length).toBeGreaterThan(before)
-    expect(tools.mock.calls.some(([purpose]) => purpose === 'judge')).toBe(true)
+    const judge = tools.mock.calls.find(([purpose]) => purpose === 'judge')
+    expect(judge?.[3]).toContain('мой ответ')
+    expect(getTrace().map((e) => e.title).some((t) => /эхо|отброшен/.test(t))).toBe(false)
     stop()
     actor.stop()
   })
