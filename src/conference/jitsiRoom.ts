@@ -1,3 +1,4 @@
+import { reopenAudioOutputs } from '../audio/beep.ts'
 import { gameSoundsRetryDelayMs } from './gameSoundsRetry.ts'
 import {
   HOST_JITSI_NAME,
@@ -706,6 +707,7 @@ export async function connectJitsiConference(input: {
     watchLocalMic(next)
     await conference.addTrack(next)
     await Promise.resolve(next.unmute())
+    reopenAudioOutputs()
     micLive = true
     syncModelMixer()
     conferenceAudio.resume()

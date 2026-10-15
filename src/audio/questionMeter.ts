@@ -1,4 +1,4 @@
-import { gameAudioContext } from './beep.ts'
+import { gameAudioContext, gameOutput } from './beep.ts'
 
 const silenceRms = 0.012
 const loudRms = 0.28
@@ -48,7 +48,7 @@ export function attachQuestionMeter(element: HTMLMediaElement): QuestionMeterGra
 
   source.connect(limiter)
   limiter.connect(makeup)
-  makeup.connect(ctx.destination)
+  makeup.connect(gameOutput(ctx))
 
   source.connect(splitter)
   splitter.connect(left, 0)

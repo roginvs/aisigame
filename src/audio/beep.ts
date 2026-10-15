@@ -1,4 +1,4 @@
-import { primeConferencePlayback } from '../conference/conferenceAudio.ts'
+import { primeConferencePlayback, refreshConferenceSinks } from '../conference/conferenceAudio.ts'
 import { buzzerBeepMs } from '../options.ts'
 
 let audioContext: AudioContext | null = null
@@ -42,7 +42,7 @@ export function markGameSoundsBroken(): boolean {
 function soundOutput(ctx: AudioContext): AudioNode | null {
   if (soundRoute === 'remote' || soundRoute === 'broken') return null
   if (soundRoute === 'stream') return soundSink && soundSink.context === ctx ? soundSink : null
-  return ctx.destination
+  return gameOutput(ctx)
 }
 
 const pipCount = 3
@@ -52,7 +52,65 @@ const pipGapSeconds = 0.07
 export function unlockAudio(): void {
   const ctx = ensureContext()
   void ctx.resume()
+  gameOutput(ctx)
+  void bus?.element?.play().catch(() => undefined)
   primeConferencePlayback()
+}
+
+/**
+ * Android Chrome: пока открыт микрофон, Chrome в режиме разговора, и качелька громкости
+ * управляет потоком «звонок». Звук WebRTC (участники Jitsi) идёт туда, а выход AudioContext,
+ * открытый до микрофона, остаётся на потоке «медиа» — второй ползунок, тихо и не той кнопкой.
+ * Поэтому на Android весь звук игры (ведущая у мастера, клипы вопросов, пи-пи-пи) идёт
+ * через MediaStream в скрытый `<audio>`, как дорожки конференции, а после открытия микрофона
+ * этот элемент и дорожки конференции переподключаются — их вывод создаётся заново уже в режиме разговора.
+ */
+type OutputBus = { ctx: AudioContext; input: GainNode; element: HTMLAudioElement | null; stream: MediaStream | null }
+let bus: OutputBus | null = null
+
+export function routesGameAudioThroughElement(userAgent = typeof navigator === 'undefined' ? '' : navigator.userAgent): boolean {
+  return /Android/i.test(userAgent)
+}
+
+/** Общий выход звука игры: вместо `ctx.destination`. */
+export function gameOutput(ctx: AudioContext = ensureContext()): AudioNode {
+  if (!routesGameAudioThroughElement()) return ctx.destination
+  if (bus && bus.ctx === ctx) return bus.input
+  const input = ctx.createGain()
+  let element: HTMLAudioElement | null = null
+  let stream: MediaStream | null = null
+  if (routesGameAudioThroughElement() && typeof document !== 'undefined' && document.body && typeof ctx.createMediaStreamDestination === 'function') {
+    const destination = ctx.createMediaStreamDestination()
+    input.connect(destination)
+    stream = destination.stream
+    element = document.createElement('audio')
+    element.autoplay = true
+    element.setAttribute('playsinline', 'true')
+    element.setAttribute('data-game-audio', '')
+    element.style.cssText = 'position:fixed;left:0;bottom:0;width:1px;height:1px;opacity:0;pointer-events:none'
+    element.srcObject = stream
+    document.body.append(element)
+    void element.play().catch(() => undefined)
+  } else {
+    input.connect(ctx.destination)
+  }
+  bus = { ctx, input, element, stream }
+  return input
+}
+
+/**
+ * Вызвать сразу после открытия микрофона: заново создать вывод звука игры и дорожек конференции,
+ * чтобы на Android он попал в поток «звонок», которым управляет качелька.
+ */
+export function reopenAudioOutputs(): void {
+  if (!routesGameAudioThroughElement()) return
+  const element = bus?.element
+  if (element && bus?.stream) {
+    element.srcObject = null
+    element.srcObject = bus.stream
+    void element.play().catch(() => undefined)
+  }
+  refreshConferenceSinks()
 }
 
 /** Контекст, который открывает жест старта. Индикатор вопроса берёт его же, чтобы не остаться suspended. */

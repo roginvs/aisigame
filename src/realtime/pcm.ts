@@ -1,4 +1,4 @@
-import { gameAudioContext } from '../audio/beep.ts'
+import { gameAudioContext, gameOutput, reopenAudioOutputs } from '../audio/beep.ts'
 
 /** Тихая дорожка без getUserMedia — сессия модели в конференции до кнопки микрофона. */
 export function createSilentMicStream(): MediaStream {
@@ -65,7 +65,7 @@ export class PcmPlayer {
     for (let index = 0; index < pcm.length; index += 1) channel[index] = (pcm[index] ?? 0) / 32768
     const source = ctx.createBufferSource()
     source.buffer = buffer
-    source.connect(ctx.destination)
+    source.connect(gameOutput(ctx))
     if (this.hostTap) source.connect(this.hostTap)
     const epoch = this.epoch
     const startAt = Math.max(ctx.currentTime + 0.02, this.next)
@@ -159,6 +159,7 @@ export class PcmMic {
       this.ownStream = await navigator.mediaDevices.getUserMedia({
         audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true },
       })
+      reopenAudioOutputs()
     }
     for (const track of this.ownStream.getAudioTracks()) track.enabled = false
     this.ensureGraph()

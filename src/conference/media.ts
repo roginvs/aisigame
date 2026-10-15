@@ -1,3 +1,4 @@
+import { reopenAudioOutputs } from '../audio/beep.ts'
 /** Display name of the model bot in Jitsi; never shown as a video tile. */
 export const HOST_JITSI_NAME = 'Ведущая'
 
@@ -93,6 +94,7 @@ export function createBroadcastMedia(displayName: string): ConferenceMedia & { d
         micStream = await navigator.mediaDevices.getUserMedia({
           audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true },
         })
+        reopenAudioOutputs()
       }
       if (micStream) {
         for (const track of micStream.getAudioTracks()) track.enabled = live

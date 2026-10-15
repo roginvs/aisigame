@@ -1,4 +1,4 @@
-import { unlockAudio } from '../audio/beep.ts'
+import { reopenAudioOutputs, unlockAudio } from '../audio/beep.ts'
 import { gameConfig, hostInstructions, withHostRules } from '../config.ts'
 import { recordResponseUsage, resetUsage } from './usage.ts'
 import { livePlayerChatVisible } from './liveSpeech.ts'
@@ -271,6 +271,7 @@ export class RealtimeClient {
             autoGainControl: true,
           },
         })
+        reopenAudioOutputs()
       } else {
         mic = createSilentMicStream()
       }

@@ -9,6 +9,8 @@ export type ConferenceAudioSink = {
   play: () => Promise<void>
   pause: () => void
   release: () => void
+  /** Переподключить тот же поток: браузер заново создаёт вывод звука. */
+  refresh?: () => void
 }
 
 export type ConferenceAudioOutput = {
@@ -118,6 +120,11 @@ export function createConferenceAudioOutput(takeSink: () => ConferenceAudioSink 
   }
 }
 
+/** После открытия микрофона: заново создать вывод уже играющих дорожек (Android, поток «звонок»). */
+export function refreshConferenceSinks(): void {
+  for (const sink of active) sink.refresh?.()
+}
+
 function takeDomSink(): ConferenceAudioSink {
   const sink = pool.pop() ?? createDomSink()
   active.add(sink)
@@ -157,6 +164,13 @@ function createDomSink(): ConferenceAudioSink & { prime: () => void } {
     },
     pause() {
       audio.pause()
+    },
+    refresh() {
+      const stream = audio.srcObject
+      if (!stream) return
+      audio.srcObject = null
+      audio.srcObject = stream
+      void audio.play().catch(() => undefined)
     },
     release() {
       active.delete(sink)
