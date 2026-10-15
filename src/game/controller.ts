@@ -3,7 +3,7 @@ import { auctionBidToolFor, finalBetToolFor, selectQuestionToolFor } from '../re
 import type { Actor, SnapshotFrom } from 'xstate'
 import { clearHostEar, getHostEar, subscribeHostEar, hostEarHearing, hostEarHostSpoke, hostEarMicClosed, hostEarProcessing, hostEarShown, hostEarSurvives, settleHostEar } from './hostEar.ts'
 import { playTimeoutBeep } from '../audio/beep.ts'
-import { mutedChooserMaxReminders, auctionDingMs, audioJudgmentTimings, catMeowMs, lateTranscriptMs, transcriptWaitMs } from '../options.ts'
+import { bargeInSustainMs, mutedChooserMaxReminders, auctionDingMs, audioJudgmentTimings, catMeowMs, lateTranscriptMs, transcriptWaitMs } from '../options.ts'
 import { matchAuctionSpeech, optionLabel } from './auction.ts'
 import { matchCatStake, nextInCircle } from './cat.ts'
 import { idleThresholds } from './idle.ts'
@@ -276,10 +276,15 @@ export function attachController(options: {
       diag('обрыв', 'модель услышала речь во время чтения — чтение НЕ обрываем, только отмечаем', { path, itemId, hostTalking })
       return
     }
-    if (path === 'choosing.clarifying' || specialClarifying(path) || path === 'chooserHandoff') {
-      client.interruptSpeech('речь на переспросе выбора')
-      if (path === 'chooserHandoff') actor.send({ type: 'PLAYER_SPEECH_STARTED' })
-      else actor.send({ type: 'PLAYER_SPEECH_STARTED' })
+    if (deferredBargeIn(path)) {
+      if (!hostTalking) {
+        actor.send({ type: 'PLAYER_SPEECH_STARTED' })
+        return
+      }
+      // Голый VAD — не повод обрывать ведущую: шум 1,3 с (дамп 15.10) обрывал переспрос.
+      // Обрываем, если речь длится bargeInSustainMs или расшифровка подтвердила речь (onSpeechStopped).
+      diag('обрыв', 'речь на переспросе — ждём подтверждения, ведущую пока не обрываем', { path, itemId, sustainMs: bargeInSustainMs })
+      armBargeIn(itemId, () => statePath(actor.getSnapshot().value) === path, 'переспрос', () => actor.send({ type: 'PLAYER_SPEECH_STARTED' }), bargeInSustainMs)
       return
     }
     if (path === 'finalBets.asking') {
@@ -356,9 +361,10 @@ export function attachController(options: {
       actor.send({ type: 'PLAYER_SPEECH_FINISHED' })
       return
     }
-    if (path === 'choosing.clarifying') {
-      client.interruptSpeech('конец речи на переспросе выбора')
-      actor.send({ type: 'PLAYER_SPEECH_STARTED' })
+    if (deferredBargeIn(path)) {
+      clearLobbyBargeIn()
+      settle(confirmBargeIn(path, durationMs, itemId))
+      return
     }
     if (statePath(actor.getSnapshot().value) === 'choosing.listening') {
       settle(considerChoice(durationMs, itemId))
@@ -413,7 +419,29 @@ export function attachController(options: {
     armBargeIn(itemId, () => statePath(actor.getSnapshot().value) === 'startMenu' && Boolean(keepVoiceSession?.()), 'лобби')
   }
   /** Игрок говорит дольше порога поверх ведущей — обрываем её (лобби, напоминания выбора). */
-  function armBargeIn(itemId: string | null, still: () => boolean, where = 'выбор', onCut?: () => void): void {
+  /**
+   * Речь, пока ведущая говорит на переспросе (выбор, кот, аукцион, передача хода), закончилась
+   * до порога bargeInSustainMs: обрываем ведущую, только если расшифровка — речь, а не пусто/эхо.
+   */
+  async function confirmBargeIn(path: string, durationMs: number, itemId: string | null): Promise<void> {
+    const heard = await client.waitForTranscript(itemId, transcriptWaitMs(durationMs))
+    if (statePath(actor.getSnapshot().value) === path) {
+      const text = heard.text.trim()
+      if (!text || echoesHost(text) || echoesChoicePrompt(text, listeningPrompt(actor.getSnapshot().context))) {
+        pushTrace('note', `переспрос: не речь (${text || 'пусто'}) — ведущую не обрываем`)
+        if (path === 'choosing.clarifying') choiceCaption(itemId, '')
+        return
+      }
+      pushTrace('note', `переспрос: речь подтверждена расшифровкой — обрываем ведущую: ${text}`)
+      client.interruptSpeech('речь на переспросе подтверждена')
+      actor.send({ type: 'PLAYER_SPEECH_STARTED' })
+    }
+    const next = statePath(actor.getSnapshot().value)
+    if (next === 'choosing.listening') return considerChoice(durationMs, itemId)
+    if (specialListening(next)) return considerSpecial(next, durationMs, itemId)
+  }
+
+  function armBargeIn(itemId: string | null, still: () => boolean, where = 'выбор', onCut?: () => void, minMs = LOBBY_BARGE_IN_MIN_MS): void {
     clearLobbyBargeIn()
     lobbyBargeTimer = window.setTimeout(() => {
       lobbyBargeTimer = 0
@@ -427,7 +455,7 @@ export function attachController(options: {
       pushTrace('note', `${where}: игрок перебил ведущую — замолкаем и слушаем`)
       client.interruptSpeech('перебивание ведущей игроком')
       onCut?.()
-    }, LOBBY_BARGE_IN_MIN_MS)
+    }, minMs)
   }
 
   // Отсчёт тишины в машине стоит, пока игрок говорит (ухо ведущей) или говорит ведущая.
@@ -1612,6 +1640,11 @@ export function specialListening(path: string): boolean {
     path === 'auction.asking' ||
     path === 'auction.listening'
   )
+}
+
+/** Переспрос/передача хода: ведущую обрывает подтверждённая речь, а не голый VAD. */
+function deferredBargeIn(path: string): boolean {
+  return path === 'choosing.clarifying' || specialClarifying(path) || path === 'chooserHandoff'
 }
 
 function specialClarifying(path: string): boolean {

@@ -833,6 +833,28 @@ describe('выбор ячейки голосом: тема в любой фор�
     expect(actor.getSnapshot().context.activeQuestionId).toBe('v-200')
     stop(); actor.stop()
   })
+
+  it('шум на переспросе не обрывает ведущую; подтверждённая речь — обрывает', async () => {
+    const client = new MockRealtimeClient()
+    const interrupt = vi.spyOn(client, 'interruptSpeech')
+    const { actor, stop } = await boot(client)
+    await toChoosing(actor)
+    client.setSpeechMs(15_000)
+    client.hear('просто болтовня без темы', 1200)
+    await vi.advanceTimersByTimeAsync(300)
+    expect(statePath(actor.getSnapshot().value)).toBe('choosing.clarifying')
+    interrupt.mockClear()
+    client.hearAudio('', '', 1000)
+    await vi.advanceTimersByTimeAsync(2000)
+    expect(interrupt).not.toHaveBeenCalled()
+    expect(statePath(actor.getSnapshot().value)).toBe('choosing.clarifying')
+    expect(getTrace().some((entry) => entry.kind === 'note' && entry.title.includes('переспрос: не речь'))).toBe(true)
+    client.hear('Волга 200', 900)
+    await vi.advanceTimersByTimeAsync(300)
+    expect(interrupt).toHaveBeenCalled()
+    expect(actor.getSnapshot().context.activeQuestionId).toBe('v-200')
+    stop(); actor.stop()
+  })
 })
 
 import { judgmentMediaNote } from './controller.ts'
