@@ -425,11 +425,13 @@ choosing ──QUESTION_SELECTED [selectedAuction]─▶ auction.announcing → 
 
 Контекст: `outcomes[questionId][playerId] = { amount, attemptId, correct }` — один текущий итог пары (−номинал, 0, +номинал). `settleOutcome` начисляет `новый − прежний`; результат с `attemptId` не новее сохранённого ничего не меняет. `appeal` — текущее окно: `questionId`, `windowId` (из счётчика `appealSerial`), `stage` (`open` — вопрос ещё открыт, `closed` — после закрытия), FIFO `queue`, `activePlayerId`, `lastPlayerId` (право в окне перехвата), сохранённый `chooserId`, `remainingMs`/`startedAt` (`appealWindowMs` = 5 000, пауза хранит остаток). Право (`eligibleAppealPlayers`): есть итог по вопросу, `amount ≤ 0`, не `correct`.
 
+Термины: **переответ** — `stage: open`; **оспаривание** — `stage: closed` (`appealConfirm`) в **окне при выборе** (`choosing.*`) или **окне итогов** (`roundSummaryWindow`).
+
 Новые узлы:
 
-- `afterQuestion` — развилка после объявления закрытого обычного вопроса (и после `announcing.holding`). Если есть право: последний вопрос раунда → `appealWindow`, иначе → `choosing` с открытым окном `closed` (`openClosedAppeals`). Без права — прежние ветки (`bridging` с `advanceRound`, `finished`, `choosing`).
-- `appealWindow` — только последний вопрос раунда: 5 секунд, `roundIndex` не меняется, финалистов не собирают. Если дальше есть раунд, `appeal.summary = 'pending'` и контроллер говорит `roundSummary` (раунд окончен, счёт каждого, «впереди второй/третий/финальный раунд», кто выбирает). По `appealLeft`, пока итог ещё звучит, окно закрывается для заявок (`timeUp`), фраза дослушивается; `HOST_AUDIO_FINISHED` purpose `roundSummary` после этого → `appealEnd`. `appealEnd` после сказанного итога → `choosing` с `advanceRound` (мост `bridging` не повторяется); без итога — прежние `bridging`/`finished`/`choosing`. Заявка во время итога прерывает его; после серии окно и итог с новым счётом начинаются заново.
-- `appealCue` — ведущая по имени просит повторить ответ, вопрос не перечитывает. `HOST_AUDIO_FINISHED` purpose `appeal` → `answering` с новой `attemptId` и обычными таймерами.
+- `afterQuestion` — развилка после объявления закрытого обычного вопроса (и после `announcing.holding`). Если есть право: последний вопрос раунда → `roundSummaryWindow`, иначе → `choosing` с открытым окном `closed` (`openClosedAppeals`). Без права — прежние ветки (`bridging` с `advanceRound`, `finished`, `choosing`).
+- `roundSummaryWindow` (**окно итогов**, бывш. `appealWindow`) — только последний вопрос раунда: 5 секунд, `roundIndex` не меняется, финалистов не собирают. Если дальше есть раунд, `appeal.summary = 'pending'` и контроллер говорит `roundSummary` (раунд окончен, счёт каждого, «впереди второй/третий/финальный раунд», кто выбирает). По `appealLeft`, пока итог ещё звучит, окно закрывается для заявок (`timeUp`), фраза дослушивается; `HOST_AUDIO_FINISHED` purpose `roundSummary` после этого → `appealEnd`. `appealEnd` после сказанного итога → `choosing` с `advanceRound` (мост `bridging` не повторяется); без итога — прежние `bridging`/`finished`/`choosing`. Заявка во время итога прерывает его; после серии окно и итог с новым счётом начинаются заново.
+- `appealCue` (**переответ**) — ведущая по имени просит повторить ответ, вопрос не перечитывает. `HOST_AUDIO_FINISHED` purpose `appeal` → `answering` с новой `attemptId` и обычными таймерами.
 - `appealConfirm` — заявка `closed` (ответ уже объявлен): `confirmClosedAppeal` ставит +номинал без переответа, через 1 мс → `announcing` (короткая реплика о решении). Контроллер обрывает текущую речь.
 - `announcing` на входе (`openAppealNow`): минус при открытой ячейке — окно `open` для этого игрока; ячейка закрыта — окно `closed` для всех с правом (старое окно `open` заменяется). Поэтому кнопка доступна уже во время объявления.
 - `appealNext` — после объявления результата апелляции в серии `closed`: следующий из `queue` → `appealCue`, иначе → `afterQuestion` (новое 5-секундное окно, если ещё есть право).
@@ -440,10 +442,10 @@ stateDiagram-v2
   buzzing --> appealCue: APPEAL_REQUESTED от lastPlayerId
   announcing --> afterQuestion: вопрос закрыт
   afterQuestion --> choosing: есть право (окно closed)
-  afterQuestion --> appealWindow: последний вопрос раунда, есть право
+  afterQuestion --> roundSummaryWindow: последний вопрос раунда, есть право
   announcing --> appealCue: APPEAL_REQUESTED, stage open
-  appealWindow --> appealConfirm: APPEAL_REQUESTED
-  appealWindow --> appealEnd: appealLeft
+  roundSummaryWindow --> appealConfirm: APPEAL_REQUESTED
+  roundSummaryWindow --> appealEnd: appealLeft
   appealEnd --> bridging
   appealEnd --> finished
   appealCue --> answering: purpose appeal
@@ -459,13 +461,13 @@ stateDiagram-v2
 
 - серия `closed` уже идёт → в конец `queue` (`queueAppeal`), один playerId — одно место;
 - `buzzing.*` при `stage: open` и только от `lastPlayerId` → `appealCue` (`acceptAppeal`), окно перехвата прекращается;
-- `buzzing.*`/`announcing` при `stage: open` → `appealCue`; `choosing.*`, `appealWindow` или `announcing` при `stage: closed` → `appealConfirm` (без переответа); контроллер увеличивает `choiceEpoch`, поздний `selectQuestion` не откроет ячейку.
+- `buzzing.*`/`announcing` при `stage: open` → `appealCue`; `choosing.*`, `roundSummaryWindow` или `announcing` при `stage: closed` → `appealConfirm` (без переответа); контроллер увеличивает `choiceEpoch`, поздний `selectQuestion` не откроет ячейку.
 
 Закрытие окна: `BUZZER_PRESSED` другого игрока (`assignAnswerer`) и `QUESTION_SELECTED` (`openQuestion`) обнуляют `appeal`; `choosing` по `appealLeft` (guard `idleClosedAppeal`) снимает окно, выбор продолжается; `advanceRound`, `clearActivePlay` (пропуск раунда), `STOP`, ошибка связи тоже обнуляют. `reopenBuzzers` после 0/минуса открывает окно `stage: open` с `lastPlayerId`. В серии `closed` `chooserId` не меняется, `playedIds` не трогается.
 
 Табло: пока `appeal.stage === 'closed'`, экран показывает табло вместо карточки вопроса; ячейки неактивны вне `choosing`. Объявление апелляции получает фактическое изменение (`outcomes[...].previous`): при нулевой разнице ведущая говорит, что апелляция результат не изменила, и не говорит об обновлении счёта.
 
-Пауза: `rememberPause` сохраняет остаток окна, `RESUME` в `appealCue`/`appealWindow` возвращает туда же. Снимок хранит `outcomes`, `appeal`, `appealSerial`; восстановление `answering.*` с активным апеллянтом идёт через `appealCue`; окно чужого раунда отбрасывается; старые снимки без полей — без апелляций.
+Пауза: `rememberPause` сохраняет остаток окна, `RESUME` в `appealCue`/`roundSummaryWindow` возвращает туда же. Снимок хранит `outcomes`, `appeal`, `appealSerial`; восстановление `answering.*` с активным апеллянтом идёт через `appealCue`; окно чужого раунда отбрасывается; старые снимки без полей — без апелляций.
 
 Реплика итога апелляции (`announceInstructions`, ветка апелляции): подсказке передаются факты (принята ли, игрок, было/стало за этот вопрос, общий счёт) и требование назвать числа точно; формулировка свободная, образца фразы нет; «счёт не изменился» без числа не говорится. Подсказка повтора ответа (`appealCue`) называет текущий итог за вопрос и что новый ответ его заменит.
 

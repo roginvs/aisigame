@@ -175,7 +175,7 @@ describe('ручные апелляции', () => {
     const input: QuestionPack = { ...pack, rounds: [...pack.rounds, { index: 1, name: 'Финал', kind: 'final' }],
       questions: [pack.questions[0]!, { ...pack.questions[1]!, id: 'final', roundIndex: 1 }] }
     const actor = start(input, [1]); normal(actor, 1, 'incorrect')
-    expect(path(actor)).toBe('appealWindow'); expect(actor.getSnapshot().context.roundIndex).toBe(0)
+    expect(path(actor)).toBe('roundSummaryWindow'); expect(actor.getSnapshot().context.roundIndex).toBe(0)
     request(actor, 1); confirm(actor); say(actor)
     expect(path(actor)).toBe('bridging'); actor.send({ type: 'HOST_AUDIO_FINISHED', purpose: 'bridge' })
     actor.send({ type: 'QUESTION_SELECTED', themeId: 't', value: 200 })
@@ -185,7 +185,7 @@ describe('ручные апелляции', () => {
   it('последний вопрос без финала не объявляет победителя до конца окна', () => {
     const input = { ...pack, questions: [pack.questions[0]!] }
     const actor = start(input, [1]); normal(actor, 1, 'ambiguous')
-    expect(path(actor)).toBe('appealWindow'); vi.advanceTimersByTime(4_999); expect(path(actor)).toBe('appealWindow')
+    expect(path(actor)).toBe('roundSummaryWindow'); vi.advanceTimersByTime(4_999); expect(path(actor)).toBe('roundSummaryWindow')
     vi.advanceTimersByTime(1); expect(path(actor)).toBe('finished')
   })
 
@@ -262,11 +262,11 @@ describe('ручные апелляции', () => {
     const input: QuestionPack = { ...pack, rounds: [...pack.rounds, { index: 1, name: 'Второй', kind: 'normal' }],
       questions: [pack.questions[0]!, { ...pack.questions[1]!, roundIndex: 1 }] }
     const actor = start(input, [1, 2]); normal(actor, 1, 'incorrect'); normal(actor, 2, 'incorrect')
-    expect(path(actor)).toBe('appealWindow'); expect(actor.getSnapshot().context.appeal?.summary).toBe('pending')
+    expect(path(actor)).toBe('roundSummaryWindow'); expect(actor.getSnapshot().context.appeal?.summary).toBe('pending')
     const text = roundSummaryInstructions(actor.getSnapshot().context)
     expect(text).toContain('Впереди второй раунд'); expect(text).toContain('Игрок 1')
     vi.advanceTimersByTime(5_000)
-    expect(path(actor)).toBe('appealWindow'); expect(actor.getSnapshot().context.appeal?.timeUp).toBe(true)
+    expect(path(actor)).toBe('roundSummaryWindow'); expect(actor.getSnapshot().context.appeal?.timeUp).toBe(true)
     const a = actor.getSnapshot().context.appeal!
     expect(appealRequestError(actor.getSnapshot().context, path(actor), { questionId: a.questionId, windowId: a.windowId, playerId: 1, requestId: 'late' })).not.toBeNull()
     actor.send({ type: 'HOST_AUDIO_FINISHED', purpose: 'roundSummary' })
@@ -279,8 +279,8 @@ describe('ручные апелляции', () => {
     const actor = start(input, [1, 2]); normal(actor, 1, 'incorrect'); normal(actor, 2, 'incorrect')
     expect(roundSummaryInstructions(actor.getSnapshot().context)).toContain('финальный раунд')
     request(actor, 1); expect(path(actor)).toBe('appealConfirm'); confirm(actor); say(actor)
-    expect(path(actor)).toBe('appealWindow'); expect(actor.getSnapshot().context.appeal?.summary).toBe('pending')
-    actor.send({ type: 'HOST_AUDIO_FINISHED', purpose: 'roundSummary' }); expect(path(actor)).toBe('appealWindow')
+    expect(path(actor)).toBe('roundSummaryWindow'); expect(actor.getSnapshot().context.appeal?.summary).toBe('pending')
+    actor.send({ type: 'HOST_AUDIO_FINISHED', purpose: 'roundSummary' }); expect(path(actor)).toBe('roundSummaryWindow')
     vi.advanceTimersByTime(5_000); expect(path(actor)).toBe('choosing.listening')
     expect(scores(actor)).toEqual([100, -100]); expect(actor.getSnapshot().context.roundIndex).toBe(1)
   })

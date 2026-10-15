@@ -1297,7 +1297,7 @@ export const gameMachine = setup({
       // До раскрытия ответа (ячейка открыта): игрок повторяет ответ.
       { guard: and([not(stateIn('paused')), 'validAppeal', 'openStageAppeal', or([stateIn('buzzing'), stateIn('announcing')])]), target: '.appealCue', actions: 'acceptAppeal' },
       // После раскрытия (ячейка закрыта): без повтора — игрок подтвердил «я ответил правильно».
-      { guard: and([not(stateIn('paused')), 'validAppeal', 'closedStageAppeal', or([stateIn('choosing'), stateIn('appealWindow'), stateIn('announcing')])]), target: '.appealConfirm', actions: ['acceptAppeal', 'confirmClosedAppeal'] },
+      { guard: and([not(stateIn('paused')), 'validAppeal', 'closedStageAppeal', or([stateIn('choosing'), stateIn('roundSummaryWindow'), stateIn('announcing')])]), target: '.appealConfirm', actions: ['acceptAppeal', 'confirmClosedAppeal'] },
     ],
     SPECIAL_PLAYER_OFFLINE: [
       { guard: and([stateIn('cat.staking'), 'awayRecipient']), target: '.specialAway', actions: 'markAwayStaking' },
@@ -1354,7 +1354,7 @@ export const gameMachine = setup({
         { guard: ({ context }) => context.resumePath.startsWith('auction.'), target: 'auction.resume', actions: 'clearResume' },
         { guard: ({ context }) => context.resumePath === 'specialAway', target: 'specialAway', actions: ['clearResume', 'restartAwayClock'] },
         { guard: ({ context }) => context.resumePath === 'appealCue', target: 'appealCue', actions: 'clearResume' },
-        { guard: ({ context }) => context.resumePath === 'appealWindow', target: 'appealWindow', actions: ['clearResume', 'restartAppealClock'] },
+        { guard: ({ context }) => context.resumePath === 'roundSummaryWindow', target: 'roundSummaryWindow', actions: ['clearResume', 'restartAppealClock'] },
         { guard: ({ context }) => context.resumePath === 'welcoming', target: 'welcoming', actions: 'clearResume' },
         { guard: ({ context }) => context.resumePath === 'choosing.listening', target: 'choosing.listening', actions: 'clearResume' },
         { guard: ({ context }) => context.resumePath === 'flashing', target: 'flashing', actions: 'clearResume' },
@@ -1719,15 +1719,15 @@ export const gameMachine = setup({
     },
     afterQuestion: {
       always: [
-        { guard: and(['hasAppeals', 'roundDoneHasNext']), target: 'appealWindow', actions: ['openClosedAppeals', 'markRoundSummary'] },
-        { guard: and(['hasAppeals', 'roundDoneNoNext']), target: 'appealWindow', actions: 'openClosedAppeals' },
+        { guard: and(['hasAppeals', 'roundDoneHasNext']), target: 'roundSummaryWindow', actions: ['openClosedAppeals', 'markRoundSummary'] },
+        { guard: and(['hasAppeals', 'roundDoneNoNext']), target: 'roundSummaryWindow', actions: 'openClosedAppeals' },
         { guard: 'hasAppeals', target: 'choosing', actions: 'openClosedAppeals' },
         { guard: 'roundDoneHasNext', target: 'bridging', actions: 'advanceRound' },
         { guard: 'roundDoneNoNext', target: 'finished', actions: 'clearAppeals' },
         { target: 'choosing', actions: 'clearAppeals' },
       ],
     },
-    appealWindow: {
+    roundSummaryWindow: {
       entry: assign(({ context }) => ({ statusLine: 'Апелляции · 5 секунд', phaseStartedAt: Date.now(), phaseDurationMs: appealMsLeft(context.appeal) })),
       after: { appealLeft: [
         // The window never cuts the round summary: appeals close, the phrase finishes, then the round advances.
@@ -1929,7 +1929,7 @@ export const gameMachine = setup({
         { guard: ({ context }) => context.resumePath.startsWith('auction.'), target: 'auction.resume', actions: 'resumeClock' },
         { guard: ({ context }) => context.resumePath === 'specialAway', target: 'specialAway', actions: ['resumeClock', 'restartAwayClock'] },
         { guard: ({ context }) => context.resumePath === 'appealCue', target: 'appealCue', actions: 'resumeClock' },
-        { guard: ({ context }) => context.resumePath === 'appealWindow', target: 'appealWindow', actions: ['resumeClock', 'restartAppealClock'] },
+        { guard: ({ context }) => context.resumePath === 'roundSummaryWindow', target: 'roundSummaryWindow', actions: ['resumeClock', 'restartAppealClock'] },
           { guard: ({ context }) => context.resumePath === 'welcoming', target: 'welcoming', actions: 'resumeClock' },
           { guard: ({ context }) => context.resumePath === 'bridging', target: 'bridging', actions: 'resumeClock' },
           { guard: ({ context }) => context.resumePath === 'choosing.listening', target: 'choosing.listening', actions: 'resumeClock' },

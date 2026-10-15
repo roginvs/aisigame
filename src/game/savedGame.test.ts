@@ -136,6 +136,13 @@ function sample(patch: Partial<SavedGame> = {}): SavedGame {
 }
 
 describe('saved game', () => {
+  it('окно итогов: старое имя appealWindow читается как roundSummaryWindow', () => {
+    for (const path of ['roundSummaryWindow', 'appealWindow']) {
+      const saved = persistMatch({ packId: 'demo', packFile: 'demo.siq', path, context: context() }, memory())
+      expect(saved?.phase).toBe('roundSummaryWindow')
+    }
+  })
+
   it('пишет снимок отдельным ключом и не кладёт туда ключ API', () => {
     const storage = memory()
     storage.setItem(storageKey, 'sk-test-should-stay')

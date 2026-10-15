@@ -572,7 +572,7 @@ export function attachController(options: {
         constraints: ['Не перечитывай вопрос. Эталон не называй.'],
       }))
     }
-    if (path === 'appealWindow') {
+    if (path === 'roundSummaryWindow') {
       client.setMicEnabled(false)
       if (context.appeal?.summary === 'pending') speak('roundSummary', roundSummaryInstructions(context), undefined, true)
       else client.interruptSpeech('окно апелляции')

@@ -125,7 +125,9 @@ const judgmentStatuses: JudgmentStatus[] = [
 /** Фазы, в которые можно войти заново после нового голосового сеанса. */
 const canonicalPhases: Record<string, string> = {
   appealCue: 'appealCue',
-  appealWindow: 'appealWindow',
+  roundSummaryWindow: 'roundSummaryWindow',
+  // Старое имя «окна итогов» (до переименования) — для старых сохранений.
+  appealWindow: 'roundSummaryWindow',
   welcoming: 'welcoming',
   choosing: 'choosing.listening',
   'choosing.listening': 'choosing.listening',
@@ -177,7 +179,7 @@ const canonicalPhases: Record<string, string> = {
 
 const questionPhases = new Set([
   'appealCue',
-  'appealWindow',
+  'roundSummaryWindow',
   'flashing',
   'reading.sealed',
   'reading.armed',
@@ -360,7 +362,7 @@ export function restoredMatch(pack: QuestionPack, saved: SavedMatch): Pick<
   let appeal = saved.appeal ?? null
   if (appeal && (questionById(pack.questions, appeal.questionId)?.roundIndex !== roundIndex || round?.kind === 'final')) appeal = null
   if (appeal?.activePlayerId !== null && appeal && phase === 'answering.waiting') phase = 'appealCue'
-  if ((phase === 'appealCue' || phase === 'appealWindow') && !appeal) phase = 'choosing.listening'
+  if ((phase === 'appealCue' || phase === 'roundSummaryWindow') && !appeal) phase = 'choosing.listening'
   const special = questionOk && saved.special?.questionId === saved.activeQuestionId ? saved.special : null
   if ((phase === 'cat.resume' || phase === 'auction.resume' || phase === 'specialAway') && !special) phase = 'choosing.listening'
   const openQuestion = questionOk && questionPhases.has(phase)
