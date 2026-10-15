@@ -1,4 +1,3 @@
-import { questionEchoWordShare } from '../options.ts'
 export type ChoiceGate = 'ignore' | 'ask-again' | 'select'
 
 export function isChoiceUtterance(text: string, minLetters = 4): boolean {
@@ -23,13 +22,7 @@ export function repeatsQuestion(heard: string, question: string): boolean {
   const said = foldSpeech(heard)
   const asked = foldSpeech(question)
   if (said.length < 8 || asked.length < 8) return false
-  if (asked.includes(said) || said.includes(asked)) return true
-  // ASR эха редко дословен (числа словами, слово-другое мимо): большинство слов — из вопроса.
-  const askedWords = new Set(asked.split(' ').filter((word) => word.length >= 3))
-  const saidWords = said.split(' ').filter((word) => word.length >= 3)
-  if (saidWords.length < 2) return false
-  const hits = saidWords.filter((word) => askedWords.has(word)).length
-  return hits / saidWords.length >= questionEchoWordShare
+  return asked.includes(said) || said.includes(asked)
 }
 
 function foldSpeech(value: string): string {
