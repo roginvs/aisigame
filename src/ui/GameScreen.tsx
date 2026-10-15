@@ -26,6 +26,8 @@ import { ConferenceMediaControls } from './ConferenceVideoStrip.tsx'
 import { ConferencePlayersRow } from './ConferencePlayersRow.tsx'
 import { AirStatus } from './airStatus.tsx'
 import { buzzerLabel } from './buzzerLabel.ts'
+import { nudgeActive, nudgeLevelOverride } from './buzzNudge.ts'
+import { useBuzzNudge } from './useBuzzNudge.ts'
 import { buzzKeyLabel, isKeyboardPlayer, playerFromBuzzKey } from './buzzKeys.ts'
 import { ConversationChat } from './DebugChat.tsx'
 import { packProgressLabel } from '../conference/packProgress.ts'
@@ -168,6 +170,8 @@ export function GameScreen(props: {
     messageRing?: ConferenceMessageRing
     onConferenceExit?: () => void
     hiddenClientIds?: ReadonlySet<string>
+    /** Собственная дорожка микрофона, опубликованная в Jitsi: локальная подсказка «жми кнопку». */
+    localMicStream?: () => MediaStream | null
     /** Только мастер: галка «Меньше слышать» (вне хода — глухо). */
     hearTurnOnly?: boolean
     onHearTurnOnlyChange?: (value: boolean) => void
@@ -280,6 +284,18 @@ export function GameScreen(props: {
   const buttonsOpen = buttonsLive(path)
   const earlyLive = path === 'reading.armed'
   const canFalseStart = falseStartOpen(path, finalRound)
+  // Локальная подсказка «жми кнопку»: только свой игрок, только из полученного состояния и своего микрофона.
+  const nudgeSelf = conference?.layout ? context.players.find((player) => canBuzzPlayer(true, conference.selfClientId, player)) : undefined
+  const nudgeOn = nudgeActive({
+    path,
+    finalRound,
+    hasSelf: Boolean(nudgeSelf),
+    missed: nudgeSelf ? context.missedIds.includes(nudgeSelf.id) : false,
+    answering: nudgeSelf ? context.activePlayerId === nudgeSelf.id : false,
+    cooling: nudgeSelf ? falseStartCooling(context.falseStarts[nudgeSelf.id], penaltyClock) : false,
+    micLive: Boolean((conference?.tiles ?? []).find((tile) => tile.isLocal)?.micLive) || nudgeLevelOverride() !== null,
+  })
+  const nudgeAt = useBuzzNudge(conference?.localMicStream, nudgeOn)
   const canPick = canPickCell(
     path,
     Boolean(conference?.layout),
@@ -682,6 +698,7 @@ export function GameScreen(props: {
           onConfirmYes={confirmYes}
           onConfirmNo={confirmNo}
           onBuzz={onPlayerAction}
+          nudgePlayerId={nudgeAt ? nudgeSelf?.id ?? null : null}
           layout
         />
       ) : (

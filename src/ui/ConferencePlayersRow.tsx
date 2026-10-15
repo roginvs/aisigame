@@ -1,6 +1,8 @@
 import { AppealConfirm } from './AppealConfirm.tsx'
 import { packProgressLabel } from '../conference/packProgress.ts'
 import { tapPressProps } from './tapPress.ts'
+import type { CSSProperties } from 'react'
+import { buzzNudge } from '../options.ts'
 import { buzzerLabel } from './buzzerLabel.ts'
 import type { ConferenceTile } from '../conference/media.ts'
 import type { RosterEntry } from '../conference/roster.ts'
@@ -48,6 +50,8 @@ export function ConferencePlayersRow(props: {
   onConfirmYes?: () => void
   onConfirmNo?: () => void
   onBuzz: (playerId: PlayerId) => void
+  /** Чья кнопка сейчас мигает подсказкой «жми» (только свой игрок, только на этом экране). */
+  nudgePlayerId?: PlayerId | null
   layout: boolean
 }) {
   const {
@@ -175,7 +179,7 @@ export function ConferencePlayersRow(props: {
               <button
                 type="button"
                 key={cooling ? 'penalty' : 'ready'}
-                className={['buzzer', chooses ? 'chooser' : '', cooling ? 'false-start' : '']
+                className={['buzzer', chooses ? 'chooser' : '', cooling ? 'false-start' : '', !cooling && props.nudgePlayerId === playerId ? 'buzz-nudge' : '']
                   .filter(Boolean)
                   .join(' ')}
                 style={
@@ -184,7 +188,9 @@ export function ConferencePlayersRow(props: {
                         animationDuration: `${falseStartMs}ms`,
                         animationPlayState: paused ? 'paused' : 'running',
                       }
-                    : undefined
+                    : props.nudgePlayerId === playerId
+                      ? ({ '--nudge-ms': `${buzzNudge.flashMs}ms`, '--nudge-count': String(buzzNudge.flashes) } as CSSProperties)
+                      : undefined
                 }
                 disabled={displayOnly || (appealState ? !appealState.enabled : cooling || ((missed || !buttonsOpen) && !canFalseStart))}
                 {...tapPressProps(() => onBuzz(playerId))}

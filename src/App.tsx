@@ -202,6 +202,7 @@ export default function App() {
   const warnedMicAttemptRef = useRef('')
   const hostSpeakingRef = useRef(link.host)
   const modelMeter = useCallback(() => conferenceHandleRef.current?.modelMeter?.() ?? null, [])
+  const localMicStream = useCallback(() => conferenceHandleRef.current?.localMicStream() ?? null, [])
   const bindConferenceVideo = useCallback((participantId: string, element: HTMLVideoElement | null) => {
     conferenceHandleRef.current?.bindVideo(participantId, element)
   }, [])
@@ -1425,6 +1426,7 @@ export default function App() {
               remoteContext: viewContext,
               remotePath: viewSnapshot?.phase ?? path,
               tiles: conferenceTiles,
+              localMicStream,
               hostSpeaking: conferenceHostSpeaking,
               mediaBusy,
               mediaError: conferenceError,

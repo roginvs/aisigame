@@ -2196,3 +2196,23 @@ button.buzzer.chooser:disabled {
   pointer-events: none;
   transition: transform 80ms linear;
 }
+
+/* Локальная подсказка «жми кнопку» (useBuzzNudge): 3 быстрые вспышки свечением, размер не меняется. */
+@keyframes buzz-nudge {
+  0%, 100% { box-shadow: 0 0 0 0 rgba(255, 246, 216, 0); filter: brightness(1); }
+  35% { box-shadow: 0 0 0 4px #fff6d8, 0 0 26px 8px rgba(255, 224, 140, 0.95); filter: brightness(1.45); }
+}
+
+button.buzzer.buzz-nudge {
+  animation: buzz-nudge var(--nudge-ms, 450ms) ease-in-out var(--nudge-count, 3);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  @keyframes buzz-nudge-soft {
+    0% { box-shadow: 0 0 0 3px #fff6d8; }
+    100% { box-shadow: 0 0 0 0 rgba(255, 246, 216, 0); }
+  }
+  button.buzzer.buzz-nudge {
+    animation: buzz-nudge-soft calc(var(--nudge-ms, 450ms) * var(--nudge-count, 3)) ease-out 1;
+  }
+}
