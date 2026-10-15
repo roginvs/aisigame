@@ -2,10 +2,8 @@ import { amountWords, appealResultLine } from '../game/appealSpeech.ts'
 import { AudioItems, type AudioReference, type AudioItemReady } from './audioItems.ts'
 import type { JudgeRequestContext, JudgmentCapabilities } from './judgmentRequest.ts'
 import { livePlayerChatVisible } from './liveSpeech.ts'
-import { clearLivePlayerLine, pushHostLine, pushPlayerLine, setLivePlayerLine } from '../debug/trace.ts'
-import { echoesAnswerPrompt } from '../game/answerPrompt.ts'
-import { echoesChoicePrompt } from '../game/choicePrompt.ts'
-import { echoesTranscriptionPrompt } from '../game/promptEcho.ts'
+import { clearLivePlayerLine, pushHostLine, pushPlayerLine, pushTrace, setLivePlayerLine } from '../debug/trace.ts'
+import { ItemPrompts, echoesAnyPrompt } from './itemPrompts.ts'
 import { nearHomophone, sharesAnswer } from '../game/judgment.ts'
 import type { GameVoice, LinkStatus, ToolCall } from './client.ts'
 import type { StoredTranscript } from './utterance.ts'
@@ -52,7 +50,8 @@ export class MockRealtimeClient implements GameVoice {
 
   private audioItems = new AudioItems()
   private audioTexts = new Map<string, string>()
-  private transcriptionPrompt = ''
+  private itemPrompts = new ItemPrompts()
+  private promptEchoLogged = new Set<string>()
   private speechToken = 0
   private speechMs = speechPauseMs
   private itemSeq = 0
@@ -146,7 +145,7 @@ export class MockRealtimeClient implements GameVoice {
   setInputStream(_stream: MediaStream | null): void {}
 
   setTranscriptionPrompt(prompt: string): void {
-    this.transcriptionPrompt = prompt
+    this.itemPrompts.set(prompt)
   }
 
   gatePlayerChat(gate: boolean): void {
@@ -217,6 +216,7 @@ export class MockRealtimeClient implements GameVoice {
     const line = { text, confidence }
     this.transcripts.set(itemId, line)
     this.offerPlayerChat(itemId, text)
+    this.itemPrompts.finished(itemId)
     const matched = this.transcriptWaiters.get(itemId) ?? []
     this.transcriptWaiters.delete(itemId)
     for (const waiter of matched) waiter(line)
@@ -276,7 +276,7 @@ export class MockRealtimeClient implements GameVoice {
     this.speechToken += 1
     this.audioItems.reset()
     this.audioTexts.clear()
-    this.transcriptionPrompt = ''
+    this.itemPrompts.reset()
     this.transcripts.clear()
     this.playerChatGated = false
     this.playerChatAllowed.clear()
@@ -308,6 +308,7 @@ export class MockRealtimeClient implements GameVoice {
     const itemId = `mock-item-${++this.itemSeq}`
     this.audioTexts.set(itemId, text)
     this.audioItems.observe({ type: 'input_audio_buffer.speech_started', item_id: itemId })
+    this.itemPrompts.started(itemId)
     this.onSpeechStarted({ itemId })
     const words = text.trim().split(/\s+/).filter(Boolean)
     const stepMs = hearMs / Math.max(1, words.length)
@@ -331,7 +332,7 @@ export class MockRealtimeClient implements GameVoice {
     if (!livePlayerChatVisible({
       suppressed: this.playerChatSuppressed.has(itemId) || this.playerChatPublished.has(itemId),
       gated: this.playerChatGated && !this.playerChatAllowed.has(itemId),
-      echo: this.isPromptEcho(text),
+      echo: this.isPromptEcho(text, itemId),
     })) {
       clearLivePlayerLine(itemId)
       return
@@ -344,8 +345,10 @@ export class MockRealtimeClient implements GameVoice {
     clearLivePlayerLine(itemId)
     this.audioTexts.set(itemId, audioText)
     this.audioItems.observe({ type: 'input_audio_buffer.speech_started', item_id: itemId })
+    this.itemPrompts.started(itemId)
     this.transcripts.set(itemId, { text, confidence })
     this.offerPlayerChat(itemId, text)
+    this.itemPrompts.finished(itemId)
     this.onSpeechStarted({ itemId })
     // Запрошенная длительность, не wall-clock: иначе при fake timers (~40 мс)
     // фантом-гард принимал бы любой эталон за тишину.
@@ -357,7 +360,7 @@ export class MockRealtimeClient implements GameVoice {
   }
 
   private offerPlayerChat(itemId: string, text: string): void {
-    if (this.isPromptEcho(text)) return
+    if (this.isPromptEcho(text, itemId)) return
     if (this.playerChatSuppressed.has(itemId) || this.playerChatPublished.has(itemId)) return
     if (this.playerChatGated && !this.playerChatAllowed.has(itemId)) {
       this.playerChatPending.set(itemId, text)
@@ -368,18 +371,19 @@ export class MockRealtimeClient implements GameVoice {
 
   private publishPlayerChat(itemId: string, text: string): void {
     if (this.playerChatPublished.has(itemId) || this.playerChatSuppressed.has(itemId)) return
-    if (this.isPromptEcho(text)) return
+    if (this.isPromptEcho(text, itemId)) return
     this.playerChatPublished.add(itemId)
     pushPlayerLine(text || 'речь не распознана')
   }
 
-  private isPromptEcho(text: string): boolean {
-    const prompt = this.transcriptionPrompt
-    return (
-      echoesChoicePrompt(text, prompt) ||
-      echoesAnswerPrompt(text, prompt) ||
-      echoesTranscriptionPrompt(text, prompt)
-    )
+  private isPromptEcho(text: string, itemId: string | null): boolean {
+    const prompts = this.itemPrompts.promptsFor(itemId)
+    const echo = echoesAnyPrompt(text, prompts)
+    if (echo && !this.promptEchoLogged.has(itemId ?? '')) {
+      this.promptEchoLogged.add(itemId ?? '')
+      pushTrace('note', `распознавание повторило подсказку (${prompts.length} подсказок реплики), в чат не идёт`)
+    }
+    return echo
   }
 
   /** Тесты: только конец речи с известным itemId, без started (запоздавший VAD). */

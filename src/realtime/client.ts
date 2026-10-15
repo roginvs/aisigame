@@ -14,9 +14,7 @@ import { audioJudgmentCapable, type JudgmentCapabilities, type JudgeRequestConte
 import { sessionTools, toolPurposes } from './tools.ts'
 import { createSilentMicStream } from './pcm.ts'
 import type { VoiceWire } from './wire.ts'
-import { echoesAnswerPrompt } from '../game/answerPrompt.ts'
-import { echoesChoicePrompt } from '../game/choicePrompt.ts'
-import { echoesTranscriptionPrompt } from '../game/promptEcho.ts'
+import { ItemPrompts, echoesAnyPrompt } from './itemPrompts.ts'
 import { transcriptionConfidence, transcriptOf, type StoredTranscript } from './utterance.ts'
 
 export type LinkStatus = {
@@ -148,7 +146,8 @@ export class RealtimeClient {
   /** Идущие ответы модели: unscoped `response.cancel` шлём только при них (иначе `response_cancel_not_active`). */
   private activeResponses = new Set<string>()
   private inputItemId: string | null = null
-  private transcriptionPrompt = ''
+  private itemPrompts = new ItemPrompts()
+  private promptEchoLogged = new Set<string>()
   private transcripts = new Map<string, StoredTranscript>()
   /** Реплики ведущей (item_id), уже отданные в чат по готовой расшифровке: response.done их не повторяет. */
   private hostItemsInChat = new Set<string>()
@@ -483,7 +482,7 @@ export class RealtimeClient {
   }
 
   setTranscriptionPrompt(prompt: string): void {
-    this.transcriptionPrompt = prompt
+    this.itemPrompts.set(prompt)
     this.send({
       type: 'session.update',
       session: {
@@ -559,6 +558,7 @@ export class RealtimeClient {
     if (this.transcripts.has(itemId)) return
     this.transcripts.set(itemId, { text, confidence })
     this.livePartials.delete(itemId)
+    this.itemPrompts.finished(itemId)
     clearLivePlayerLine(itemId)
     this.offerPlayerChat(itemId, text)
     const matched = this.transcriptWaiters.get(itemId) ?? []
@@ -580,7 +580,7 @@ export class RealtimeClient {
     if (!livePlayerChatVisible({
       suppressed: this.playerChatSuppressed.has(itemId) || this.playerChatPublished.has(itemId),
       gated: this.playerChatGated && !this.playerChatAllowed.has(itemId),
-      echo: this.isPromptEcho(text),
+      echo: this.isPromptEcho(text, itemId),
     })) {
       clearLivePlayerLine(itemId)
       return
@@ -590,7 +590,7 @@ export class RealtimeClient {
 
   private offerPlayerChat(itemId: string, text: string): void {
     const chat = (decision: string) => diag('чат', `строка игрока: ${decision}`, { itemId, source: 'расшифровка', chars: text.length })
-    if (this.isPromptEcho(text)) return chat('эхо подсказки — не показываем')
+    if (this.isPromptEcho(text, itemId)) return chat('эхо подсказки — не показываем')
     if (this.playerChatPublished.has(itemId)) return chat('уже показана — дубль отброшен')
     if (this.playerChatSuppressed.has(itemId)) return chat('подавлена (будет текст оценки)')
     if (this.playerChatGated && !this.playerChatAllowed.has(itemId)) {
@@ -604,18 +604,19 @@ export class RealtimeClient {
 
   private publishPlayerChat(itemId: string, text: string): void {
     if (this.playerChatPublished.has(itemId) || this.playerChatSuppressed.has(itemId)) return
-    if (this.isPromptEcho(text)) return
+    if (this.isPromptEcho(text, itemId)) return
     this.playerChatPublished.add(itemId)
     pushPlayerLine(text || 'речь не распознана')
   }
 
-  private isPromptEcho(text: string): boolean {
-    const prompt = this.transcriptionPrompt
-    return (
-      echoesChoicePrompt(text, prompt) ||
-      echoesAnswerPrompt(text, prompt) ||
-      echoesTranscriptionPrompt(text, prompt)
-    )
+  private isPromptEcho(text: string, itemId: string | null): boolean {
+    const prompts = this.itemPrompts.promptsFor(itemId)
+    const echo = echoesAnyPrompt(text, prompts)
+    if (echo && !this.promptEchoLogged.has(itemId ?? '')) {
+      this.promptEchoLogged.add(itemId ?? '')
+      pushTrace('note', `распознавание повторило подсказку (${prompts.length} подсказок реплики), в чат не идёт`)
+    }
+    return echo
   }
 
   private removeTranscriptWaiter(itemId: string | null, finish: (text: string) => void): void {
@@ -737,7 +738,7 @@ export class RealtimeClient {
     this.wire?.close()
     this.inputStartedAt = null
     this.inputItemId = null
-    this.transcriptionPrompt = ''
+    this.itemPrompts.reset()
     this.transcripts.clear()
     this.hostItemsInChat.clear()
     this.transcriptWaiters.clear()
@@ -1051,6 +1052,7 @@ export class RealtimeClient {
       this.inputStartedAt = performance.now()
       this.inputAudioStartMs = typeof event.audio_start_ms === 'number' ? event.audio_start_ms : null
       this.inputItemId = readItemId(event)
+      this.itemPrompts.started(this.inputItemId)
       this.onSpeechStarted({ itemId: this.inputItemId })
     }
     if (type === 'input_audio_buffer.speech_stopped') {

@@ -240,7 +240,7 @@ describe('attachController choice', () => {
     const client = new MockRealtimeClient()
     const { actor, stop } = await boot(client)
     expect(statePath(actor.getSnapshot().value)).toBe('choosing.listening')
-    const echo = (client as unknown as { transcriptionPrompt: string }).transcriptionPrompt
+    const echo = (client as unknown as { itemPrompts: { prompt: string } }).itemPrompts.prompt
     expect(echo.length).toBeGreaterThan(20)
     client.hear(echo, 400)
     await vi.advanceTimersByTimeAsync(80)
