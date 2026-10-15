@@ -113,6 +113,7 @@ export class MockRealtimeClient implements GameVoice {
 
   /** Последняя суженная схема инструмента — для тестов. */
   lastTool: { name: string } | null = null
+  lastToolAudioItemId: string | null = null
 
   /** Сколько раз мастер выключал/включал локальную ведущую — для тестов. */
   localPlayback = true
@@ -254,8 +255,9 @@ export class MockRealtimeClient implements GameVoice {
     }, wait)
   }
 
-  requestTool(purpose: string, turn: number, name: string, instructions: string, _isolated = false, tool?: { name: string }): void {
+  requestTool(purpose: string, turn: number, name: string, instructions: string, _isolated = false, tool?: { name: string }, audioItemId?: string): void {
     this.lastTool = tool ?? null
+    this.lastToolAudioItemId = audioItemId ?? null
     const call: ToolCall = {
       name,
       callId: `mock-call-${++this.callSeq}`,
@@ -264,7 +266,7 @@ export class MockRealtimeClient implements GameVoice {
           : name === 'pickCatStake' ? catStakeArguments(instructions)
             : name === 'auctionBid' ? auctionBidArguments(instructions, tool)
               : name === 'finalBet' ? finalBetArguments(instructions, tool)
-            : selectArguments(instructions),
+            : selectArguments(instructions, audioItemId === undefined ? undefined : this.audioTexts.get(audioItemId)),
     }
     window.setTimeout(() => this.onToolCall(call, purpose, turn), speechPauseMs)
   }
@@ -346,10 +348,11 @@ export class MockRealtimeClient implements GameVoice {
     this.audioTexts.set(itemId, audioText)
     this.audioItems.observe({ type: 'input_audio_buffer.speech_started', item_id: itemId })
     this.itemPrompts.started(itemId)
+    // Как живой сервер: speech_started раньше расшифровки.
+    this.onSpeechStarted({ itemId })
     this.transcripts.set(itemId, { text, confidence })
     this.offerPlayerChat(itemId, text)
     this.itemPrompts.finished(itemId)
-    this.onSpeechStarted({ itemId })
     // Запрошенная длительность, не wall-clock: иначе при fake timers (~40 мс)
     // фантом-гард принимал бы любой эталон за тишину.
     window.setTimeout(() => {
@@ -538,7 +541,9 @@ function finalBetArguments(instructions: string, tool: unknown): Record<string, 
   return { amount: 0, allIn: false, unclear: true, heard }
 }
 
-function selectArguments(instructions: string): Record<string, unknown> {
+/** audioText — «звук» реплики в моке: пустой — шума без речи (распознавание могло выдумать текст). */
+function selectArguments(instructions: string, audioText?: string): Record<string, unknown> {
+  if (audioText !== undefined && !audioText.trim()) return { themeId: '', value: 0, confident: false, heard: '', speech: 'noise' }
   const heard = quoted(instructions, 'Распознанный текст')
   const needle = normalize(heard)
   // Строки «id — тема: 200, 400» (свободные ячейки по темам).
@@ -558,6 +563,7 @@ function selectArguments(instructions: string): Record<string, unknown> {
     value: hit?.value ?? 0,
     confident: Boolean(hit),
     heard,
+    speech: hit ? 'choice' : 'other',
   }
 }
 

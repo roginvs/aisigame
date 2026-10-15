@@ -137,6 +137,7 @@ export class RealtimeClient {
     turn: number
     isolated: boolean
     tool?: { name: string }
+    audioItemId?: string
   } | null = null
   /** Isolated tool calls use conversation:none — their call_id is not in the session. */
   private lastToolIsolated = false
@@ -693,14 +694,18 @@ export class RealtimeClient {
   }
 
   /** tool — суженная схема на этот запрос (enum открытых тем, вариантов ставки); иначе общая из сессии. */
-  requestTool(purpose: string, turn: number, name: string, instructions: string, isolated = false, tool?: { name: string }): void {
+  /** audioItemId — реплика игрока: модель получает её звук (item_reference), а не только расшифровку. */
+  requestTool(purpose: string, turn: number, name: string, instructions: string, isolated = false, tool?: { name: string }, audioItemId?: string): void {
     this.clearSpeechTimers()
     this.clearFlushTimer()
     this.pendingSpeak = null
     this.speech = null
     this.toolMode = 'text'
     this.lastToolIsolated = isolated
-    this.pendingTool = { purpose, turn, name, instructions, isolated, tool }
+    const audioReady = Boolean(audioItemId && isolated && this.judgmentCapabilities().isolatedAudioReference &&
+      this.audioItems.status(this.audioItems.reference(audioItemId)).ready)
+    if (audioItemId) diag('слух', `${name}: ${audioReady ? 'со звуком реплики' : 'без звука (только текст)'}`, { audioItemId })
+    this.pendingTool = { purpose, turn, name, instructions, isolated, tool, audioItemId: audioReady ? audioItemId : undefined }
     this.sendToolRequest('text')
   }
 
@@ -835,6 +840,7 @@ export class RealtimeClient {
           turn: pending.turn,
           mode,
           tools: pending.tool ? sessionTools.map((tool) => (tool.name === pending.tool?.name ? pending.tool : tool)) : sessionTools,
+          audioItemId: pending.audioItemId,
         })
       : {
           output_modalities: mode === 'text' ? ['text'] : ['audio'],

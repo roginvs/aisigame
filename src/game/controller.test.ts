@@ -257,6 +257,21 @@ describe('attachController choice', () => {
     actor.stop()
   })
 
+  it('шум, на котором распознавание выдумало список тем: модель по звуку — не речь, в чат «речь не распознана»', async () => {
+    const client = new MockRealtimeClient()
+    const { actor, stop } = await boot(client)
+    expect(statePath(actor.getSnapshot().value)).toBe('choosing.listening')
+    client.hearAudio('', 'П......Ц; СВОБОДНАЯ; ВОЛГА', 1300)
+    await vi.advanceTimersByTimeAsync(400)
+    expect(client.lastToolAudioItemId).toMatch(/^mock-item-/)
+    expect(statePath(actor.getSnapshot().value)).toBe('choosing.listening')
+    expect(playerLines().some((line) => line.includes('СВОБОДНАЯ; ВОЛГА'))).toBe(false)
+    expect(playerLines()).toContain('речь не распознана')
+    expect(getTrace().some((entry) => entry.kind === 'note' && entry.title.includes('модель по звуку: не речь'))).toBe(true)
+    stop()
+    actor.stop()
+  })
+
   it('новый выбирающий может говорить, пока ведущая объявляет передачу хода', async () => {
     const client = new MockRealtimeClient()
     const { actor, stop } = await boot(client)

@@ -22,10 +22,16 @@ export const selectQuestionTool = {
       },
       heard: {
         type: 'string',
-        description: 'Дословно, что сказал игрок. Если это шум или кашель, так и напиши.',
+        description: 'Дословно, что сказал игрок — по звуку реплики. Если речи нет, пустая строка.',
+      },
+      speech: {
+        type: 'string',
+        enum: ['choice', 'other', 'noise'],
+        description:
+          'По звуку реплики: choice — игрок называет ячейку или соглашается на предложение; other — человеческая речь, но не выбор; noise — человеческой речи нет (шум, кашель, стук, тишина). Расшифровка распознавателя на шуме бывает выдумана (например, повторяет список тем) — верь звуку, а не ей.',
       },
     },
-    required: ['themeId', 'value', 'confident', 'heard'],
+    required: ['themeId', 'value', 'confident', 'heard', 'speech'],
   },
 } as const
 
