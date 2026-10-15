@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { isolatedCue, isolatedToolResponse, speechMatches, speechOverruns, speechReport, verbatimResponse, withPlayNote } from './speechMatch.ts'
+import { isolatedCue, isolatedToolResponse, speechMatches, speechOverruns, speechReport, verbatimResponse } from './speechMatch.ts'
 
 const newton = 'Кто сформулировал закон всемирного тяготения?'
 const melting = 'Как называется процесс, при котором вещество переходит из твердого состояния в жидкое, и наоборот?'
@@ -70,24 +70,6 @@ describe('isolatedCue', () => {
     expect(response.instructions).toContain('своими словами')
     expect(response.input[0]?.content[0]?.text).toContain('плюс 100')
     expect(response.input[0]?.content[0]?.text).not.toContain('Вивальди')
-  })
-
-  it('пометку как сыграть не кладёт в текст, который говорят игрокам', () => {
-    const response = isolatedCue(
-      withPlayNote(
-        'Одна короткая фраза: верно. Сразу назови очки: плюс 300. Можно добавить «дальше».',
-        'Коротко рассмейся — только звук, без слов.',
-      ),
-      { purpose: 'announce', turn: 4, take: 1 },
-    )
-    const said = response.input[0]?.content[0]?.text ?? ''
-    expect(said).toContain('плюс 300')
-    expect(said).toContain('дальше')
-    expect(said).not.toContain('рассмейся')
-    expect(response.instructions).toContain('без предисловия')
-    expect(response.instructions).toContain('своими словами')
-    expect(response.instructions).toContain('Действие ведущей, не слова реплики: Коротко рассмейся')
-    expect(response.instructions).toContain('служебные пометки вслух не произноси')
   })
 })
 

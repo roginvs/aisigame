@@ -1,7 +1,6 @@
 import type { ConferenceHistoryMessage } from '../conference/messages.ts'
 import type { GameContext } from './types.ts'
 import { commentaryHistoryMessages } from '../options.ts'
-import { playNote, spokenPayload, withPlayNote } from '../realtime/speechMatch.ts'
 
 const maxHistoryChars = 24_000
 
@@ -50,6 +49,5 @@ export function commentaryContext(context: GameContext | null, history: readonly
 }
 
 export function withCommentary(cue: string, context: GameContext, history: readonly ConferenceHistoryMessage[]): string {
-  // Keep the factual task and performance aside in their existing sections.
-  return withPlayNote(`${spokenPayload(cue)}\n\n${commentaryContext(context, history)}`, playNote(cue))
+  return `${cue.trim()}\n\n${commentaryContext(context, history)}`
 }

@@ -13,7 +13,7 @@ import { JudgmentClock } from './judgmentClock.ts'
 import { gameConfig } from '../config.ts'
 import { noteLink, pushJudgeLine, pushPlayerLine, pushSystemLine, pushTrace } from '../debug/trace.ts'
 import type { GameVoice, LinkStatus, ToolCall } from '../realtime/client.ts'
-import { spokenPayload, verbatimSpeech, withPlayNote } from '../realtime/speechMatch.ts'
+import { verbatimSpeech } from '../realtime/speechMatch.ts'
 import { echoesTranscriptionPrompt } from './promptEcho.ts'
 import type { ConferenceHistoryMessage } from '../conference/messages.ts'
 import { conversationLineFromTrace } from '../conference/traceConversation.ts'
@@ -857,7 +857,7 @@ export function attachController(options: {
 
   function speakWhileListening(purpose: SpeechPurpose, instructions: string, expect?: string): void {
     speechTurn += 1
-    lastHostSpoken = expect ?? spokenPayload(instructions)
+    lastHostSpoken = expect ?? instructions.trim()
     hostPurpose = purpose
     diag('окно', `ведущая говорит и слушает (можно перебить): ${purpose}`)
     // conversation:none — подсказка про микрофон и уточнение выбора не продолжают лобби/партию.
@@ -892,7 +892,7 @@ export function attachController(options: {
     chatNote?: (spoken: string) => string,
   ): void {
     speechTurn += 1
-    lastHostSpoken = expect ?? spokenPayload(instructions)
+    lastHostSpoken = expect ?? instructions.trim()
     hostPurpose = purpose
     client.setMicEnabled(false)
     client.requestSpeech(purpose, speechTurn, expect ? instructions : withCommentary(instructions, actor.getSnapshot().context, publicHistory()), expect, isolated || !expect, chatNote)
@@ -1808,12 +1808,6 @@ function openChoiceCells(context: GameContext) {
     .map((question) => ({ themeId: question.themeId, themeName: question.themeName, value: question.value }))
 }
 
-/** Звук смеха. В слова реплики не входит. */
-const giggleNote = 'Коротко рассмейся — только звук, без слов.'
-
-/** Ошибка без смеха. В слова реплики не входит. */
-const dryNote = 'Без смеха.'
-
 /** Общее для всех свободных реплик: коротко и без ремарок, которые модель иначе читает вслух. */
 const cueBrevity = 'Без вступления и пересказа задания. Говори только саму реплику для игроков; служебные пометки не озвучивай.'
 
@@ -1910,12 +1904,11 @@ export function chooserHandoffCue(context: GameContext): string {
 export function welcomeInstructions(context: GameContext): string {
   const round = currentRound(context, context.roundIndex)
   const chooser = playerName(context.players, context.chooserId) || 'игрока'
-  const spoken = hostCue({
+  return hostCue({
     situation: `Партия только началась. Пакет «${context.packName}», сейчас «${round?.name ?? 'раунд'}». Вопрос выбирает ${chooser}.`,
     goal: `Коротко поприветствуй и сразу позови выбрать вопрос. Можно обратиться к выбирающему по имени.`,
     constraints: [boardSecrets, 'Вопрос викторины не задавай. Ничего лишнего после приглашения выбрать.'],
   })
-  return withPlayNote(spoken, giggleNote)
 }
 
 const roundOrdinals = ['первый', 'второй', 'третий', 'четвёртый', 'пятый', 'шестой', 'седьмой', 'восьмой', 'девятый', 'десятый']
@@ -2516,44 +2509,35 @@ export function announceInstructions(context: GameContext): string {
   const plus = delta > 0 ? `Сразу назови очки: плюс ${delta}.` : ''
   const minus = delta > 0 ? `Сразу назови очки: минус ${delta}.` : ''
   if (kind === 'correct' && hidden) {
-    return withPlayNote(
-      hostCue({
-        situation: `Исход: верно. Отвечал ${playerNameLine || 'игрок'}; эталон пакета вслух не называют.`,
-        goal: `${verdictOpener('correct', playerNameLine)} Затем сразу назови плюс очков. ${plus} Формулировку выбери сама.`,
-        constraints: [
-          'Правильный ответ пакета не произноси и не намекай.',
-          finalNote,
-                  ],
-      }),
-      giggleNote,
-    )
+    return hostCue({
+      situation: `Исход: верно. Отвечал ${playerNameLine || 'игрок'}; эталон пакета вслух не называют.`,
+      goal: `${verdictOpener('correct', playerNameLine)} Затем сразу назови плюс очков. ${plus} Формулировку выбери сама.`,
+      constraints: [
+        'Правильный ответ пакета не произноси и не намекай.',
+        finalNote,
+      ],
+    })
   }
   if (kind === 'correct') {
-    return withPlayNote(
-      hostCue({
-        situation: `Исход: верно. Отвечал ${playerNameLine || 'игрок'}; эталон пакета вслух не называют.`,
-        goal: `${verdictOpener('correct', playerNameLine)} Затем сразу назови плюс очков. Дальше не зови: табло уже на экране. ${plus}`,
-        constraints: [
-          'Правильный ответ пакета не произноси. Вопрос не повторяй.',
-          finalNote,
-                  ],
-      }),
-      giggleNote,
-    )
+    return hostCue({
+      situation: `Исход: верно. Отвечал ${playerNameLine || 'игрок'}; эталон пакета вслух не называют.`,
+      goal: `${verdictOpener('correct', playerNameLine)} Затем сразу назови плюс очков. Дальше не зови: табло уже на экране. ${plus}`,
+      constraints: [
+        'Правильный ответ пакета не произноси. Вопрос не повторяй.',
+        finalNote,
+      ],
+    })
   }
   if (kind === 'incorrect' && !publish) {
-    return withPlayNote(
-      hostCue({
-        situation: `Исход: неверно. Отвечал ${playerNameLine || 'игрок'}; ячейку ещё можно перехватить.`,
-        goal: `${verdictOpener('incorrect', playerNameLine)} Затем сразу назови минус очков. ${minus}`,
-        constraints: [
-          'Правильный ответ не называй и не намекай. Не зови нажимать кнопку.',
-          finalNote,
-          'Без утешений и без длинных комментариев.',
-        ],
-      }),
-      dryNote,
-    )
+    return hostCue({
+      situation: `Исход: неверно. Отвечал ${playerNameLine || 'игрок'}; ячейку ещё можно перехватить.`,
+      goal: `${verdictOpener('incorrect', playerNameLine)} Затем сразу назови минус очков. ${minus}`,
+      constraints: [
+        'Правильный ответ не называй и не намекай. Не зови нажимать кнопку.',
+        finalNote,
+        'Без утешений и без длинных комментариев.',
+      ],
+    })
   }
   if (kind === 'incorrect') {
     // Неверно + эталон: вердикт и имя → эталон → коротко что неверно и очки.
@@ -2642,13 +2626,10 @@ export function finishedInstructions(context: GameContext): string {
     leaders.length === 1
       ? `Победил ${leaders[0]?.name ?? 'игрок'} со счётом ${best}.`
       : `Ничья: ${leaders.map((player) => player.name).join(' и ')}, по ${best}.`
-  return withPlayNote(
-    hostCue({
-      situation: `Партия окончена. Счёт: ${scores}. ${outcome}`,
-      goal: 'Подведи итог: назови счёт и победителя или ничью.',
-      constraints: ['Не начинай новую игру.'],
-      length: 'Две короткие фразы.',
-    }),
-    giggleNote,
-  )
+  return hostCue({
+    situation: `Партия окончена. Счёт: ${scores}. ${outcome}`,
+    goal: 'Подведи итог: назови счёт и победителя или ничью.',
+    constraints: ['Не начинай новую игру.'],
+    length: 'Две короткие фразы.',
+  })
 }

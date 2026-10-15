@@ -5,7 +5,7 @@ import { STAGE_WORDS } from '../debug/stageWords.ts'
 import { getTrace, pushHostLine } from '../debug/trace.ts'
 import { lobbySpeechInstructions } from '../conference/lobbySpeech.ts'
 import type { RosterEntry } from '../conference/roster.ts'
-import { isolatedCue, spokenPayload } from '../realtime/speechMatch.ts'
+import { isolatedCue } from '../realtime/speechMatch.ts'
 import * as cues from './controller.ts'
 import { gameMachine } from './machine.ts'
 import type { AnnounceKind, GameContext, Question, QuestionPack, SpecialState } from './types.ts'
@@ -99,10 +99,10 @@ describe('подсказки ведущей: без ремарок, тона-п�
       const folded = text.toLocaleLowerCase('ru').replaceAll('ё', 'е')
       for (const word of STOP) expect(folded, `${name}: «${word}»`).not.toContain(word)
       const gendered = /(?:Боря|Маша|Игрок 3)\s+(?:молчал|промолчал|отключился|не вернулся|нажал|выбрал|назвал)\b|\b(?:у него|ему достался|кому он)\b/u
-      expect(spokenPayload(text).match(gendered)?.[0] ?? null, `${name}: род игрока`).toBeNull()
+      expect(text.match(gendered)?.[0] ?? null, `${name}: род игрока`).toBeNull()
       const oblique = /(?:^|[\s«])(?:к|у|от|для|с|Спроси|Поторопи|попроси|Попроси|назови|Скажи|скажи|Поздравь|обратись к|Обратись к)\s+(?:Боря|Маша|Игрок 3)(?=[\s,.:;!?»]|$)/u
-      expect(spokenPayload(text).match(oblique)?.[0] ?? null, `${name}: имя в косвенном падеже`).toBeNull()
-      expect(spokenPayload(text).match(/.{0,40}[()].{0,40}/)?.[0] ?? null, `${name}: скобки`).toBeNull()
+      expect(text.match(oblique)?.[0] ?? null, `${name}: имя в косвенном падеже`).toBeNull()
+      expect(text.match(/.{0,40}[()].{0,40}/)?.[0] ?? null, `${name}: скобки`).toBeNull()
     })
   }
 })

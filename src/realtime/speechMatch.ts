@@ -61,29 +61,6 @@ export function verbatimSpeech(text: string): string {
   return text.trim()
 }
 
-/** Второй абзац модель играет, но игрокам не читает. */
-export const playNoteMark = '\n\nДействие ведущей, не слова реплики:\n'
-
-export function withPlayNote(spoken: string, note: string): string {
-  const line = spoken.trim()
-  const aside = note.trim()
-  if (!aside) return line
-  return `${line}${playNoteMark}${aside}`
-}
-
-/** Текст, который можно сказать. Пометка действия сюда не входит. */
-export function spokenPayload(cue: string): string {
-  const at = cue.indexOf(playNoteMark)
-  return (at === -1 ? cue : cue.slice(0, at)).trim()
-}
-
-/** Действие ведущей, например смех. Пусто, если пометки нет. */
-export function playNote(cue: string): string {
-  const at = cue.indexOf(playNoteMark)
-  if (at === -1) return ''
-  return cue.slice(at + playNoteMark.length).trim()
-}
-
 /** Короткое сообщение хода для tool-запроса: сама инструкция — в instructions. */
 export function toolTurnInput(name: string): string {
   return `Выполни инструкцию этого хода и вызови ${name}.`
@@ -134,9 +111,7 @@ export function saysAnswer(line: string, answer: string): boolean {
 }
 
 export function isolatedCue(instructions: string, meta: { purpose: string; turn: number; take: number }) {
-  const spoken = spokenPayload(instructions)
-  const aside = playNote(instructions)
-  const performance = aside ? `Действие ведущей, не слова реплики: ${aside}` : ''
+  const spoken = instructions.trim()
   return {
     conversation: 'none' as const,
     output_modalities: ['audio'] as const,
@@ -149,7 +124,6 @@ export function isolatedCue(instructions: string, meta: { purpose: string; turn:
       spoken.includes(revealAuthorization)
         ? 'Правильный ответ из сообщения произнеси вслух дословно: это разрешено и обязательно — даже если это выдуманное или необычное слово, просто скажи его чётко как есть. Указания о том, как его произнести, вслух не повторяй.'
         : 'Если сообщение прямо не просит произнести эталон пакета, не произноси правильный ответ и не вспоминай его из других знаний.',
-      performance,
     ]
       .filter(Boolean)
       .join(' ')),

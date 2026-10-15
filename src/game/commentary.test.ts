@@ -2,7 +2,6 @@ import { createActor } from 'xstate'
 import { describe, expect, it } from 'vitest'
 import { commentaryContext, withCommentary } from './commentary.ts'
 import { gameMachine } from './machine.ts'
-import { playNote, spokenPayload, withPlayNote } from '../realtime/speechMatch.ts'
 
 describe('public commentary context', () => {
   it('contains names, chat and scores but never serialized hidden answers or credentials', () => {
@@ -25,11 +24,11 @@ describe('public commentary context', () => {
     expect(commentaryContext(null, Array.from({ length: 200 }, () => ({ kind: 'chat' as const, name: 'Игрок', text: 'x'.repeat(10000) }))).length).toBeLessThan(26000)
   })
 
-  it('keeps the performance aside separate from public history', () => {
+  it('appends public history after the cue', () => {
     const actor = createActor(gameMachine).start()
-    const cue = withCommentary(withPlayNote('Объяви счёт', 'Коротко'), actor.getSnapshot().context, [])
-    expect(spokenPayload(cue)).toContain('Публичный контекст')
-    expect(playNote(cue)).toBe('Коротко')
+    const cue = withCommentary('Объяви счёт', actor.getSnapshot().context, [])
+    expect(cue.startsWith('Объяви счёт')).toBe(true)
+    expect(cue).toContain('Публичный контекст')
     actor.stop()
   })
 })

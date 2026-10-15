@@ -1,6 +1,5 @@
 import { describe, expect, it } from 'vitest'
 import { gameConfig, hostInstructions } from '../config.ts'
-import { playNote, spokenPayload } from '../realtime/speechMatch.ts'
 import {
   announceInstructions,
   bridgeInstructions,
@@ -148,7 +147,7 @@ describe('announceInstructions', () => {
         { id: 3, name: 'Игрок 3', score: 0 },
       ] }),
     )
-    const spoken = spokenPayload(line)
+    const spoken = line
     expect(spoken).toContain('Исход: молчание')
     expect(spoken).toContain('ничего не услышала')
     expect(spoken).toContain('микрофон')
@@ -414,7 +413,7 @@ describe('announceInstructions', () => {
     expect(line).not.toContain('синоним вроде')
   })
 
-  it('в словах похвалы нет смешка: звук только в пометке, как сыграть', () => {
+  it('в похвале нет смеха', () => {
     const line = announceInstructions(
       context({
         announceKind: 'correct',
@@ -437,7 +436,7 @@ describe('announceInstructions', () => {
         ],
       }),
     )
-    const spoken = spokenPayload(line)
+    const spoken = line
     expect(spoken).toContain('Исход: верно')
     expect(spoken).toContain('плюс 300')
     expect(spoken).toContain('Маша')
@@ -448,16 +447,13 @@ describe('announceInstructions', () => {
     expect(spoken).not.toContain('хи-хи')
     expect(spoken).not.toContain('Боевой Буратино')
     expect(spoken).not.toContain('синоним вроде')
-    const note = playNote(line)
-    expect(line).toContain('Действие ведущей, не слова реплики')
-    expect(note).toContain('рассмейся')
-    expect(note).toContain('без слов')
-    expect(note).not.toContain('хи-хи')
+    expect(line).not.toContain('рассме')
+    expect(line).not.toContain('Действие ведущей')
   })
 
-  it('неверный ответ без смеха и без слова «сухая» в реплике', () => {
+  it('неверный ответ без смеха и без слова «сухая»', () => {
     const line = announceInstructions(context({ announceKind: 'incorrect', playedIds: [] }))
-    const spoken = spokenPayload(line)
+    const spoken = line
     expect(spoken).toContain('Исход: неверно')
     expect(spoken).toContain('минус 100')
     expect(spoken).toContain('Ситуация:')
@@ -466,10 +462,7 @@ describe('announceInstructions', () => {
     expect(spoken).not.toContain('сух')
     expect(spoken).not.toContain('тёпл')
     expect(spoken).not.toContain('синоним вроде')
-    const note = playNote(line)
-    expect(note).not.toContain('хи-хи')
-    expect(note).not.toContain('хихикаем')
-    expect(note).toBe('Без смеха.')
+    expect(line).not.toContain('смех')
   })
 })
 
@@ -509,17 +502,17 @@ describe('welcomeInstructions', () => {
     expect(hostInstructions).toContain('текст вопроса')
     expect(hostInstructions).toContain('ответ пакета')
     expect(hostInstructions).not.toContain('«ах»')
-    const spoken = spokenPayload(line)
+    const spoken = line
     expect(spoken).toContain('поприветствуй')
     expect(spoken).not.toContain('смешок')
     expect(spoken).not.toContain('хихикаем')
     expect(spoken).not.toContain('тёпл')
-    expect(playNote(line)).toContain('рассмейся')
+    expect(line).not.toContain('рассме')
   })
 })
 
 describe('finishedInstructions', () => {
-  it('в итоге звук смеха не входит в слова счёта', () => {
+  it('итог без смеха', () => {
     const line = finishedInstructions(
       context({
         players: [
@@ -528,7 +521,7 @@ describe('finishedInstructions', () => {
         ],
       }),
     )
-    const spoken = spokenPayload(line)
+    const spoken = line
     expect(spoken).toContain('Вася — 100')
     expect(spoken).toContain('Победил Вася')
     expect(spoken).toContain('Ситуация:')
@@ -536,7 +529,7 @@ describe('finishedInstructions', () => {
     expect(spoken).not.toContain('хихикаем')
     expect(spoken).not.toContain('улыб')
     expect(spoken).not.toContain('тёпл')
-    expect(playNote(line)).toContain('рассмейся')
+    expect(line).not.toContain('рассме')
   })
 })
 
