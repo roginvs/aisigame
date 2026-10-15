@@ -156,3 +156,10 @@ export const silentClonePeak = 0.003
 
 /** Как часто мастер обновляет уровни «что слышит модель» (после микшера) для своего индикатора. */
 export const modelLevelsUpdateMs = 75
+
+/**
+ * Темп речи ведущей после приветствия: OpenAI/Grok `session.audio.output.speed` (0.25–1.5).
+ * У Gemini Live параметра нет — там просьба о темпе в systemInstruction (`geminiTempoRule`).
+ */
+export const hostSpeechSpeed = 1.2
+export const geminiTempoRule = 'Говори в бодром темпе, чуть быстрее обычного; слова дословных фраз не меняй и не пропускай.'

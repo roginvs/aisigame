@@ -1,4 +1,4 @@
-import { matchTimings } from './options.ts'
+import { hostSpeechSpeed, matchTimings } from './options.ts'
 
 export const gameConfig = {
   playerCount: 3,
@@ -19,7 +19,7 @@ export const gameConfig = {
     cachedImageIn: 0.08,
   },
   welcomeSpeechSpeed: 1.25,
-  speechSpeed: 1,
+  speechSpeed: hostSpeechSpeed,
   questionsPath: 'public/packs/builtin/demo.siq',
 } as const
 

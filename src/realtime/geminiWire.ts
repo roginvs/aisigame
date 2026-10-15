@@ -2,6 +2,7 @@ import { hostInstructions, withoutHostRules } from '../config.ts'
 import { base64ToPcm, pcmToBase64, PcmMic, PcmPlayer } from './pcm.ts'
 import { sessionTools } from './tools.ts'
 import type { VoiceSink, VoiceWire } from './wire.ts'
+import { geminiTempoRule } from '../options.ts'
 
 const inputRate = 16_000
 const outputRate = 24_000
@@ -19,7 +20,7 @@ export function geminiSetup(model: string, thinking: boolean): object {
         responseModalities: ['AUDIO'],
         ...(thinking ? { thinkingConfig: { thinkingLevel: 'LOW' } } : {}),
       },
-      systemInstruction: { parts: [{ text: hostInstructions }] },
+      systemInstruction: { parts: [{ text: `${hostInstructions}\n\n${geminiTempoRule}` }] },
       tools: [
         {
           functionDeclarations: sessionTools.map((tool) => ({
