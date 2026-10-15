@@ -36,6 +36,7 @@ import { messageRingEntries } from './messageRing.ts'
 import { commentaryContext } from '../game/commentary.ts'
 import { emptyMessageRing } from './messageRing.ts'
 import { ConferenceStatePublisher } from './stateProtocol.ts'
+import { LoopbackStateReceiver } from './receivedState.ts'
 import { conversationLineFromTrace } from './traceConversation.ts'
 import { setPendingGuests } from '../game/commentary.ts'
 import { throttleLatest } from '../realtime/liveSpeech.ts'
@@ -86,6 +87,7 @@ export class MasterSession {
   private gameStarted = false
   private hearTurnOnly = false
   private onSnapshotCb?: (snapshot: ConferenceSnapshot) => void
+  private loopback: LoopbackStateReceiver | null = null
   private gameStartedAt = 0
   private lobbyOpenedSpeech = false
   private spokenLobbySignature = ''
@@ -129,6 +131,10 @@ export class MasterSession {
   constructor(options: MasterSessionOptions) {
     clearRemoteDebug()
     this.onSnapshotCb = options.onSnapshot
+    if (this.onSnapshotCb) {
+      const show = this.onSnapshotCb
+      this.loopback = new LoopbackStateReceiver(show, () => this.broadcastFullStatus())
+    }
     this.masterClientId = options.masterClientId
     this.transport = options.transport
     this.client = options.client
@@ -307,6 +313,7 @@ export class MasterSession {
   }
 
   dispose(): void {
+    this.loopback?.close()
     window.clearInterval(this.heartbeatTimer)
     window.clearInterval(this.presenceTimer)
     window.clearInterval(this.pingTimer)
@@ -556,7 +563,6 @@ export class MasterSession {
   }
 
   private publishSnapshot(snapshot: ConferenceSnapshot): void {
-    this.onSnapshotCb?.(snapshot)
     if (!this.statePublisher) {
       this.statePublisher = new ConferenceStatePublisher(snapshot, this.authorityToken)
       this.sendState(this.statePublisher.full(), 'первый')
@@ -570,15 +576,17 @@ export class MasterSession {
   /** Снимок/изменение с часами мастера (`sentAt`) — игрок пишет задержку доставки. */
   private sendState(message: SnapshotMessage | PartialUpdateMessage, reason: string): void {
     const stamped = { ...message, sentAt: Date.now() }
-    const bytes = JSON.stringify(stamped).length
+    const wire = JSON.stringify(stamped)
+    const bytes = wire.length
     if (message.type === 'snapshot') diag('снимок', `мастер отправил полный снимок (${reason})`, { revision: message.revision, bytes })
     else this.stateSent(bytes, Object.keys(message.changes).slice(0, 3).join('+'))
     this.transport.send(stamped)
+    // Экран мастера — из тех же байтов, что ушли гостям (петля, см. receivedState.ts).
+    this.loopback?.deliver(wire)
   }
 
   private broadcastFullStatus(): void {
     const snapshot = this.buildSnapshot(this.gameStarted ? statePath(this.actor.getSnapshot().value) : 'lobby')
-    this.onSnapshotCb?.(snapshot)
     if (!this.statePublisher) this.statePublisher = new ConferenceStatePublisher(snapshot, this.authorityToken)
     else this.statePublisher.update(snapshot)
     this.sendState(this.statePublisher.full(), 'статус')

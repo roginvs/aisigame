@@ -3,8 +3,9 @@ import type { AppealRequest } from '../game/types.ts'
 import { masterBuildMismatchMessage } from './buildMatch.ts'
 import { decidePackGate } from './packGate.ts'
 import { deletePack, getPack, putPack } from './packDb.ts'
-import { validConferenceState, type ConferenceMessage, type ConferenceSnapshot, type ConferenceState, type PackOfferMessage } from './messages.ts'
+import { type ConferenceMessage, type ConferenceSnapshot, type ConferenceState, type PackOfferMessage } from './messages.ts'
 import { snapshotFromState } from './stateProtocol.ts'
+import { ReceivedState } from './receivedState.ts'
 import { createPackPipeJoiner, type PackPipeInbound } from './packPipe.ts'
 import { derivePackPhase, type PackPhase } from './packProgress.ts'
 import { CHUNK_BYTES, createPackReceiver } from './packTransfer.ts'
@@ -73,7 +74,7 @@ export class JoinerSession {
   private packName = ''
   private lastSnapshot: ConferenceSnapshot | null = null
   private masterState: ConferenceState | null = null
-  private stateRevision: number | null = null
+  private readonly received = new ReceivedState()
   private waitingStatus = true
   /** Любой трафик от мастера (снимок, offer, chunk) — признак, что он жив. */
   private lastMasterAliveAt: number | null = null
@@ -322,34 +323,20 @@ export class JoinerSession {
     if ((message.type === 'snapshot' || message.type === 'partialUpdate') && typeof sentAt === 'number') {
       this.stateLatency(Date.now() - sentAt, message.type === 'snapshot' ? 'полный' : 'изменение')
     }
-    if (message.type === 'snapshot') {
+    if (message.type === 'snapshot' || message.type === 'partialUpdate') {
       this.noteMasterAlive()
-      if (this.stateRevision !== null && message.revision < this.stateRevision) return
-      const { type: _type, authorityToken: _token, revision, sentAt: _sentAt, ...state } = message as typeof message & { sentAt?: number }
-      this.masterState = state
-      this.stateRevision = revision
-      this.waitingStatus = false
-      this.emitSnapshot()
-      await this.syncPackFromState(message.authorityToken)
-      return
-    }
-    if (message.type === 'partialUpdate') {
-      this.noteMasterAlive()
-      if (this.stateRevision !== null && message.revision < this.stateRevision) return
-      if (this.stateRevision === message.revision && message.revision !== message.baseRevision) return
-      if (!this.masterState || this.stateRevision !== message.baseRevision) {
+      // Тот же сборщик «полученного состояния», что у мастера (receivedState.ts).
+      const step = this.received.next(message)
+      if (step.kind === 'needFull') {
         if (!this.waitingStatus) this.requestStatus()
         return
       }
-      const state = { ...this.masterState, ...message.changes }
-      if (!validConferenceState(state)) {
-        this.requestStatus()
-        return
-      }
-      if (!this.acceptMasterBuild(state.commit)) return
-      this.masterState = state
-      this.stateRevision = message.revision
-      if (Object.keys(message.changes).length > 0) this.emitSnapshot()
+      if (step.kind !== 'apply') return
+      if (message.type === 'partialUpdate' && !this.acceptMasterBuild(step.state.commit)) return
+      this.received.commit(step)
+      this.masterState = step.state
+      if (message.type === 'snapshot') this.waitingStatus = false
+      if (step.changed) this.emitSnapshot()
       await this.syncPackFromState(message.authorityToken)
       return
     }
@@ -647,7 +634,7 @@ export class JoinerSession {
     // привязок. Старые ready/hello нельзя считать доставленными ему.
     this.readySent = false
     this.masterState = null
-    this.stateRevision = null
+    this.received.reset()
     this.sendHello()
     this.requestStatus()
     return true
