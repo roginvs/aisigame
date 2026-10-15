@@ -1,4 +1,4 @@
-import { reopenAudioOutputs, unlockAudio } from '../audio/beep.ts'
+import { onAudioOutputsReopen, recreateStreamElement, reopenAudioOutputs, unlockAudio } from '../audio/beep.ts'
 import { gameConfig, hostInstructions, withHostRules } from '../config.ts'
 import { recordResponseUsage, resetUsage } from './usage.ts'
 import { livePlayerChatVisible } from './liveSpeech.ts'
@@ -107,6 +107,8 @@ export class RealtimeClient {
   private dc: RTCDataChannel | null = null
   private mic: MediaStream | null = null
   private audio = new Audio()
+  /** Android: после микрофона голос ведущей играет новый элемент — в потоке «звонок», под качелькой. */
+  private stopReopen: () => void = () => undefined
   private audioItems = new AudioItems()
   private judgeRequests = new Map<string, {
     context: JudgeRequestContext
@@ -294,6 +296,11 @@ export class RealtimeClient {
       const [stream] = event.streams
       if (!stream || !alive()) return
       this.audio.srcObject = stream
+      this.stopReopen()
+      this.stopReopen = onAudioOutputsReopen(() => {
+        const current = this.audio.srcObject
+        if (current instanceof MediaStream) this.audio = recreateStreamElement(this.audio, current)
+      })
       this.hostOutputHandler?.(forkHostStream(stream))
       void this.audio.play().then(
         () => this.onLink({ host: 'idle' }),
@@ -722,6 +729,7 @@ export class RealtimeClient {
     mic?.getTracks().forEach((track) => track.stop())
     this.audio.pause()
     this.audio.srcObject = null
+    this.stopReopen()
     this.onLink({ connection: 'idle', mic: 'idle', host: 'idle' })
   }
 

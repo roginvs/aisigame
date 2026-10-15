@@ -120,6 +120,13 @@ export function createConferenceAudioOutput(takeSink: () => ConferenceAudioSink 
   }
 }
 
+type Recreate = (old: HTMLAudioElement, stream: MediaStream) => HTMLAudioElement
+let recreate: Recreate = (old) => old
+/** beep.ts ставит пересоздание элемента (без цикла импортов). */
+export function setConferenceElementRecreate(next: Recreate): void {
+  recreate = next
+}
+
 /** После открытия микрофона: заново создать вывод уже играющих дорожек (Android, поток «звонок»). */
 export function refreshConferenceSinks(): void {
   for (const sink of active) sink.refresh?.()
@@ -132,7 +139,7 @@ function takeDomSink(): ConferenceAudioSink {
 }
 
 function createDomSink(): ConferenceAudioSink & { prime: () => void } {
-  const audio = document.createElement('audio') as HTMLAudioElement & { playsInline: boolean }
+  let audio = document.createElement('audio') as HTMLAudioElement & { playsInline: boolean }
   audio.autoplay = true
   audio.playsInline = true
   audio.setAttribute('playsinline', 'true')
@@ -167,10 +174,8 @@ function createDomSink(): ConferenceAudioSink & { prime: () => void } {
     },
     refresh() {
       const stream = audio.srcObject
-      if (!stream) return
-      audio.srcObject = null
-      audio.srcObject = stream
-      void audio.play().catch(() => undefined)
+      if (!(stream instanceof MediaStream)) return
+      audio = recreate(audio, stream) as typeof audio
     },
     release() {
       active.delete(sink)

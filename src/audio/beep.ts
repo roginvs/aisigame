@@ -1,4 +1,4 @@
-import { primeConferencePlayback, refreshConferenceSinks } from '../conference/conferenceAudio.ts'
+import { primeConferencePlayback, refreshConferenceSinks, setConferenceElementRecreate } from '../conference/conferenceAudio.ts'
 import { buzzerBeepMs } from '../options.ts'
 
 let audioContext: AudioContext | null = null
@@ -104,13 +104,38 @@ export function gameOutput(ctx: AudioContext = ensureContext()): AudioNode {
  */
 export function reopenAudioOutputs(): void {
   if (!routesGameAudioThroughElement()) return
-  const element = bus?.element
-  if (element && bus?.stream) {
-    element.srcObject = null
-    element.srcObject = bus.stream
-    void element.play().catch(() => undefined)
-  }
+  if (bus?.element && bus.stream) bus.element = recreateStreamElement(bus.element, bus.stream)
+  for (const reopen of reopeners) reopen()
   refreshConferenceSinks()
+}
+
+const reopeners = new Set<() => void>()
+setConferenceElementRecreate((old, stream) => recreateStreamElement(old, stream) as typeof old)
+
+/** Другие выходы с `srcObject` (голос ведущей OpenAI у мастера): пересоздать после микрофона. */
+export function onAudioOutputsReopen(reopen: () => void): () => void {
+  reopeners.add(reopen)
+  return () => { reopeners.delete(reopen) }
+}
+
+/**
+ * Новый `<audio>` вместо старого с тем же потоком. Переприсвоить `srcObject` мало:
+ * на телефоне голос ведущей так и остался на «медиа» (4b58587). Новый элемент — новый вывод.
+ */
+export function recreateStreamElement(old: HTMLAudioElement, stream: MediaStream): HTMLAudioElement {
+  const next = document.createElement('audio')
+  next.autoplay = true
+  next.setAttribute('playsinline', 'true')
+  for (const name of old.getAttributeNames?.() ?? []) if (name.startsWith('data-') || name === 'style') next.setAttribute(name, old.getAttribute(name) ?? '')
+  next.muted = old.muted
+  next.volume = old.volume
+  old.pause()
+  old.srcObject = null
+  old.remove?.()
+  next.srcObject = stream
+  if (old.isConnected !== false && document.body) document.body.append(next)
+  void next.play().catch(() => undefined)
+  return next
 }
 
 /** Контекст, который открывает жест старта. Индикатор вопроса берёт его же, чтобы не остаться suspended. */

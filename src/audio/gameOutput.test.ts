@@ -24,7 +24,15 @@ class FakeAudioElement {
   style = { cssText: '' }
   attrs: Record<string, string> = {}
   plays = 0
+  muted = false
+  volume = 1
+  removed = false
+  paused = false
   setAttribute(key: string, value: string) { this.attrs[key] = value }
+  getAttribute(key: string) { return this.attrs[key] ?? null }
+  getAttributeNames() { return Object.keys(this.attrs) }
+  pause() { this.paused = true }
+  remove() { this.removed = true }
   play() { this.plays += 1; return Promise.resolve() }
 }
 
@@ -67,7 +75,7 @@ describe('общий выход звука игры и качелька гром
     expect(elements).toHaveLength(0)
   })
 
-  it('Android: выход идёт через MediaStream в скрытый <audio>, после микрофона переподключается', async () => {
+  it('Android: выход через MediaStream в скрытый <audio>; после микрофона элемент и голос ведущей пересоздаются', async () => {
     const { beep, elements, links } = await load('Mozilla/5.0 (Linux; Android 14; CPH2581) Chrome/129 Mobile')
     const first = beep.gameOutput()
     expect(beep.gameOutput()).toBe(first)
@@ -77,8 +85,19 @@ describe('общий выход звука игры и качелька гром
     const element = elements[0]!
     expect(element.attrs['data-game-audio']).toBe('')
     expect(element.assigned).toEqual([{ id: 'bus-stream' }])
+    let hostReopened = 0
+    const stop = beep.onAudioOutputsReopen(() => { hostReopened += 1 })
     beep.reopenAudioOutputs()
-    expect(element.assigned).toEqual([{ id: 'bus-stream' }, null, { id: 'bus-stream' }])
-    expect(element.plays).toBeGreaterThanOrEqual(2)
+    expect(hostReopened).toBe(1)
+    expect(elements).toHaveLength(2)
+    expect(element.removed).toBe(true)
+    expect(element.srcObject).toBeNull()
+    const fresh = elements[1]!
+    expect(fresh.srcObject).toEqual({ id: 'bus-stream' })
+    expect(fresh.attrs['data-game-audio']).toBe('')
+    expect(fresh.plays).toBe(1)
+    stop()
+    beep.reopenAudioOutputs()
+    expect(hostReopened).toBe(1)
   })
 })
