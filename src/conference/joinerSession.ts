@@ -1,4 +1,3 @@
-import { setModelLevels } from './modelLevels.ts'
 import type { AppealRequest } from '../game/types.ts'
 import { masterBuildMismatchMessage } from './buildMatch.ts'
 import { decidePackGate } from './packGate.ts'
@@ -134,10 +133,6 @@ export class JoinerSession {
     this.unsub = this.transport.subscribe((message, senderId) => {
       // Ping отвечаем сразу, мимо очереди: иначе RTT включает время, пока очередь
       // ждёт проверку пакета (реальный sha256), и pong опаздывает или теряется.
-      if (message.type === 'modelLevels') {
-        if (!this.disposed) setModelLevels(message.levels)
-        return
-      }
       if (message.type === 'ping') {
         if (!this.disposed && !this.buildRejected) this.answerPing(message, senderId)
         return

@@ -1,8 +1,7 @@
 import { afterEach, describe, expect, it } from 'vitest'
 import { createElement } from 'react'
 import { renderToStaticMarkup } from 'react-dom/server'
-import { displayLevel, getModelLevels, resetModelLevels, sameModelLevels, setModelLevels, validModelLevels } from './modelLevels.ts'
-import { isConferenceMessage } from './messages.ts'
+import { displayLevel, getModelLevels, resetModelLevels, setModelLevels } from './modelLevels.ts'
 import { ConferenceVideoTile } from '../ui/ConferenceVideoStrip.tsx'
 
 afterEach(() => resetModelLevels())
@@ -15,18 +14,7 @@ describe('modelLevels', () => {
     expect(displayLevel(Number.NaN)).toBe(0)
   })
 
-  it('sameModelLevels: отсутствующий ключ = 0', () => {
-    expect(sameModelLevels({ total: 0, byParticipant: { a: 0 } }, { total: 0, byParticipant: {} })).toBe(true)
-    expect(sameModelLevels({ total: 0.1, byParticipant: {} }, { total: 0, byParticipant: {} })).toBe(false)
-  })
-
-  it('сообщение modelLevels проходит проверку только с уровнями 0..1', () => {
-    expect(isConferenceMessage({ type: 'modelLevels', authorityToken: 't', levels: { total: 0.3, byParticipant: { a: 0.3 } } })).toBe(true)
-    expect(isConferenceMessage({ type: 'modelLevels', authorityToken: 't', levels: { total: 2, byParticipant: {} } })).toBe(false)
-    expect(validModelLevels({ total: 0, byParticipant: { a: -1 } })).toBe(false)
-  })
-
-  it('кадр участника рисует его вклад в поток модели из общих уровней', () => {
+  it('кадр участника рисует его вклад в поток модели из уровней мастера', () => {
     setModelLevels({ total: 0.5, byParticipant: { irina: 0.4 } })
     expect(getModelLevels().total).toBe(0.5)
     const html = renderToStaticMarkup(createElement(ConferenceVideoTile, {

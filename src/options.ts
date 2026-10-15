@@ -157,5 +157,5 @@ export const silentCloneSamples = 6
 /** Пик клона (0..1) ниже этого — «тишина» для детектора немого клона. */
 export const silentClonePeak = 0.003
 
-/** Как часто мастер рассылает уровни «что слышит модель» (после микшера) всем участникам. */
-export const modelLevelsSendMs = 150
+/** Как часто мастер обновляет уровни «что слышит модель» (после микшера) для своего индикатора. */
+export const modelLevelsUpdateMs = 75

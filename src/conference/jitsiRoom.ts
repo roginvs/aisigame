@@ -14,7 +14,7 @@ import type { ConferenceMessage } from './messages.ts'
 import { isConferenceMessage } from './messages.ts'
 import type { ConferenceTransport } from './transport.ts'
 import { createHearWindow } from './hearWindow.ts'
-import { hearWindowSampleMs, modelLevelsSendMs } from '../options.ts'
+import { hearWindowSampleMs, modelLevelsUpdateMs } from '../options.ts'
 import { displayLevel, resetModelLevels, setModelLevels } from './modelLevels.ts'
 import { createMicMixer, type MicMixer, type MixerRemote } from './audioMix.ts'
 import { cameraFacing, isMobileCameraDevice, nextCameraDeviceId, shouldMirrorVideo, switchFacingCamera, type CameraFacing } from './camera.ts'
@@ -501,7 +501,7 @@ export async function connectJitsiConference(input: {
   }
 
   let levelsTimer: number | null = null
-  /** Уровни после микшера → общий индикатор (мастер рассылает их игрокам). */
+  /** Уровни после микшера → индикатор мастера (игрокам не рассылаются). */
   function publishModelLevels(): void {
     if (!modelMixer) return
     const byParticipant: Record<string, number> = {}
@@ -965,7 +965,7 @@ export async function connectJitsiConference(input: {
     localMicStream: () => localMicMedia,
     modelInputStream: () => {
       if (!modelMixer) {
-        levelsTimer = window.setInterval(publishModelLevels, Math.max(50, Math.round(modelLevelsSendMs / 2)))
+        levelsTimer = window.setInterval(publishModelLevels, modelLevelsUpdateMs)
         modelMixer = createMicMixer((event) => {
           pushTrace('note', 'Модель: источник микса', {
             ...event,

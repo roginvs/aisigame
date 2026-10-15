@@ -37,9 +37,6 @@ import { QuestionClip, QuestionMedia } from './QuestionMedia.tsx'
 import { questionClipPlaying } from './questionClip.ts'
 import { remainingFraction, remainingSeconds } from './timerFraction.ts'
 import { ModelInputMeter } from './ModelInputMeter.tsx'
-import { getModelLevels } from '../conference/modelLevels.ts'
-
-const modelLevelTotal = () => getModelLevels().total
 
 const ignoreConferenceVideoBinding = () => {}
 
@@ -424,12 +421,8 @@ export function GameScreen(props: {
                 <ModelName modelId={modelId} onModel={onModel} />
               </>
             )}
-            {conference ? (
-              <>
-                {' '}
-                <ModelInputMeter getLevel={modelLevelTotal} />
-              </>
-            ) : modelMeter ? (
+            {/* Только мастер: выход микшера (тот же узел, что уходит в модель). Игрокам не показываем. */}
+            {(!conference || conference.isMaster) && modelMeter ? (
               <>
                 {' '}
                 <ModelInputMeter getAnalyser={modelMeter} />
