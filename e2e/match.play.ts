@@ -46,6 +46,20 @@ test('верный ответ голосом', async ({ page }) => {
   await expect(page.getByRole('button', { name: 'Текст, 100, сыграно' })).toBeDisabled()
 })
 
+test('после кнопки ведущая коротко зовёт по имени, ответ поверх обращения принимается', async ({ page }) => {
+  await startDemo(page)
+  await page.evaluate(() => window.__aisigame?.setSpeechMs(4000))
+  await hear(page, 'Текст 100')
+  await expect(page.getByRole('heading', { name: 'Как звали первого римского императора?' })).toBeVisible()
+  await page.evaluate(() => window.__aisigame?.setSpeechMs(300))
+  await buzz(page, 'Игрок 1')
+  await page.evaluate(() => window.__aisigame?.setSpeechMs(4000))
+  await expect(page.getByRole('complementary', { name: 'Разговор' }).getByText('Игрок 1, ваш ответ.')).toBeVisible()
+  await hear(page, 'Август')
+  await expect(page.getByText('Верно.')).toBeVisible()
+  await page.screenshot({ path: test.info().outputPath('buzz-call.png') })
+})
+
 test('неверный ответ не закрывает ячейку, пока могут ответить другие', async ({ page }) => {
   await startDemo(page)
   await pick(page, 'Текст, 100')

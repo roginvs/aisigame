@@ -1,4 +1,4 @@
-import { auctionDingSound, catMeowSound, playAuctionDing, playCatMeow, preloadPublicSound } from '../audio/beep.ts'
+import { auctionDingSound, catMeowSound, preloadPublicSound } from '../audio/beep.ts'
 import { specialListenerId } from '../game/controller.ts'
 import { SpecialPanel, type SpecialPick } from './SpecialPanel.tsx'
 import { specialPanelPath } from './specialPanelPath.ts'
@@ -37,6 +37,9 @@ import { QuestionClip, QuestionMedia } from './QuestionMedia.tsx'
 import { questionClipPlaying } from './questionClip.ts'
 import { remainingFraction, remainingSeconds } from './timerFraction.ts'
 import { ModelInputMeter } from './ModelInputMeter.tsx'
+import { getModelLevels } from '../conference/modelLevels.ts'
+
+const modelLevelTotal = () => getModelLevels().total
 
 const ignoreConferenceVideoBinding = () => {}
 
@@ -273,16 +276,7 @@ export function GameScreen(props: {
     void preloadPublicSound(catMeowSound)
     void preloadPublicSound(auctionDingSound)
   }, [])
-  // Мяу/гонг — один раз на ячейку, на входе в объявление (у каждого клиента свой).
-  const specialSoundRef = useRef<string | null>(null)
-  const specialSoundKey = context.special && (path === 'cat.announcing' || path === 'auction.announcing')
-    ? `${context.special.kind}:${context.special.questionId}`
-    : null
-  useEffect(() => {
-    if (!specialSoundKey || specialSoundRef.current === specialSoundKey) return
-    specialSoundRef.current = specialSoundKey
-    void (specialSoundKey.startsWith('cat:') ? playCatMeow() : playAuctionDing())
-  }, [specialSoundKey])
+  // Мяу/динь играет контроллер (playSpecialSound) на входе в объявление: экран только рисует.
   const buttonsOpen = buttonsLive(path)
   const earlyLive = path === 'reading.armed'
   const canFalseStart = falseStartOpen(path, finalRound)
@@ -428,14 +422,19 @@ export function GameScreen(props: {
               <>
                 {' · '}
                 <ModelName modelId={modelId} onModel={onModel} />
-                {modelMeter ? (
-                  <>
-                    {' '}
-                    <ModelInputMeter getAnalyser={modelMeter} />
-                  </>
-                ) : null}
               </>
             )}
+            {conference ? (
+              <>
+                {' '}
+                <ModelInputMeter getLevel={modelLevelTotal} />
+              </>
+            ) : modelMeter ? (
+              <>
+                {' '}
+                <ModelInputMeter getAnalyser={modelMeter} />
+              </>
+            ) : null}
           </p>
           <h1>Своя игра</h1>
         </div>

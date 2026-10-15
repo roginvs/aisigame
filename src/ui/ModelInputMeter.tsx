@@ -17,10 +17,10 @@ const HEIGHT = 20
 
 /**
  * Индикатор того, что реально слышит модель: история уровня выхода микшера
- * (тот же поток, что уходит в realtime). Только у мастера. Отвод через
- * AnalyserNode, поток модели не меняется.
+ * (тот же поток, что уходит в realtime). В конференции — `getLevel` из общих уровней
+ * мастера (после микшера, разосланы всем), без конференции — свой AnalyserNode.
  */
-export function ModelInputMeter({ getAnalyser }: { getAnalyser: () => AnalyserNode | null }) {
+export function ModelInputMeter({ getAnalyser, getLevel }: { getAnalyser?: () => AnalyserNode | null; getLevel?: () => number }) {
   const canvasRef = useRef<HTMLCanvasElement | null>(null)
 
   useEffect(() => {
@@ -35,8 +35,8 @@ export function ModelInputMeter({ getAnalyser }: { getAnalyser: () => AnalyserNo
       const canvas = canvasRef.current
       const ctx = canvas?.getContext('2d')
       if (!canvas || !ctx) return
-      const analyser = getAnalyser()
-      let level = 0
+      const analyser = getLevel ? null : getAnalyser?.() ?? null
+      let level = getLevel ? getLevel() : 0
       if (analyser) {
         if (!samples || samples.length !== analyser.fftSize) samples = new Uint8Array(analyser.fftSize)
         analyser.getByteTimeDomainData(samples)
@@ -45,7 +45,7 @@ export function ModelInputMeter({ getAnalyser }: { getAnalyser: () => AnalyserNo
       history[head] = level
       head = (head + 1) % WIDTH
       ctx.clearRect(0, 0, WIDTH, HEIGHT)
-      ctx.fillStyle = analyser ? '#4ade80' : '#888'
+      ctx.fillStyle = analyser || getLevel ? '#4ade80' : '#888'
       for (let x = 0; x < WIDTH; x += 1) {
         const value = history[(head + x) % WIDTH] ?? 0
         const h = Math.max(1, Math.round(value * HEIGHT))
@@ -57,7 +57,7 @@ export function ModelInputMeter({ getAnalyser }: { getAnalyser: () => AnalyserNo
       stopped = true
       cancelAnimationFrame(frame)
     }
-  }, [getAnalyser])
+  }, [getAnalyser, getLevel])
 
   return (
     <canvas

@@ -412,6 +412,10 @@ function hostLine(purpose: string, instructions = ''): string {
   if (purpose === 'turn') return 'Ваш ответ.'
   if (purpose === 'appeal') return 'Повторите ответ, пожалуйста.'
   if (purpose === 'roundSummary') return 'Раунд окончен. Впереди следующий раунд.'
+  if (purpose === 'buzzCall') {
+    const name = /Игрок (.+?) первым нажал/.exec(instructions)?.[1]?.trim()
+    return name ? `${name}, ваш ответ.` : 'Ваш ответ.'
+  }
   if (purpose === 'micWarning') {
     const name =
       /Имя игрока:\s*(.+)/.exec(instructions)?.[1]?.split('\n')[0]?.trim() ||

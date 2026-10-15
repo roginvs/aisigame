@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { HOST_JITSI_NAME, isHostJitsiParticipant } from './media.ts'
+import { HOST_JITSI_NAME, isHostJitsiParticipant, modelHearsParticipant } from './media.ts'
 
 describe('isHostJitsiParticipant', () => {
   it('recognizes the bot by id even with another display name', () => {
@@ -24,5 +24,17 @@ describe('участник «Звуки игры»', () => {
     expect(isSoundsJitsiParticipant('x', SOUNDS_JITSI_NAME, null)).toBe(true)
     expect(isSoundsJitsiParticipant('x', 'Маша', null)).toBe(false)
     expect(isHostForSounds('x', SOUNDS_JITSI_NAME, null)).toBe(false)
+  })
+})
+
+describe('modelHearsParticipant', () => {
+  const ids = { bot: 'bot-2', sounds: 'snd' }
+  it('не кладёт в микс модели «Ведущую» прошлой сессии (другой id, то же имя)', () => {
+    expect(modelHearsParticipant('bot-1', HOST_JITSI_NAME, ids)).toBe(false)
+    expect(modelHearsParticipant('bot-2', '', ids)).toBe(false)
+    expect(modelHearsParticipant('x', SOUNDS_JITSI_NAME, ids)).toBe(false)
+  })
+  it('людей кладёт', () => {
+    expect(modelHearsParticipant('p1', 'Маша', ids)).toBe(true)
   })
 })

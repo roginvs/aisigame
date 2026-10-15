@@ -168,9 +168,9 @@ test.describe('конференция на BroadcastChannel', () => {
     await master.getByRole('group', { name: /Мастер: 0/ }).getByRole('button', { name: 'Жмите' }).click()
     await expect(joiner.getByRole('status').filter({ hasText: 'Мастер отвечает' })).toBeVisible()
     const mutedReminder = master.getByText(/Мастер,.+микрофон/i)
-    await master.waitForTimeout(2_500)
-    await expect(mutedReminder).toHaveCount(0)
-    await expect(mutedReminder).toBeVisible({ timeout: 2_000 })
+    // Сначала короткое обращение по имени после кнопки, напоминание про микрофон — позже, отдельной репликой.
+    await expect(master.getByRole('complementary', { name: 'Разговор' }).getByText('Мастер, ваш ответ.')).toBeVisible()
+    await expect(mutedReminder).toBeVisible({ timeout: 6_000 })
     await hear(master, 'кислород')
     await expect(joiner.getByRole('status').filter({ hasText: 'Мастер выбирает вопрос' })).toBeVisible({
       timeout: 20_000,

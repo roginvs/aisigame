@@ -1,3 +1,5 @@
+import { getModelLevels, sameModelLevels, type ModelLevels } from './modelLevels.ts'
+import { modelLevelsSendMs } from '../options.ts'
 import { getHostEar, subscribeHostEar, type HostEar } from '../game/hostEar.ts'
 import { hostMood } from '../ui/hostMood.ts'
 import type { LinkStatus } from '../realtime/client.ts'
@@ -94,6 +96,8 @@ export class MasterSession {
   private heartbeatTimer = 0
   private presenceTimer = 0
   private pingTimer = 0
+  private levelsTimer = 0
+  private lastLevels: ModelLevels = { total: 0, byParticipant: {} }
   private pingSeq = 0
   private onRosterCb: () => void
   private initialHistory: ConferenceMessageRing
@@ -206,6 +210,8 @@ export class MasterSession {
     }, PRESENCE_HEARTBEAT_MS)
     // RTT каждому клиенту: один широковещательный ping, ответ — pong с тем же sentAt.
     this.pingTimer = window.setInterval(() => this.sendPing(), PING_INTERVAL_MS)
+    // Индикатор «что слышит модель» у всех из одного замера мастера (после микшера).
+    this.levelsTimer = window.setInterval(() => this.sendModelLevels(), modelLevelsSendMs)
     this.presenceTimer = window.setInterval(() => {
       const now = Date.now()
       this.onRosterCb()
@@ -308,6 +314,7 @@ export class MasterSession {
     window.clearInterval(this.heartbeatTimer)
     window.clearInterval(this.presenceTimer)
     window.clearInterval(this.pingTimer)
+    window.clearInterval(this.levelsTimer)
     this.clearLobbySpeechTimer()
     this.machineSub?.unsubscribe()
     this.traceUnsub()
@@ -363,6 +370,14 @@ export class MasterSession {
       packPhase: nextIndex > 0 ? 'downloading' : 'connecting',
     })
     this.onRosterCb()
+  }
+
+  private sendModelLevels(): void {
+    if (this.disposedFallback) return
+    const levels = getModelLevels()
+    if (sameModelLevels(levels, this.lastLevels)) return
+    this.lastLevels = levels
+    this.transport.send({ type: 'modelLevels', authorityToken: this.authorityToken, levels })
   }
 
   private sendPing(): void {

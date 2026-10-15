@@ -79,7 +79,7 @@ function judgeLines(): string[] {
   })
 }
 
-async function boot(client: MockRealtimeClient, questions = pack, getPublicHistory?: () => readonly ConferenceHistoryMessage[]) {
+async function boot(client: MockRealtimeClient, questions = pack, getPublicHistory?: () => readonly ConferenceHistoryMessage[], playSpecialSound?: (kind: 'cat' | 'auction') => void) {
   vi.useFakeTimers()
   vi.stubGlobal('window', {
     setTimeout: (handler: TimerHandler, timeout?: number) => globalThis.setTimeout(handler, timeout),
@@ -93,6 +93,7 @@ async function boot(client: MockRealtimeClient, questions = pack, getPublicHisto
     client,
     getApiKey: () => 'test-key',
     getPublicHistory,
+    playSpecialSound,
     setLink: () => {},
     onActions: (next) => {
       actions = next
@@ -159,6 +160,73 @@ describe('attachController choice', () => {
     expect(judge?.[3]).toContain('другим фактически верным ответом')
     expect(judge?.[3]).not.toContain('CHAT_MARKER')
     expect(judge?.[4]).toBe(true)
+    stop()
+    actor.stop()
+  })
+
+  it('мяу кота играет контроллер один раз на входе, не экран', async () => {
+    const questions: QuestionPack = {
+      ...pack,
+      questions: pack.questions.map((q) => (q.id === 's-400'
+        ? { ...q, cat: { source: 'cat' as const, theme: 'Звери', price: { kind: 'fixed' as const, value: 400 }, knows: 'after' as const, options: [400] } }
+        : q)),
+    }
+    const sounds: string[] = []
+    const { actor, stop } = await boot(new MockRealtimeClient(), questions, () => [], (kind) => sounds.push(kind))
+    actor.send({ type: 'HOST_AUDIO_FINISHED', purpose: 'welcome' })
+    actor.send({ type: 'QUESTION_SELECTED', themeId: 's', value: 400 })
+    await vi.advanceTimersByTimeAsync(gameConfig.cellFlashMs + 3000)
+    expect(sounds).toEqual(['cat'])
+    stop()
+    actor.stop()
+  })
+
+  it('после кнопки ведущая коротко зовёт по имени, а ответ поверх обращения принимается', async () => {
+    const client = new MockRealtimeClient()
+    client.setSpeechMs(60_000)
+    const speech = vi.spyOn(client, 'requestSpeech')
+    const interrupt = vi.spyOn(client, 'interruptSpeech')
+    const tools = vi.spyOn(client, 'requestTool')
+    const { actor, stop } = await boot(client, pack, () => [])
+    actor.send({ type: 'HOST_AUDIO_FINISHED', purpose: 'welcome' })
+    actor.send({ type: 'QUESTION_SELECTED', themeId: 's', value: 400 })
+    await vi.advanceTimersByTimeAsync(gameConfig.cellFlashMs + 100)
+    actor.send({ type: 'HOST_AUDIO_FINISHED', purpose: 'read' })
+    await vi.advanceTimersByTimeAsync(50)
+    expect(statePath(actor.getSnapshot().value)).toMatch(/^buzzing/)
+    actor.send({ type: 'BUZZER_PRESSED', playerId: 1 })
+    await vi.advanceTimersByTimeAsync(0)
+    const call = speech.mock.calls.find(([purpose]) => purpose === 'buzzCall')
+    expect(call?.[2]).toContain(actor.getSnapshot().context.players[0]!.name)
+    expect(call?.[2]).toContain('Каждый раз формулируй иначе')
+    expect(call?.[2]).not.toMatch(/«[^»]*отвечайте/i)
+    const before = interrupt.mock.calls.length
+    client.hear('мой ответ', 1200)
+    await vi.advanceTimersByTimeAsync(100)
+    expect(interrupt.mock.calls.length).toBeGreaterThan(before)
+    expect(tools.mock.calls.some(([purpose]) => purpose === 'judge')).toBe(true)
+    stop()
+    actor.stop()
+  })
+
+  it('эхо чтения с ошибками ASR не обрывает вопрос, а реплика игрока обрывает', async () => {
+    const text = 'Эта река протекает через Рим и впадает в Тирренское море'
+    const questions: QuestionPack = { ...pack, questions: pack.questions.map((q) => (q.id === 's-400' ? { ...q, text } : q)) }
+    const client = new MockRealtimeClient()
+    client.setSpeechMs(60_000)
+    const { actor, stop } = await boot(client, questions, () => [])
+    actor.send({ type: 'HOST_AUDIO_FINISHED', purpose: 'welcome' })
+    actor.send({ type: 'QUESTION_SELECTED', themeId: 's', value: 400 })
+    await vi.advanceTimersByTimeAsync(gameConfig.cellFlashMs + 2500)
+    expect(statePath(actor.getSnapshot().value)).toMatch(/^reading/)
+    const notes = () => getTrace().map((entry) => entry.title)
+    client.hear('эта река протекает чрез рим и впадает', 2500)
+    await vi.advanceTimersByTimeAsync(300)
+    expect(notes()).toContain('речь совпала с текстом вопроса, чтение не прерываю')
+    expect(notes().some((line) => line.startsWith('перебили чтение'))).toBe(false)
+    client.hear('подождите повторите пожалуйста', 1500)
+    await vi.advanceTimersByTimeAsync(300)
+    expect(notes()).toContain('перебили чтение: подождите повторите пожалуйста')
     stop()
     actor.stop()
   })

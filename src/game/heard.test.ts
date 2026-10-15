@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { blurtGate, choiceGate } from './heard.ts'
+import { blurtGate, choiceGate, repeatsQuestion } from './heard.ts'
 
 describe('choiceGate', () => {
   it('accepts a phrase that could be a cell', () => {
@@ -29,5 +29,16 @@ describe('blurtGate', () => {
     expect(blurtGate('Каспийское море', 1500)).toBe('talk')
     expect(blurtGate('кхе', 1500)).toBe('ignore')
     expect(blurtGate('мм', 2000)).toBe('ignore')
+  })
+})
+describe('repeatsQuestion', () => {
+  const question = 'Эта река протекает через Рим и впадает в Тирренское море'
+  it('эхо чтения с ошибками ASR — не перебивание', () => {
+    expect(repeatsQuestion('эта река протекает через рим', question)).toBe(true)
+    expect(repeatsQuestion('эта река протекает чрез рим и впадает', question)).toBe(true)
+  })
+  it('настоящая реплика игрока — перебивание', () => {
+    expect(repeatsQuestion('подождите повторите пожалуйста', question)).toBe(false)
+    expect(repeatsQuestion('река', question)).toBe(false)
   })
 })

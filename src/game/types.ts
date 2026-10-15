@@ -21,6 +21,7 @@ export type SpeechPurpose =
   | 'turn'
   | 'chooserHandoff'
   | 'micWarning'
+  | 'buzzCall'
   | 'falseStart'
   | 'appeal'
   | 'roundSummary'

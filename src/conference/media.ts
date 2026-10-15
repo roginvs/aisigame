@@ -29,6 +29,15 @@ export function isSoundsJitsiParticipant(id: string, name: string, soundsPartici
   return name === SOUNDS_JITSI_NAME
 }
 
+/** Кого кладём в микс, который слышит модель: только людей — не «Ведущую» (её же голос = ложное перебивание чтения) и не эффекты. */
+export function modelHearsParticipant(
+  id: string,
+  name: string,
+  ids: { bot: string | null; sounds: string | null },
+): boolean {
+  return !isHostJitsiParticipant(id, name, ids.bot) && !isSoundsJitsiParticipant(id, name, ids.sounds)
+}
+
 export function isHostJitsiParticipant(id: string, name: string, botParticipantId: string | null): boolean {
   if (botParticipantId && id === botParticipantId) return true
   return name === HOST_JITSI_NAME

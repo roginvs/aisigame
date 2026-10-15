@@ -168,6 +168,22 @@ describe('createMicMixer', () => {
     mixer.dispose()
   })
 
+  it('trace: источник добавлен/снят; reattach пересоздаёт клон той же дорожки', () => {
+    const events: string[] = []
+    const mixer = createMicMixer((event) => events.push(`${event.kind}:${event.key}`))
+    const a = new FakeTrack('audio', true, 'live', 'a')
+    mixer.update({ remotes: [remote('t1', 'pa', a)], local: noLocal, focus: 'pa' })
+    mixer.update({ remotes: [remote('t1', 'pa', a)], local: noLocal, focus: 'pa' })
+    expect(a.clone).toHaveBeenCalledTimes(1)
+    mixer.reattach('remote-t1')
+    mixer.update({ remotes: [remote('t1', 'pa', a)], local: noLocal, focus: 'pa' })
+    expect(a.clone).toHaveBeenCalledTimes(2)
+    mixer.update({ remotes: [], local: noLocal, focus: 'pa' })
+    expect(events).toEqual(['added:remote-t1', 'replaced:remote-t1', 'removed:remote-t1'])
+    expect(mixer.levels()).toEqual([])
+    mixer.dispose()
+  })
+
   it('смена фокуса меняет только гейн, источники не пересоздаются', () => {
     const mixer = createMicMixer()
     const a = new FakeTrack('audio', true, 'live', 'a')

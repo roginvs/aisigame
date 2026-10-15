@@ -1,3 +1,4 @@
+import { validModelLevels, type ModelLevels } from './modelLevels.ts'
 /** Сообщения конференции — plain JSON, без классов. */
 import { readHostEar, type HostEar } from '../game/hostEar.ts'
 import { readAppeal, readOutcomes } from '../game/appeals.ts'
@@ -290,6 +291,9 @@ export type DebugLogMessage = {
 export type PingMessage = { type: 'ping'; authorityToken: string; seq: number; sentAt: number }
 export type PongMessage = { type: 'pong'; clientId: string; authToken: string; seq: number; sentAt: number }
 
+/** Мастер → все: уровни «что слышит модель» после микшера (см. modelLevels.ts). */
+export type ModelLevelsMessage = { type: 'modelLevels'; authorityToken: string; levels: ModelLevels }
+
 export type SnapshotMessage = {
   type: 'snapshot'
   authorityToken: string
@@ -319,6 +323,7 @@ export type ConferenceMessage =
   | StatusRequestMessage
   | PingMessage
   | PongMessage
+  | ModelLevelsMessage
 
 export function isConferenceMessage(value: unknown): value is ConferenceMessage {
   if (!isRecord(value) || typeof value.type !== 'string') return false
@@ -394,6 +399,8 @@ export function isConferenceMessage(value: unknown): value is ConferenceMessage 
       )
     case 'ping':
       return authority(value) && integer(value.seq, 0) && Number.isFinite(value.sentAt)
+    case 'modelLevels':
+      return authority(value) && validModelLevels(value.levels)
     case 'pong':
       return client() && integer(value.seq, 0) && Number.isFinite(value.sentAt)
     case 'snapshot':

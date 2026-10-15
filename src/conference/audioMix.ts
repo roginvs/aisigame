@@ -1,3 +1,4 @@
+import { levelOf } from './hearWindow.ts'
 /** Удалённая дорожка в миксе модели. key — стабильный ключ дорожки, не участника. */
 export type MixerRemote = {
   key: string
@@ -19,8 +20,17 @@ export type MicMixer = {
   outputStream: () => MediaStream | null
   /** AnalyserNode на той же шине, что уходит модели (только отвод, поток не меняет). */
   meter: () => AnalyserNode
+  /** Уровни каждого источника до гейна (для диагностики окна «модель слушает»). */
+  levels: () => Array<{ key: string; rms: number; peak: number; gain: 0 | 1; postRms: number }>
+  /** Уровень шины — тот же узел, что рисует индикатор «что слышит модель» и уходит в модель. */
+  busLevel: () => { rms: number; peak: number }
+  /** Пересоздать источник (новый клон) при следующем update — лечение «немого клона». */
+  reattach: (key: string) => void
   dispose: () => void
 }
+
+/** Событие источника микса для trace: подключён, заменён (новая дорожка/клон), снят. */
+export type MixerSourceEvent = { key: string; kind: 'added' | 'replaced' | 'removed'; tracks: string }
 
 /**
  * Кого модель слышит в миксе конференции.
@@ -89,6 +99,9 @@ const GAIN_TIME_CONSTANT_S = 0.005
 type MixerSource = {
   node: MediaStreamAudioSourceNode
   gain: GainNode
+  analyser: AnalyserNode | null
+  /** После гейна: ровно то, что этот источник добавляет в поток модели. */
+  postAnalyser: AnalyserNode | null
   /** Только клоны: оригинал микрофона останавливать нельзя. */
   clones: MediaStreamTrack[]
   fingerprint: string
@@ -109,7 +122,7 @@ function liveAudioTracks(stream: MediaStream | null): MediaStreamTrack[] {
  * а Web Audio в Chromium на общем треке с HTML-элементом часто молчит.
  * Локальный микрофон не клонируем: клон не подчиняется Jitsi `mute()`.
  */
-export function createMicMixer(): MicMixer {
+export function createMicMixer(onSource: (event: MixerSourceEvent) => void = () => undefined): MicMixer {
   const context = new AudioContext()
   const destination = context.createMediaStreamDestination()
   const sources = new Map<string, MixerSource>()
@@ -118,11 +131,16 @@ export function createMicMixer(): MicMixer {
   bus.connect(destination)
   let analyser: AnalyserNode | null = null
 
-  function drop(key: string): void {
+  const forceReattach = new Set<string>()
+
+  function drop(key: string, quiet = false): void {
     const existing = sources.get(key)
     if (!existing) return
+    if (!quiet) onSource({ key, kind: 'removed', tracks: existing.fingerprint })
     existing.node.disconnect()
     existing.gain.disconnect()
+    existing.analyser?.disconnect()
+    existing.postAnalyser?.disconnect()
     for (const clone of existing.clones) {
       try {
         clone.stop()
@@ -142,15 +160,28 @@ export function createMicMixer(): MicMixer {
     }
     const fingerprint = `${cloneTracks ? 'c' : 'o'}:${originals.map((track) => track.id).join(',')}`
     const existing = sources.get(key)
-    if (existing?.fingerprint === fingerprint) return true
-    drop(key)
+    const forced = forceReattach.delete(key)
+    if (existing?.fingerprint === fingerprint && !forced) return true
+    drop(key, true)
     const tracks = cloneTracks ? originals.map((track) => track.clone()) : originals
     const node = context.createMediaStreamSource(new MediaStream(tracks))
     const gain = context.createGain()
     gain.gain.value = 0
     node.connect(gain)
     gain.connect(bus)
-    sources.set(key, { node, gain, clones: cloneTracks ? tracks : [], fingerprint, level: 0 })
+    // Анализатор до гейна: видно, есть ли звук у источника, даже когда фокус его глушит.
+    let analyser: AnalyserNode | null = null
+    let postAnalyser: AnalyserNode | null = null
+    if (typeof context.createAnalyser === 'function') {
+      analyser = context.createAnalyser()
+      analyser.fftSize = 1024
+      node.connect(analyser)
+      postAnalyser = context.createAnalyser()
+      postAnalyser.fftSize = 1024
+      gain.connect(postAnalyser)
+    }
+    sources.set(key, { node, gain, analyser, postAnalyser, clones: cloneTracks ? tracks : [], fingerprint, level: 0 })
+    onSource({ key, kind: existing ? 'replaced' : 'added', tracks: fingerprint })
     return true
   }
 
@@ -199,8 +230,32 @@ export function createMicMixer(): MicMixer {
       }
       return analyser
     },
+    levels() {
+      const out: Array<{ key: string; rms: number; peak: number; gain: 0 | 1; postRms: number }> = []
+      const read = (tap: AnalyserNode | null) => {
+        if (!tap || typeof tap.getFloatTimeDomainData !== 'function') return { rms: 0, peak: 0 }
+        const data = new Float32Array(tap.fftSize)
+        tap.getFloatTimeDomainData(data)
+        return levelOf(data)
+      }
+      for (const [key, source] of sources) {
+        const { rms, peak } = read(source.analyser)
+        out.push({ key, rms, peak, gain: source.level, postRms: read(source.postAnalyser).rms })
+      }
+      return out
+    },
+    busLevel() {
+      const tap = this.meter()
+      if (typeof tap.getFloatTimeDomainData !== 'function') return { rms: 0, peak: 0 }
+      const data = new Float32Array(tap.fftSize)
+      tap.getFloatTimeDomainData(data)
+      return levelOf(data)
+    },
+    reattach(key) {
+      if (sources.has(key)) forceReattach.add(key)
+    },
     dispose() {
-      for (const key of [...sources.keys()]) drop(key)
+      for (const key of [...sources.keys()]) drop(key, true)
       void context.close()
     },
   }

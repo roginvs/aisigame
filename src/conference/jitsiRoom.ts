@@ -5,6 +5,7 @@ import {
   SOUNDS_JITSI_NAME,
   isSoundsJitsiParticipant,
   isHostJitsiParticipant,
+  modelHearsParticipant,
   type ConferenceHandle,
   type ConferenceTile,
 } from './media.ts'
@@ -12,6 +13,9 @@ import { fetchJitsiConfig, websocketUrlForBase } from './jitsiConfig.ts'
 import type { ConferenceMessage } from './messages.ts'
 import { isConferenceMessage } from './messages.ts'
 import type { ConferenceTransport } from './transport.ts'
+import { createHearWindow } from './hearWindow.ts'
+import { hearWindowSampleMs, modelLevelsSendMs } from '../options.ts'
+import { displayLevel, resetModelLevels, setModelLevels } from './modelLevels.ts'
 import { createMicMixer, type MicMixer, type MixerRemote } from './audioMix.ts'
 import { cameraFacing, isMobileCameraDevice, nextCameraDeviceId, shouldMirrorVideo, switchFacingCamera, type CameraFacing } from './camera.ts'
 import { createSpeakerActivity } from './speakerActivity.ts'
@@ -462,6 +466,59 @@ export async function connectJitsiConference(input: {
   /** `null` — модель слышит всех; иначе только этот Jitsi participant id. */
   let modelHearOnlyId: string | null | false = null
   let lastFallbackFocus = ''
+  /** Последний уровень Jitsi по участнику (TRACK_AUDIO_LEVEL_CHANGED) — для сравнения с клоном в миксе. */
+  const jitsiLevels = new Map<string, number>()
+  /** Ключ источника микса → participant id на последнем синке. */
+  const mixerOwners = new Map<string, string>()
+  let hearWindow: ReturnType<typeof createHearWindow> | null = null
+  let hearTimer: number | null = null
+
+  function closeHearWindow(): void {
+    if (hearTimer !== null) window.clearInterval(hearTimer)
+    hearTimer = null
+    if (!hearWindow) return
+    pushTrace('note', 'Модель: окно слушания (уровни микса)', hearWindow.summary(performance.now()))
+    hearWindow = null
+  }
+
+  function sampleHearWindow(): void {
+    if (!modelMixer || !hearWindow) return
+    const samples = modelMixer.levels().map((item) => {
+      const participantId = item.key === 'local' ? localId() : mixerOwners.get(item.key) ?? ''
+      return { ...item, participantId, jitsi: participantId ? jitsiLevels.get(participantId) ?? 0 : null }
+    })
+    const bus = modelMixer.busLevel()
+    samples.push({ key: 'bus', participantId: 'модель', gain: 1, rms: bus.rms, peak: bus.peak, postRms: bus.rms, jitsi: null })
+    for (const key of hearWindow.add(samples)) {
+      if (key === 'bus' || key === 'local') {
+        pushTrace('note', 'Модель: Jitsi слышит речь, а в миксе тишина', { key })
+        continue
+      }
+      pushTrace('note', 'Модель: немой клон дорожки — пересоздаём', { key, participantId: mixerOwners.get(key) ?? '' })
+      modelMixer.reattach(key)
+      syncModelMixer()
+    }
+  }
+
+  let levelsTimer: number | null = null
+  /** Уровни после микшера → общий индикатор (мастер рассылает их игрокам). */
+  function publishModelLevels(): void {
+    if (!modelMixer) return
+    const byParticipant: Record<string, number> = {}
+    for (const item of modelMixer.levels()) {
+      const id = item.key === 'local' ? localId() : mixerOwners.get(item.key) ?? ''
+      if (!id) continue
+      byParticipant[id] = Math.max(byParticipant[id] ?? 0, displayLevel(item.postRms))
+    }
+    setModelLevels({ total: displayLevel(modelMixer.busLevel().rms), byParticipant })
+  }
+
+  function openHearWindow(focus: string | false | null): void {
+    closeHearWindow()
+    if (typeof focus !== 'string' || !modelMixer) return
+    hearWindow = createHearWindow(focus, performance.now())
+    hearTimer = window.setInterval(sampleHearWindow, hearWindowSampleMs)
+  }
   const tileListeners = new Set<(tiles: ConferenceTile[]) => void>()
   const hostSpeakingListeners = new Set<(speaking: boolean) => void>()
   let lastHostSpeaking = false
@@ -634,12 +691,14 @@ export async function connectJitsiConference(input: {
     for (const [track, entry] of remoteAudioTracks) {
       const owner = trackOwner(track)
       if (!owner || (botId && owner === botId)) continue
-      // Эффекты игры модель не слышит.
-      if (isSoundsRemote(owner)) continue
+      // Ни «Ведущую» (в т.ч. призрак прошлой сессии / по имени), ни эффекты модель не слышит:
+      // иначе она слышит своё же чтение и controller считает это перебиванием (TALKED_OVER).
+      if (!modelHearsParticipant(owner, remoteNames.get(owner) ?? '', { bot: botId, sounds: soundsHandle?.localParticipantId() ?? null })) continue
       const stream = conferenceAudioStream(track)
       if (!stream) continue
       const muted = Boolean(track.isMuted?.())
       remotes.push({ key: entry.key, participantId: owner, stream, muted })
+      mixerOwners.set(`remote-${entry.key}`, owner)
     }
     const result = modelMixer.update({
       remotes,
@@ -699,7 +758,9 @@ export async function connectJitsiConference(input: {
     if (!next) throw new Error('Микрофон недоступен')
     for (const extra of tracks.slice(1)) extra.dispose()
     localAudio = next
-    localMicMedia = next.getOriginalStream?.() ?? null
+    // Тот же объект, что опубликован в комнату, и та же функция, что для чужих дорожек.
+    // Свою дорожку Jitsi обратно не присылает (trackAdded только у других).
+    localMicMedia = conferenceAudioStream(next)
     watchLocalMic(next)
     await conference.addTrack(next)
     await Promise.resolve(next.unmute())
@@ -788,6 +849,7 @@ export async function connectJitsiConference(input: {
 
   conference.on(confEvents.audioLevel, (id: unknown, level: unknown) => {
     if (input.bot || typeof id !== 'string' || typeof level !== 'number') return
+    jitsiLevels.set(id, level)
     speakerActivity.note(id, level)
   })
 
@@ -903,15 +965,23 @@ export async function connectJitsiConference(input: {
     localMicStream: () => localMicMedia,
     modelInputStream: () => {
       if (!modelMixer) {
-        modelMixer = createMicMixer()
+        levelsTimer = window.setInterval(publishModelLevels, Math.max(50, Math.round(modelLevelsSendMs / 2)))
+        modelMixer = createMicMixer((event) => {
+          pushTrace('note', 'Модель: источник микса', {
+            ...event,
+            participantId: event.key === 'local' ? localId() : mixerOwners.get(event.key) ?? '',
+          })
+        })
         syncModelMixer()
       }
       return modelMixer.outputStream()
     },
     modelMeter: () => modelMixer?.meter() ?? null,
     setModelHearOnly(participantId) {
+      const changed = participantId !== modelHearOnlyId
       modelHearOnlyId = participantId
       syncModelMixer()
+      if (changed) openHearWindow(participantId)
     },
     anyoneSpeaking,
     localParticipantId: localId,
@@ -1056,6 +1126,9 @@ export async function connectJitsiConference(input: {
       soundsHandle?.dispose()
       soundsHandle = null
       transport.close()
+      closeHearWindow()
+      if (levelsTimer !== null) window.clearInterval(levelsTimer)
+      resetModelLevels()
       modelMixer?.dispose()
       modelMixer = null
       speakerActivity.dispose()

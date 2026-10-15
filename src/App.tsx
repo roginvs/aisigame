@@ -304,6 +304,7 @@ export default function App() {
       setLink,
       keepVoiceSession: () => conferenceLobbyRef.current,
       voiceAlreadyConnected: () => voiceConnectedRef.current,
+      playSpecialSound: (kind) => { void (kind === 'cat' ? playCatMeow() : playAuctionDing()) },
       onActions: (actions) => {
         controllerActionsRef.current = actions
       },

@@ -76,6 +76,8 @@ export function attachController(options: {
   getJudgmentMode?: () => JudgmentInputMode
   judgmentMode?: JudgmentInputMode
   getPublicHistory?: () => readonly ConferenceHistoryMessage[] | null
+  /** Мяу/динь при входе в объявление кота/аукциона. Звуки игры — дело машины, не экрана. */
+  playSpecialSound?: (kind: 'cat' | 'auction') => void
 }): () => void {
   const { actor, client, getApiKey, setLink, keepVoiceSession, voiceAlreadyConnected, onActions } = options
   let historyStartId = getTrace().at(-1)?.id ?? 0
@@ -583,6 +585,7 @@ export function attachController(options: {
       // Мяу / динь звучит у всех локально; первая фраза — после звука.
       const purpose = path === 'cat.announcing' ? 'cat' : 'auction'
       const waitMs = from === 'paused' || from.startsWith(purpose === 'cat' ? 'cat.' : 'auction.') ? 0 : purpose === 'cat' ? catMeowMs : auctionDingMs
+      if (waitMs > 0) options.playSpecialSound?.(purpose)
       if (specialIntroTimer) clearTimeout(specialIntroTimer)
       specialIntroTimer = setTimeout(() => {
         specialIntroTimer = null
@@ -692,6 +695,11 @@ export function attachController(options: {
       armAnswerAttempt(context.attemptId)
       client.setTranscriptionPrompt(answerPromptFor(context))
       client.setMicEnabled(true)
+      // Нажал кнопку — короткое обращение по имени, слух уже открыт: начало ответа обрывает ведущую.
+      const pressed = from.startsWith('buzzing') || from.startsWith('reading') || from === 'falseStartCue'
+      if (pressed && !earlyAnswer && context.activePlayerId !== null) {
+        speakWhileListening('buzzCall', buzzCallCue(playerName(context.players, context.activePlayerId)))
+      }
       if (earlyAnswer) {
         earlyAnswer = false
         liveSpeechItemId = openSpeechItemId ?? liveSpeechItemId
@@ -960,7 +968,7 @@ export function attachController(options: {
       return
     }
     const question = questionById(actor.getSnapshot().context.questions, actor.getSnapshot().context.activeQuestionId)
-    if (question && repeatsQuestion(heard.text, questionSpeech(question))) {
+    if ((question && repeatsQuestion(heard.text, questionSpeech(question))) || echoesHost(heard.text)) {
       pushTrace('note', 'речь совпала с текстом вопроса, чтение не прерываю')
       return
     }
@@ -1586,6 +1594,7 @@ function isSpeechPurpose(purpose: string): purpose is SpeechPurpose {
     purpose === 'turn' ||
     purpose === 'chooserHandoff' ||
     purpose === 'micWarning' ||
+    purpose === 'buzzCall' ||
     purpose === 'idleNudge' ||
     purpose === 'idleAuto' ||
     purpose === 'falseStart' ||
@@ -1712,6 +1721,19 @@ export function mutedMicCue(playerName: string): string {
     constraints: [
       boardSecrets,
       'Ячейку не выбирай.',
+    ],
+  })
+}
+
+/** Обращение к нажавшему кнопку: очень коротко и каждый раз по-разному, формулировку выбирает модель. */
+export function buzzCallCue(playerName: string): string {
+  const name = playerName.trim() || 'Игрок'
+  return hostCue({
+    situation: `Игрок ${name} первым нажал кнопку и сейчас будет отвечать. Его уже слушают.`,
+    goal: `Дай ${name} слово: обратись по имени, можно одним именем.`,
+    constraints: [
+      boardSecrets,
+      'Очень коротко: имя и максимум два слова. Каждый раз формулируй иначе, не повторяй прошлое обращение. Вопрос не повторяй, правильный ответ не произноси, не подсказывай.',
     ],
   })
 }
