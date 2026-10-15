@@ -66,7 +66,7 @@ describe('grok wire', () => {
       },
       call.turn,
     )
-    expect(asOutput(again.events[0])).toEqual([])
+    expect(asOutput(again.events[0]!)).toEqual([])
   })
 })
 

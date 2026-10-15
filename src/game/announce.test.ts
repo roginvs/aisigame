@@ -187,7 +187,7 @@ describe('announceInstructions', () => {
       announceKind: 'unclear',
       judgmentStatus: 'unintelligible',
       judgmentReason: 'Реплика обрывочная и не позволяет понять осмысленный ответ.',
-      questions: [{ ...base.questions[0], answers: ['Солнце', 'солнечная звезда'] }],
+      questions: [{ ...base.questions[0]!, answers: ['Солнце', 'солнечная звезда'] }],
     })
     const line = announceInstructions(sample)
     expect(verbatimAnnouncement(sample)).toBeNull()
@@ -213,7 +213,7 @@ describe('announceInstructions', () => {
     const base = context()
     const line = announceInstructions(
       context({
-        questions: [{ ...base.questions[0], answers: ['Солнце', 'солнечная звезда', 'ближайшая звезда'] }],
+        questions: [{ ...base.questions[0]!, answers: ['Солнце', 'солнечная звезда', 'ближайшая звезда'] }],
       }),
     )
     expect(line).toContain('просит назвать эталон вслух')
@@ -230,7 +230,7 @@ describe('announceInstructions', () => {
       context({
         questions: [
           {
-            ...base.questions[0],
+            ...base.questions[0]!,
             text: 'Что появилось раньше?',
             answers: ['D', 'Звёздные войны'],
             choices: [
@@ -270,7 +270,7 @@ describe('announceInstructions', () => {
     const sample = context({
       sayCloseGuess: false,
       wrongHeard: ['Братство кольца'],
-      questions: [{ ...base.questions[0], answers: ['Властелин колец'] }],
+      questions: [{ ...base.questions[0]!, answers: ['Властелин колец'] }],
     })
     expect(announceInstructions(sample)).toBe('Властелин колец')
     expect(verbatimAnnouncement(sample)).toBe('Властелин колец')
@@ -281,7 +281,7 @@ describe('announceInstructions', () => {
     const sample = context({
       sayCloseGuess: true,
       wrongHeard: ['Братство кольца'],
-      questions: [{ ...base.questions[0], answers: ['Властелин колец'] }],
+      questions: [{ ...base.questions[0]!, answers: ['Властелин колец'] }],
     })
     const line = announceInstructions(sample)
     expect(verbatimAnnouncement(sample)).toBeNull()
@@ -304,7 +304,7 @@ describe('announceInstructions', () => {
       context({
         sayCloseGuess: true,
         wrongHeard: [heard, 'Хоббит'],
-        questions: [{ ...base.questions[0], answers: ['Властелин колец'] }],
+        questions: [{ ...base.questions[0]!, answers: ['Властелин колец'] }],
       }),
     )
     expect(line).toContain(`«${heard}»`)
@@ -338,7 +338,7 @@ describe('announceInstructions', () => {
         announceKind: 'incorrect',
         sayCloseGuess: true,
         wrongHeard: ['Братство кольца'],
-        questions: [{ ...base.questions[0], answers: ['Властелин колец'] }],
+        questions: [{ ...base.questions[0]!, answers: ['Властелин колец'] }],
       }),
     )
     expect(line.indexOf('вердикт')).toBeLessThan(line.indexOf('«Братство кольца»'))
@@ -355,7 +355,7 @@ describe('announceInstructions', () => {
         announceKind: 'silence',
         sayCloseGuess: true,
         wrongHeard: ['Братство кольца'],
-        questions: [{ ...base.questions[0], answers: ['Властелин колец'] }],
+        questions: [{ ...base.questions[0]!, answers: ['Властелин колец'] }],
       }),
     )
     expect(line.indexOf('«Братство кольца»')).toBeLessThan(line.indexOf('«Властелин колец»'))
@@ -385,7 +385,7 @@ describe('announceInstructions', () => {
         sayCloseGuess: true,
         wrongHeard: ['Братство кольца'],
         spokeWithoutButton: true,
-        questions: [{ ...base.questions[0], answers: ['Властелин колец'] }],
+        questions: [{ ...base.questions[0]!, answers: ['Властелин колец'] }],
       }),
     )
     expect(line.indexOf('Братство кольца')).toBeLessThan(line.indexOf('Властелин колец'))

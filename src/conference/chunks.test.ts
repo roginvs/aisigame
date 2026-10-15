@@ -120,7 +120,7 @@ describe('verifyPack', () => {
     const bytes = new TextEncoder().encode('payload')
     const hash = await sha256Hex(bytes)
     const tampered = bytes.slice()
-    tampered[0] ^= 0xff
+    tampered[0] = tampered[0]! ^ 0xff
     expect(await verifyPack(tampered, hash)).toEqual({ ok: false, percent: 0 })
     expect(await verifyPack(bytes.slice(0, 4), hash)).toEqual({ ok: false, percent: 0 })
   })

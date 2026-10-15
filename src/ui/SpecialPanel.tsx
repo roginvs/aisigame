@@ -89,7 +89,7 @@ export function SpecialPanel(props: {
       <p className="eyebrow">{question?.themeName} · {special.nominal}</p>
       <h2>Аукцион</h2>
       <p className="special-bid">
-        {special.leaderId !== null ? `${name(special.leaderId)} — ${special.allIn ? 'ва-банк ' : ''}${special.bid}` : `Минимум ${special.nominal}`}
+        {special.leaderId !== null ? `${name(special.leaderId)} — ${special.allIn ? 'ва-банк ' : ''}${special.bid ?? special.nominal}` : `Минимум ${special.nominal}`}
       </p>
       {path === 'auction.won'
         ? <p className="special-status">Вопрос уходит игроку {name(special.leaderId)}</p>

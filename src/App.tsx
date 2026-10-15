@@ -126,7 +126,7 @@ export default function App() {
   const [showKey, setShowKey] = useState(false)
   const [link, setLink] = useState<LinkStatus>(initialLink)
   const catalogIds = packCatalog.map((item) => item.id)
-  const [packId, setPackId] = useState(() => preferredPackId(readStartPrefs().packId, catalogIds, packCatalog[0].id))
+  const [packId, setPackId] = useState(() => preferredPackId(readStartPrefs().packId, catalogIds, packCatalog[0]?.id ?? ''))
   const [pack, setPack] = useState<QuestionPack | null>(null)
   const [packError, setPackError] = useState<string | null>(null)
   const [loadingPack, setLoadingPack] = useState(true)

@@ -10,6 +10,7 @@ export const revealAuthorization = 'В этом ходе игра уже при�
  */
 export function spokenAnswerCue(answers: readonly string[], choices: readonly QuestionChoice[] = []): string {
   const list = spokenChoiceForms(answers, choices)
-  if (list.length === 0) return 'Правильного ответа в пакете нет. Свой ответ не придумывай.'
-  return `${revealAuthorization} Начни с правильного ответа дословно: «${list[0]}». Другие формы ответа не перечисляй и свой ответ не придумывай. Затем одна короткая связка к следующему ходу.`
+  const first = list[0]
+  if (first === undefined) return 'Правильного ответа в пакете нет. Свой ответ не придумывай.'
+  return `${revealAuthorization} Начни с правильного ответа дословно: «${first}». Другие формы ответа не перечисляй и свой ответ не придумывай. Затем одна короткая связка к следующему ходу.`
 }

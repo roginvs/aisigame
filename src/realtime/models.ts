@@ -39,10 +39,11 @@ export const voiceModels: readonly VoiceModel[] = [
   { id: 'mock', label: 'Мок для тестов', provider: 'mock' },
 ]
 
-const fallbackId = voiceModels[0].id
+const fallbackModel: VoiceModel = voiceModels[0]!
+const fallbackId = fallbackModel.id
 
 export function voiceById(id: string): VoiceModel {
-  return voiceModels.find((item) => item.id === id) ?? voiceModels[0]
+  return voiceModels.find((item) => item.id === id) ?? fallbackModel
 }
 
 export function readVoiceModelId(storage: Storage = localStorage): string {

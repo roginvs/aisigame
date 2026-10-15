@@ -4,7 +4,7 @@ import { describe, expect, it } from 'vitest'
 
 const root = path.resolve(import.meta.dirname, '../../packs')
 const xml = readFileSync(path.join(root, 'demo.xml'), 'utf8')
-const refs = [...xml.matchAll(/isRef="true">([^<]+)</g)].map((match) => match[1].trim())
+const refs = [...xml.matchAll(/isRef="true">([^<]+)</g)].map((match) => (match[1] ?? "").trim())
 
 describe('медиа демо-пакета', () => {
   it('каждая ссылка пакета указывает на существующий файл', () => {

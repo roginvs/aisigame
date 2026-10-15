@@ -8,7 +8,7 @@ import { outputCut, outputFlushWaitMs, timersAfterPlaybackStarted, timersAfterRe
 import type { HostAudioTimers, OutputCutState } from './playback.ts'
 import { freeReplyMaxOutputTokens } from '../options.ts'
 import { speechDurationMs } from './utterance.ts'
-import { isolatedCue, isolatedToolResponse, revealedAnswer, saysAnswer, speechMatches, speechOverruns, verbatimResponse } from './speechMatch.ts'
+import { isolatedCue, isolatedToolResponse, revealedAnswer, saysAnswer, speechMatches, speechReport, speechOverruns, verbatimResponse } from './speechMatch.ts'
 import { AudioItems, type AudioReference, type AudioItemReady } from './audioItems.ts'
 import { audioJudgmentCapable, type JudgmentCapabilities, type JudgeRequestContext } from './judgmentRequest.ts'
 import { sessionTools, toolPurposes } from './tools.ts'
@@ -1004,7 +1004,7 @@ export class RealtimeClient {
         this.speech.liveTranscript = (this.speech.liveTranscript ?? '') + delta
         if (speechOverruns(this.speech.liveTranscript, this.speech.expect)) {
           // Фраза уже сказана; продолжение (часто — ответ на вопрос) игрокам не играем.
-          pushTrace('note', 'ведущая продолжила после дословной фразы — обрываем', { said: this.speech.liveTranscript })
+          pushTrace('note', `ведущая продолжила после дословной фразы — обрываем: ${speechReport(this.speech.liveTranscript, this.speech.expect)}`, { said: this.speech.liveTranscript })
           this.cancelActiveResponse()
           this.sendOutputClear()
           this.finishSpeech('overrun')
@@ -1206,9 +1206,10 @@ export class RealtimeClient {
     this.holdSpeech('')
   }
 
-  private rejectSpokenLine(responseId: string, said: string): void {
+  private rejectSpokenLine(responseId: string, line: string): void {
     const speech = this.speech
     if (!speech?.expect) return
+    const said = line || speech.liveTranscript || ''
     const heardId = responseId || speech.liveResponseId
     if (heardId && speech.dropResponseId === heardId) return
     speech.dropResponseId = heardId
@@ -1225,12 +1226,12 @@ export class RealtimeClient {
     }
     if (speech.retries < 1) {
       speech.retries += 1
-      pushTrace('note', `не та фраза, повтор дословно: ${said}`)
+      pushTrace('note', `не та фраза, повтор дословно: ${speechReport(said, speech.expect)}`)
       this.holdSpeech('')
       return
     }
     this.sendOutputClear()
-    pushTrace('note', `модель не прочитала точную фразу; продолжаем по тексту на экране: ${said}`)
+    pushTrace('note', `модель не прочитала точную фразу; продолжаем по тексту на экране: ${speechReport(said, speech.expect)}`)
     this.finishSpeech('screen-text')
   }
 

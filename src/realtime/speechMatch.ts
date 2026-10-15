@@ -1,14 +1,46 @@
 import { withHostRules } from '../config.ts'
 import { freeReplyMaxOutputTokens } from '../options.ts'
 import { revealAuthorization } from '../game/spokenAnswer.ts'
+/**
+ * Дословное чтение: регистр, ё/е, знаки, кавычки и тире не важны; слова короче 3 букв
+ * не считаются; порядок не важен. Нужно ≥75% слов эталона и не больше 4 лишних слов.
+ * Числа эталона цифрами («1492») расшифровка может дать словами — такие токены
+ * не обязательны, а на каждый даём запас лишних слов.
+ */
 export function speechMatches(said: string, expected: string): boolean {
-  const want = words(expected)
+  const all = words(expected)
   const heard = words(said)
-  if (!want.length) return true
   const heardSet = new Set(heard)
+  const numbers = all.filter((word) => isNumber(word) && !heardSet.has(word))
+  const want = all.filter((word) => !numbers.includes(word))
+  if (!want.length) return true
   const hits = want.filter((word) => heardSet.has(word)).length
   if (hits / want.length < 0.75) return false
-  return heard.length <= want.length + 4
+  return heard.length <= all.length + 4 + numbers.length * 3
+}
+
+function isNumber(word: string): boolean {
+  return /^\d+$/.test(word)
+}
+
+/** Компактно: где расшифровка впервые разошлась с эталоном (для логов). */
+export function speechDivergence(said: string, expected: string): string {
+  const a = foldWords(said)
+  const b = foldWords(expected)
+  let i = 0
+  while (i < a.length && i < b.length && a[i] === b[i]) i += 1
+  const seen = (list: string[]) => list.slice(i, i + 4).join(' ') || '∅'
+  if (i === a.length && i === b.length) return 'совпало целиком'
+  return `расхождение на слове ${i + 1}: ждали «${seen(b)}», сказала «${seen(a)}»`
+}
+
+/** Строка для лога: что сказала, что ждали, где разошлось. */
+export function speechReport(said: string, expected: string): string {
+  return `сказала «${said.trim()}» | ждали «${expected.trim()}» | ${speechDivergence(said, expected)}`
+}
+
+function foldWords(value: string): string[] {
+  return value.toLowerCase().replaceAll('ё', 'е').replace(/[^\p{L}\p{N}]+/gu, ' ').trim().split(' ').filter(Boolean)
 }
 
 /**

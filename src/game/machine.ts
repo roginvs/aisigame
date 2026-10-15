@@ -331,7 +331,7 @@ export function falseStartOpen(path: string, finalRound: boolean): boolean {
 export function statePath(value: unknown): string {
   if (typeof value === 'string') return value
   if (value && typeof value === 'object') {
-    const [key, nested] = Object.entries(value)[0] ?? []
+    const [key, nested]: [string?, unknown?] = Object.entries(value as Record<string, unknown>)[0] ?? []
     if (!key) return ''
     const rest = statePath(nested)
     return rest ? `${key}.${rest}` : key

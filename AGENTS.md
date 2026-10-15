@@ -102,7 +102,7 @@ npm run look
 
 Dev-сервер слушает сеть на порту 5173, чтобы открыть его с планшета.
 
-Живой сайт: https://roginvs.github.io/aisigame/. Продакшен-сборка ставит Vite `base` `/aisigame/`, чтобы пакеты и портрет открывались с адреса проекта. `npm run dev` и `npm run look` остаются на `/`. Pull request и push в `master` проверяет `.github/workflows/ci.yml` (`npm ci`, `npm test`, `npx tsc -b`). Push в `master` ещё собирает сайт в `.github/workflows/pages.yml`: те же проверки, затем `npm run build`, и публикует Pages.
+Живой сайт: https://roginvs.github.io/aisigame/. Продакшен-сборка ставит Vite `base` `/aisigame/`, чтобы пакеты и портрет открывались с адреса проекта. `npm run dev` и `npm run look` остаются на `/`. Pull request и push в `master` проверяет `.github/workflows/ci.yml` (`npm ci`, `npm test`, `npx tsc -b`; `npm test` сначала запускает `npm run lint` через `pretest`). Типы строгие: `strict` и `noUncheckedIndexedAccess` в tsconfig, типовой eslint (`eslint.config.js`) запрещает объект или `undefined` в шаблонной строке (`[object Object]`), `any` и небезопасные значения; глушить правила директивами нельзя, чините тип. Push в `master` ещё собирает сайт в `.github/workflows/pages.yml`: те же проверки, затем `npm run build`, и публикует Pages.
 
 ## Куда класть код
 

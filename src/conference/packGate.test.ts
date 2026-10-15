@@ -14,7 +14,7 @@ describe('decidePackGate', () => {
     const bytes = new TextEncoder().encode('pack-bytes')
     const hash = await sha256Hex(bytes)
     const bad = bytes.slice()
-    bad[3] ^= 0x01
+    bad[3] = bad[3]! ^ 0x01
     expect(await decidePackGate(bad, hash)).toEqual({ ready: false, store: false, buzz: false })
   })
 

@@ -418,10 +418,15 @@ function debugEntriesSize(entries: unknown[]): number {
   let total = 0
   for (const entry of entries) {
     if (!isRecord(entry)) continue
-    total += String(entry.at ?? '').length + String(entry.kind ?? '').length +
-      String(entry.title ?? '').length + String(entry.detail ?? '').length
+    total += textSize(entry.at) + textSize(entry.kind) + textSize(entry.title) + textSize(entry.detail)
   }
   return total
+}
+
+function textSize(value: unknown): number {
+  if (value == null) return 0
+  if (typeof value === 'string') return value.length
+  return (JSON.stringify(value) ?? '').length
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

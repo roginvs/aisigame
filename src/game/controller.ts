@@ -1661,7 +1661,7 @@ export function pickChoosingReminder(context: GameContext): ChoosingReminder & {
   const cells = openChoiceCells(context)
   if (final || cells.length === 0 || choosingReminderDice.roll() < 0.5) return { kind: 'list', offer: null }
   const cell = cells[Math.min(cells.length - 1, Math.floor(choosingReminderDice.roll() * cells.length))]
-  return { kind: 'offer', offer: cell }
+  return cell ? { kind: 'offer', offer: cell } : { kind: 'list', offer: null }
 }
 
 /** Напоминание на выборе: темы с оставшимися номиналами или предложение одной ячейки. */
@@ -2059,7 +2059,7 @@ export function idleNudgeCue(path: string, context: GameContext): string {
       goal: hurry
         ? `Поторопи выбирающего, назвав по имени: время на выбор заканчивается.${next ? ` Можно намекнуть, что иначе выбирать будет ${next}.` : ''}`
         : `Обратись к выбирающему по имени и предложи выбрать вопрос.`,
-      constraints: [boardSecrets, style[0], 'Ячейку сама не выбирай.'],
+      constraints: [boardSecrets, ...style.slice(0, 1), 'Ячейку сама не выбирай.'],
     })
   }
   if (path === 'cat.picking') {
@@ -2074,7 +2074,7 @@ export function idleNudgeCue(path: string, context: GameContext): string {
     const recipient = nameOf(context, context.special?.recipientId)
     const options = context.special?.stakeOptions ?? []
     return hostCue({
-      situation: `Кот в мешке у игрока ${recipient}. Ставка на выбор: минимум ${options[0]} или максимум ${options.at(-1)}. Молчит около ${waited} с.${soon('ставка будет минимальной')}`,
+      situation: `Кот в мешке у игрока ${recipient}. Ставка на выбор: минимум ${amount(options[0])} или максимум ${amount(options.at(-1))}. Молчит около ${waited} с.${soon('ставка будет минимальной')}`,
       goal: `Обратись по имени к игроку ${recipient} и спроси: минимум или максимум.`,
       constraints: ['Своими словами.', 'Вопрос не читай.'],
     })
@@ -2084,8 +2084,8 @@ export function idleNudgeCue(path: string, context: GameContext): string {
   const opening = special?.bid == null
   return hostCue({
     situation: opening
-      ? `Аукцион. Открывает торги игрок: ${bidder}. Молчит около ${waited} с.${soon(`торги откроются по номиналу ${special?.nominal}`)}`
-      : `Аукцион. Ставка ${special?.bid} у игрока ${nameOf(context, special?.leaderId)}. Решает игрок: ${bidder}. Молчит около ${waited} с.${soon('это будет пас')}`,
+      ? `Аукцион. Открывает торги игрок: ${bidder}. Молчит около ${waited} с.${soon(`торги откроются по номиналу ${amount(special?.nominal)}`)}`
+      : `Аукцион. Ставка ${amount(special?.bid)} у игрока ${nameOf(context, special?.leaderId)}. Решает игрок: ${bidder}. Молчит около ${waited} с.${soon('это будет пас')}`,
     goal: opening ? `Обратись по имени к игроку ${bidder} и попроси назвать ставку.` : `Обратись по имени к игроку ${bidder} и спроси: перекупает или пас.`,
     constraints: [...style],
   })
@@ -2096,8 +2096,8 @@ export function idleAutoCue(context: GameContext): string {
   const idle = context.idleOutcome
   const recipient = nameOf(context, context.special?.recipientId)
   return hostCue({
-    situation: `Кот в мешке у игрока ${recipient}. Около ${seconds(idle?.waitedMs ?? 0)} с ставку не назвали, поэтому она минимальная: ${idle?.stake ?? context.special?.stake}. Дальше ты прочитаешь вопрос.`,
-    goal: `Коротко скажи, обратившись по имени к игроку ${recipient}: ставку не назвали, играем на минимум ${idle?.stake ?? context.special?.stake}.`,
+    situation: `Кот в мешке у игрока ${recipient}. Около ${seconds(idle?.waitedMs ?? 0)} с ставку не назвали, поэтому она минимальная: ${amount(idle?.stake ?? context.special?.stake)}. Дальше ты прочитаешь вопрос.`,
+    goal: `Коротко скажи, обратившись по имени к игроку ${recipient}: ставку не назвали, играем на минимум ${amount(idle?.stake ?? context.special?.stake)}.`,
     constraints: ['Своими словами.', 'Вопрос не читай.'],
   })
 }
@@ -2114,8 +2114,13 @@ function auctionIdleNote(context: GameContext): string {
   if (idle?.kind !== 'auction') return ''
   const who = nameOf(context, idle.fromId)
   return idle.autoOpen
-    ? `Игрок ${who}: около ${seconds(idle.waitedMs)} с тишины — торги открыты по номиналу ${context.special?.nominal}. `
+    ? `Игрок ${who}: около ${seconds(idle.waitedMs)} с тишины — торги открыты по номиналу ${amount(context.special?.nominal)}. `
     : `Игрок ${who}: около ${seconds(idle.waitedMs)} с тишины — это пас. `
+}
+
+/** Сумма для реплики; пропуск — явной пометкой, а не «undefined» в промпте. */
+function amount(value: number | null | undefined): string {
+  return value == null ? 'не задана' : String(value)
 }
 
 function nameOf(context: GameContext, id: number | null | undefined): string {
@@ -2132,7 +2137,7 @@ export function catCue(context: GameContext): string {
   const giver = nameOf(context, special?.giverId)
   const count = context.players.length
   const question = questionById(context.questions, context.activeQuestionId)
-  const before = question?.cat?.knows === 'before' ? ` Тема: «${catTheme(context)}», варианты цены: ${special?.stakeOptions.join(' или ')}.` : ''
+  const before = question?.cat?.knows === 'before' ? ` Тема: «${catTheme(context)}», варианты цены: ${(special?.stakeOptions ?? []).map(amount).join(' или ')}.` : ''
   const who = count === 1
     ? 'Игрок один — вопрос остаётся у того же игрока.'
     : special?.recipientId != null
@@ -2162,7 +2167,7 @@ export function catStakeCue(context: GameContext): string {
   const options = special?.stakeOptions ?? []
   const fixed = options.length <= 1
   return hostCue({
-    situation: `${idleNote}Кот в мешке у игрока ${recipient}. Тема: «${catTheme(context)}». ${fixed ? `Цена фиксированная: ${options[0] ?? special?.nominal}.` : `Ставка на выбор: минимум ${options[0]} или максимум ${options.at(-1)}.`}`,
+    situation: `${idleNote}Кот в мешке у игрока ${recipient}. Тема: «${catTheme(context)}». ${fixed ? `Цена фиксированная: ${amount(options[0] ?? special?.nominal)}.` : `Ставка на выбор: минимум ${amount(options[0])} или максимум ${amount(options.at(-1))}.`}`,
     goal: fixed
       ? `${idle ? 'Сначала коротко скажи, что кот достался случайно. ' : ''}Обратись к игроку ${recipient}: назови тему и цену вопроса. Сейчас прочитаешь вопрос.`
       : `${idle ? 'Сначала коротко скажи, что кот достался случайно. ' : ''}Обратись к игроку ${recipient}: назови тему и попроси выбрать ставку — минимум или максимум.`,
@@ -2175,7 +2180,7 @@ export function catStakeClarifyCue(context: GameContext): string {
   const options = context.special?.stakeOptions ?? []
   return hostCue({
     situation: `Кот в мешке. Ставку выбирает игрок: ${nameOf(context, context.special?.recipientId)}. Ответ не поняла, причина: ${context.special?.unclear || 'неясно'}.`,
-    goal: `Коротко попроси выбрать: ${options[0]} или ${options.at(-1)}.`,
+    goal: `Коротко попроси выбрать: ${amount(options[0])} или ${amount(options.at(-1))}.`,
     constraints: [],
   })
 }
@@ -2185,10 +2190,10 @@ export function auctionCue(context: GameContext): string {
   const giver = nameOf(context, special?.giverId)
   const auto = special?.bid != null
   return hostCue({
-    situation: `Выбрана ячейка-аукцион. Выбор игрока: ${giver}. Номинал ${special?.nominal}. ${auto ? `Счёт игрока ${giver} не выше номинала, поэтому торгов нет: вопрос играется за номинал ${special?.bid}.` : ''}`,
+    situation: `Выбрана ячейка-аукцион. Выбор игрока: ${giver}. Номинал ${amount(special?.nominal)}. ${auto ? `Счёт игрока ${giver} не выше номинала, поэтому торгов нет: вопрос играется за номинал ${amount(special?.bid)}.` : ''}`,
     goal: auto
-      ? `Поздравь игрока ${giver}, обратившись по имени: достался вопрос-аукцион. Скажи, что торгов не будет и вопрос играется за ${special?.bid}.`
-      : `Поздравь игрока ${giver}, обратившись по имени: достался вопрос-аукцион. Попроси сделать ставку, минимум ${special?.nominal}.`,
+      ? `Поздравь игрока ${giver}, обратившись по имени: достался вопрос-аукцион. Скажи, что торгов не будет и вопрос играется за ${amount(special?.bid)}.`
+      : `Поздравь игрока ${giver}, обратившись по имени: достался вопрос-аукцион. Попроси сделать ставку, минимум ${amount(special?.nominal)}.`,
     constraints: ['Варианты ставок целиком не перечисляй: они на экране.', 'Вопрос не читай.'],
   })
 }
@@ -2206,8 +2211,8 @@ export function auctionAskCue(context: GameContext): string {
   const special = context.special
   const bidder = nameOf(context, special?.recipientId)
   return hostCue({
-    situation: `${auctionIdleNote(context)}Аукцион. Сейчас ${special?.allIn ? 'ва-банк ' : ''}${special?.bid} у игрока ${nameOf(context, special?.leaderId)}. Спрашиваешь игрока ${bidder}.`,
-    goal: `${auctionIdleFirst(context)}Обратись к игроку ${bidder} по имени: назови текущую ставку ${special?.allIn ? 'ва-банк ' : ''}${special?.bid}, скажи, что она у игрока ${nameOf(context, special?.leaderId)}, и спроси, будет ли ${bidder} перекупать.`,
+    situation: `${auctionIdleNote(context)}Аукцион. Сейчас ${special?.allIn ? 'ва-банк ' : ''}${amount(special?.bid)} у игрока ${nameOf(context, special?.leaderId)}. Спрашиваешь игрока ${bidder}.`,
+    goal: `${auctionIdleFirst(context)}Обратись к игроку ${bidder} по имени: назови текущую ставку ${special?.allIn ? 'ва-банк ' : ''}${amount(special?.bid)}, скажи, что она у игрока ${nameOf(context, special?.leaderId)}, и спроси, будет ли ${bidder} перекупать.`,
     constraints: [
       `Примеры стиля с другими именами и суммой — только чтобы понять тон; не копируй их, говори каждый раз по-новому, реальные имена склоняй сама: ${auctionAskStyle}.`,
                 ],
@@ -2225,8 +2230,8 @@ export function auctionClarifyCue(context: GameContext): string {
 export function auctionWonCue(context: GameContext): string {
   const special = context.special
   return hostCue({
-    situation: `${auctionIdleNote(context)}Торги закончены. Вопрос уходит игроку ${nameOf(context, special?.leaderId)} за ${special?.bid ?? special?.nominal}.`,
-    goal: `${auctionIdleFirst(context)}Скажи, что вопрос уходит игроку ${nameOf(context, special?.leaderId)} за ${special?.bid ?? special?.nominal}. Сейчас прочитаешь вопрос.`,
+    situation: `${auctionIdleNote(context)}Торги закончены. Вопрос уходит игроку ${nameOf(context, special?.leaderId)} за ${amount(special?.bid ?? special?.nominal)}.`,
+    goal: `${auctionIdleFirst(context)}Скажи, что вопрос уходит игроку ${nameOf(context, special?.leaderId)} за ${amount(special?.bid ?? special?.nominal)}. Сейчас прочитаешь вопрос.`,
     constraints: ['Вопрос не читай.', 'Одна короткая фраза.'],
   })
 }
@@ -2302,7 +2307,7 @@ export function catRecipientInstructions(transcript: string, candidates: Array<{
 /** Изолированный запрос: минимум или максимум за кота. */
 export function catStakeInstructions(transcript: string, options: number[]): string {
   return [
-    `Кот в мешке: игрок выбирает ставку — минимум ${options[0]} или максимум ${options.at(-1)}.`,
+    `Кот в мешке: игрок выбирает ставку — минимум ${amount(options[0])} или максимум ${amount(options.at(-1))}.`,
     `Распознанный текст: «${transcript}»`,
     'Вызови pickCatStake: option=min или max; если неясно — unclear.',
   ].join('\n')

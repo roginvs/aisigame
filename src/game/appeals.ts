@@ -72,7 +72,7 @@ export function readOutcomes(value: unknown): OutcomeLedger | null {
   if (!value || typeof value !== 'object' || Array.isArray(value)) return null
   for (const players of Object.values(value)) {
     if (!players || typeof players !== 'object' || Array.isArray(players)) return null
-    for (const [id, outcome] of Object.entries(players)) {
+    for (const [id, outcome] of Object.entries(players as Record<string, unknown>)) {
       if (!/^[1-9]\d*$/.test(id) || !outcome || typeof outcome !== 'object') return null
       const row = outcome as Record<string, unknown>
       if (!Number.isFinite(row.amount) || !Number.isSafeInteger(row.attemptId) || Number(row.attemptId) < 0 || (row.correct !== undefined && typeof row.correct !== 'boolean') || (row.previous !== undefined && !Number.isFinite(row.previous)) || (row.stake !== undefined && !Number.isFinite(row.stake))) return null

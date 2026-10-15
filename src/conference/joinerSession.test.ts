@@ -302,7 +302,7 @@ describe('JoinerSession pack cache and transfer', () => {
     vi.stubGlobal('window', globalThis)
     const bytes = new TextEncoder().encode('valid pack')
     const bad = bytes.slice()
-    bad[0] ^= 0xff
+    bad[0] = bad[0]! ^ 0xff
     const hash = await sha256Hex(bytes)
     const cache: JoinerPackCache = {
       get: vi.fn(async () => bad),

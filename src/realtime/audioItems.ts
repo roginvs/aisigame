@@ -27,7 +27,7 @@ export class AudioItems {
     if (type === 'conversation.item.deleted') record.deleted = true
     if (item) {
       record.audio = item.type === 'message' && item.role === 'user' && Array.isArray(item.content) &&
-        item.content.some((part) => part && typeof part === 'object' && part.type === 'input_audio')
+        (item.content as unknown[]).some((part) => isRecord(part) && part.type === 'input_audio')
       if (record.audio) record.committed = true
     }
     this.items.delete(id)
@@ -86,4 +86,8 @@ export class AudioItems {
       if (!item.pins) this.items.delete(id)
     }
   }
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return !!value && typeof value === 'object'
 }

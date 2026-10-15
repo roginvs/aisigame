@@ -17,8 +17,9 @@ export function transcriptionConfidence(logprobs: unknown): number | null {
   const probs: number[] = []
   for (const item of logprobs) {
     if (!item || typeof item !== 'object') continue
-    const token = 'token' in item && typeof item.token === 'string' ? item.token : ''
-    const logprob = 'logprob' in item && typeof item.logprob === 'number' ? item.logprob : null
+    const entry = item as { token?: unknown; logprob?: unknown }
+    const token = typeof entry.token === 'string' ? entry.token : ''
+    const logprob = typeof entry.logprob === 'number' ? entry.logprob : null
     if (logprob === null || !Number.isFinite(logprob) || !/[a-zа-яё0-9]/i.test(token)) continue
     probs.push(Math.exp(logprob))
   }

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { isolatedCue, isolatedToolResponse, speechMatches, speechOverruns, verbatimResponse, withPlayNote } from './speechMatch.ts'
+import { isolatedCue, isolatedToolResponse, speechMatches, speechOverruns, speechReport, verbatimResponse, withPlayNote } from './speechMatch.ts'
 
 const newton = 'Кто сформулировал закон всемирного тяготения?'
 const melting = 'Как называется процесс, при котором вещество переходит из твердого состояния в жидкое, и наоборот?'
@@ -240,5 +240,17 @@ describe('правила ведущей: без «системы» и без в�
     expect(hostInstructions).toContain('«не расслышала»')
     expect(hostInstructions).toContain('«секунду»')
     expect(hostInstructions).toContain('«давайте уточним»')
+  })
+})
+
+describe('speechMatches: числа и отчёт', () => {
+  it('принимает число словами вместо цифр', () => {
+    expect(speechMatches('Глобус сделали в Нюрнберге в тысяча четыреста девяносто втором году, назвал земным яблоком', 'Глобус сделали в Нюрнберге в 1492 году, назвал «земным яблоком»')).toBe(true)
+  })
+  it('ловит пропуск половины вопроса', () => {
+    expect(speechMatches('Старейший сохранившийся глобус сделали', 'Старейший сохранившийся глобус сделали в Нюрнберге в 1492 году, и автор назвал его земным яблоком')).toBe(false)
+  })
+  it('отчёт показывает место расхождения', () => {
+    expect(speechReport('Маятник в коробке', 'Маятник в коробочке')).toContain('расхождение на слове 3: ждали «коробочке», сказала «коробке»')
   })
 })

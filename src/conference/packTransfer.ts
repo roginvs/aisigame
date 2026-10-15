@@ -206,7 +206,7 @@ export function createPackReceiver(onProgress: (percent: number) => void): {
     offer = { ...offer, percent: pct, nextIndex }
     onProgress(pct)
     if (!bytes) return { hash: offer.hash, nextIndex }
-    if (tamperFirstByte && bytes.length > 0) bytes[0] ^= 0xff
+    if (tamperFirstByte && bytes[0] !== undefined) bytes[0] ^= 0xff
     offer = { ...offer, bytes, percent: 100, nextIndex }
     return { hash: offer.hash, nextIndex, bytes }
   }

@@ -671,8 +671,9 @@ function normalizeBets(value: unknown): Bet[] | null {
 }
 
 function stringList(value: unknown): string[] | null {
-  if (!Array.isArray(value) || value.some((item) => typeof item !== 'string')) return null
-  return [...value]
+  if (!Array.isArray(value)) return null
+  const items: unknown[] = value
+  return items.every((item): item is string => typeof item === 'string') ? [...items] as string[] : null
 }
 
 function playerList(value: unknown): PlayerId[] | null {

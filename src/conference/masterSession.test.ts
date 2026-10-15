@@ -138,7 +138,7 @@ describe('MasterSession resume', () => {
       if (message.type !== 'partialUpdate') throw new Error('нет дифа')
       expect(Object.keys(message.changes)).toHaveLength(2)
       expect(message.changes).toHaveProperty('messageIndex')
-      expect(message.changes).toHaveProperty(`message${message.changes.messageIndex}`)
+      expect(message.changes).toHaveProperty(`message${String(message.changes.messageIndex)}`)
       expect(isConferenceMessage(message)).toBe(true)
     }
     expect(chatLines(lastSnapshot(transport))).toEqual([expect.objectContaining({ text: 'Привет' })])

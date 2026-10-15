@@ -24,7 +24,7 @@ export async function getPack(hash: string): Promise<Uint8Array | null> {
       const request = store.get(hash)
       request.onerror = () => reject(request.error ?? new Error('get failed'))
       request.onsuccess = () => {
-        const value = request.result
+        const value: unknown = request.result
         if (!value) {
           resolve(null)
           return

@@ -117,7 +117,8 @@ export function hostCaption(input: { title: string; hint: string; status: string
       covers(hint, status) ||
       covers(status, hint)
     if (lines.length > 0 && related) {
-      if (weight(status) >= weight(lines[0])) lines[0] = status
+      const first = lines[0]
+      if (first !== undefined && weight(status) >= weight(first)) lines[0] = status
     } else if (lines.length < 2) {
       lines.push(status)
     }
