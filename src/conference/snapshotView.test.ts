@@ -1,7 +1,10 @@
 import { beforeEach, describe, expect, it } from 'vitest'
 import { TIMER_RESYNC_THRESHOLD_MS } from '../options.ts'
 import type { ConferenceSnapshot } from './messages.ts'
-import { anchoredPhaseStart, resetTimerAnchor } from './snapshotView.ts'
+import { anchoredPhaseStart, contextFromSnapshot, resetTimerAnchor } from './snapshotView.ts'
+import { createActor } from 'xstate'
+import { gameMachine } from '../game/machine.ts'
+import { buildConferenceSnapshot } from './buildSnapshot.ts'
 
 const snap = (over: Partial<ConferenceSnapshot>): ConferenceSnapshot =>
   ({ phase: 'buzzing.open', phaseDurationMs: 10_000, timerRemainingMs: 10_000, activeQuestionId: 'q1', attemptId: 1, ...over }) as ConferenceSnapshot
@@ -34,5 +37,18 @@ describe('якорь полоски таймера у гостя', () => {
     expect(anchoredPhaseStart(snap({ timerRemainingMs: null }), 1_500)).toBeNull()
     expect(anchoredPhaseStart(snap({ timerRemainingMs: 9_800 }), 1_900)).toBe(1_700)
     expect(anchoredPhaseStart(snap({ phase: 'paused' }), 2_000)).toBeNull()
+  })
+})
+
+describe('гость рисует паузу и ошибку как мастер', () => {
+  it('resumePath, resumeStatus и error переходят из контекста мастера в контекст гостя', () => {
+    const actor = createActor(gameMachine).start()
+    const master = { ...actor.getSnapshot().context, resumePath: 'announcing.holding', resumeStatus: 'Ответ', error: 'Ведущая отключилась' }
+    actor.stop()
+    const snapshot = buildConferenceSnapshot({ phase: 'paused', pack: null, context: master, roster: [], timerRemainingMs: null, falseStartIds: [] })
+    const guest = contextFromSnapshot(snapshot, { name: 'p', rounds: master.rounds, questions: master.questions, warnings: [] } as never)
+    expect(guest.resumePath).toBe('announcing.holding')
+    expect(guest.resumeStatus).toBe('Ответ')
+    expect(guest.error).toBe('Ведущая отключилась')
   })
 })

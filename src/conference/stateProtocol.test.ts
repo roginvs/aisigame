@@ -18,6 +18,25 @@ function publisher() {
 }
 
 describe('conference state protocol', () => {
+  it('пауза, ошибка ведущей и состояние ведущей едут в снимке и дифе', () => {
+    const { state, snapshot } = publisher()
+    expect(snapshot.resumePath).toBe('')
+    expect(snapshot.error).toBeNull()
+    const paused = state.update({
+      ...snapshot, phase: 'paused', resumePath: 'announcing.holding', resumeStatus: 'Ответ: Цезарь',
+      error: 'Ведущая отключилась', hostLink: { host: 'speaking', mic: 'live' },
+    })
+    expect(paused.changes).toEqual({
+      phase: 'paused', resumePath: 'announcing.holding', resumeStatus: 'Ответ: Цезарь',
+      error: 'Ведущая отключилась', hostLink: { host: 'speaking', mic: 'live' },
+    })
+    expect(isConferenceMessage(paused)).toBe(true)
+    expect(isConferenceMessage({ ...paused, changes: { hostLink: { host: 'loud', mic: 'live' } } })).toBe(false)
+    const legacy: Record<string, unknown> = { ...state.full() }
+    delete legacy.resumePath; delete legacy.error; delete legacy.hostLink; delete legacy.resumeStatus
+    expect(isConferenceMessage(legacy)).toBe(true)
+  })
+
   it('hostEar: по умолчанию idle, едет дифом к joiner, мусор отвергается', () => {
     const { state, snapshot } = publisher()
     expect(snapshot.hostEar).toBe('idle')

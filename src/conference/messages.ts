@@ -102,6 +102,15 @@ export type ConferenceSnapshot = AppealFields & {
   liveSpeech?: { text: string; at: string } | null
   /** Что ведущая слышит (speech_started/stopped), только для показа; старые мастера не шлют. */
   hostEar?: HostEar
+  /** Пауза: куда вернётся партия — гость рисует паузу как мастер (эталон, медиа ответа). */
+  resumePath?: string
+  resumeStatus?: string
+  /** Публичная ошибка ведущей/модели (у мастера `context.error`). */
+  error?: string | null
+  /** Состояние ведущей у мастера: говорит ли, открыт ли микрофон модели. Настроение карточки у всех из него. */
+  /** «Меньше слышать» у мастера: подсказка карточки ведущей у всех одна. */
+  hearTurnOnly?: boolean
+  hostLink?: { host: 'idle' | 'speaking' | 'blocked'; mic: 'idle' | 'requesting' | 'live' | 'muted' | 'error' }
 } & ConferenceMessageRing
 
 /** Единая история состояния, сохранения и экрана — сообщения в отдельных слотах. */
@@ -489,6 +498,13 @@ const stateValidators = {
   hostEar: (value: unknown) => value === undefined || readHostEar(value) !== null,
   liveSpeech: (value: unknown) => value === undefined || value === null ||
     (isRecord(value) && typeof value.text === 'string' && value.text.length <= 2000 && typeof value.at === 'string' && value.at.length <= 64),
+  resumePath: (value: unknown) => value === undefined || (typeof value === 'string' && value.length <= 100),
+  resumeStatus: (value: unknown) => value === undefined || validText(value),
+  error: (value: unknown) => value === undefined || value === null || (typeof value === 'string' && value.length <= 2_000),
+  hearTurnOnly: (value: unknown) => value === undefined || typeof value === 'boolean',
+  hostLink: (value: unknown) => value === undefined || (isRecord(value) &&
+    ['idle', 'speaking', 'blocked'].includes(value.host as string) &&
+    ['idle', 'requesting', 'live', 'muted', 'error'].includes(value.mic as string)),
 } satisfies Record<keyof StateFields, (value: unknown) => boolean>
 
 function validPackManifest(value: unknown): boolean {

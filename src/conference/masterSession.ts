@@ -80,6 +80,7 @@ export class MasterSession {
   private packTransfer: PackTransferMaster
   private verified = new Set<string>()
   private gameStarted = false
+  private hearTurnOnly = false
   private gameStartedAt = 0
   private lobbyOpenedSpeech = false
   private spokenLobbySignature = ''
@@ -584,6 +585,8 @@ export class MasterSession {
       messageRing: this.statePublisher?.history() ?? this.initialHistory,
       liveSpeech: liveSpeechOf(getLivePlayerLine()),
       hostEar: this.publicEar(phase),
+      hostLink: this.gameStarted ? this.publicLink() : undefined,
+      hearTurnOnly: this.hearTurnOnly,
       timerRemainingMs: this.gameStarted ? timerRemainingMs(context, now) : null,
       falseStartIds: this.gameStarted
         ? Object.entries(this.actor.getSnapshot().context.falseStarts)
@@ -591,6 +594,19 @@ export class MasterSession {
             .map(([id]) => Number(id))
         : [],
     })
+  }
+
+  /** «Меньше слышать» мастера: сразу в снимок, у гостей та же подсказка карточки. */
+  setHearTurnOnly(value: boolean): void {
+    if (this.hearTurnOnly === value) return
+    this.hearTurnOnly = value
+    if (this.statePublisher) this.broadcastCurrentSnapshot()
+  }
+
+  /** Ведущая у мастера (говорит / микрофон модели): гость считает настроение карточки из тех же полей. */
+  private publicLink(): NonNullable<ConferenceSnapshot['hostLink']> {
+    const link = getLinkStatus()
+    return { host: link.host as LinkStatus['host'], mic: link.mic as LinkStatus['mic'] }
   }
 
   /** Для гостей: «слушаю» (мик открыт, речи нет) выводим у мастера — у гостя нет его микрофона. */

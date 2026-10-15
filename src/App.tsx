@@ -144,6 +144,11 @@ export default function App() {
   const [conferenceLobby, setConferenceLobby] = useState(false)
   /** Мастер: вне выбора/ответа модель глуха; на ходе — только этот игрок. В снимке партии. */
   const [hearTurnOnly, setHearTurnOnly] = useState(() => hearTurnOnlyOf(readSavedGame()))
+  const hearTurnOnlyRef = useRef(hearTurnOnly)
+  useEffect(() => {
+    hearTurnOnlyRef.current = hearTurnOnly
+    masterSessionRef.current?.setHearTurnOnly(hearTurnOnly)
+  }, [hearTurnOnly])
   const [masterRoster, setMasterRoster] = useState<RosterEntry[]>([])
   const [masterRosterAll, setMasterRosterAll] = useState<RosterEntry[]>([])
   const [masterParticipantIds, setMasterParticipantIds] = useState<Record<string, string>>({})
@@ -877,6 +882,7 @@ export default function App() {
         usePackPipe: !useBroadcast,
       })
       masterSessionRef.current = session
+      session.setHearTurnOnly(hearTurnOnlyRef.current)
       const initialRoster = session.rosterList()
       setMasterRoster(initialRoster)
       setMasterRosterAll(session.rosterAll())
@@ -1288,7 +1294,7 @@ export default function App() {
   return (
     <GameScreen
       snapshot={snapshot}
-      link={link}
+      link={conferenceRole === 'joiner' && joinerSnapshot?.hostLink ? { ...link, ...joinerSnapshot.hostLink } : link}
       onAppeal={async (request) => {
         if (conferenceRole === 'joiner') return joinerSessionRef.current?.sendAppeal(request) ?? { accepted: false, reason: 'Нет связи с мастером' }
         const current = actor.getSnapshot()
@@ -1423,7 +1429,7 @@ export default function App() {
               messageRing: conferenceRole === 'master' ? masterHistory : joinerSnapshot ?? emptyMessageRing(),
               onConferenceExit: conferenceRole === 'joiner' ? leaveConferenceToMenu : exitToMenu,
               hiddenClientIds: hiddenConferenceClientIds,
-              hearTurnOnly: conferenceRole === 'master' ? hearTurnOnly : undefined,
+              hearTurnOnly: conferenceRole === 'master' ? hearTurnOnly : joinerSnapshot?.hearTurnOnly,
               onHearTurnOnlyChange: conferenceRole === 'master' ? setHearTurnOnly : undefined,
             }
           : undefined

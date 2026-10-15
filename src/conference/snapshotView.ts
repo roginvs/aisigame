@@ -74,10 +74,10 @@ export function contextFromSnapshot(snapshot: ConferenceSnapshot, pack: Question
     earlyLeftMs: null,
     earlyStartedAt: null,
     pauseStartedAt: null,
-    resumePath: '',
-    resumeStatus: '',
+    resumePath: snapshot.resumePath ?? '',
+    resumeStatus: snapshot.resumeStatus ?? '',
     statusLine: snapshot.statusLine || statusForPhase(snapshot.phase),
-    error: null,
+    error: snapshot.error ?? null,
     falseStarts,
   }
 }

@@ -20,6 +20,8 @@ export function buildConferenceSnapshot(input: {
   falseStartIds: number[]
   liveSpeech?: { text: string; at: string } | null
   hostEar?: HostEar
+  hostLink?: ConferenceSnapshot['hostLink']
+  hearTurnOnly?: boolean
 }): ConferenceSnapshot {
   const bets: Record<string, number> = {}
   for (const bet of input.context.bets) bets[String(bet.playerId)] = bet.amount
@@ -87,6 +89,11 @@ export function buildConferenceSnapshot(input: {
     timerRemainingMs: input.timerRemainingMs,
     liveSpeech: input.liveSpeech ?? null,
     hostEar: input.hostEar ?? 'idle',
+    resumePath: input.context.resumePath,
+    resumeStatus: input.context.resumeStatus,
+    error: input.context.error,
+    ...(input.hostLink ? { hostLink: input.hostLink } : {}),
+    ...(input.hearTurnOnly !== undefined ? { hearTurnOnly: input.hearTurnOnly } : {}),
     ...(input.messageRing ?? emptyMessageRing()),
   }
 }
