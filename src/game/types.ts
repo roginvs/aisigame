@@ -233,6 +233,12 @@ export type GameEvent =
   | { type: 'TALKED_OVER' }
   | { type: 'ANSWER_JUDGED'; judgment: AnswerJudgment }
   | { type: 'ANSWER_ECHO' }
+  /** Ответ из нескольких реплик: игрок замолчал, оценки готовы — решение в judging. */
+  | { type: 'ANSWER_SETTLED' }
+  /** Ни в одной реплике нет разборчивого ответа (шум, мычание, «щас») — как молчание. */
+  | { type: 'ANSWER_NONE' }
+  /** Решающая реплика осталась без оценки модели (таймаут) — как «оценка не пришла». */
+  | { type: 'ANSWER_JUDGE_FAILED' }
   | { type: 'CHOOSER_OFFLINE'; fromPlayerId: PlayerId; toPlayerId: PlayerId }
   | { type: 'PAUSE'; path: string }
   | { type: 'RESUME' }

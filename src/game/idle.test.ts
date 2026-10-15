@@ -119,6 +119,7 @@ describe('молчание на выборе вопроса', () => {
     const actor = start(['Аня', 'Боря'])
     tick(idleSteps.choosing[0] - 1000)
     actor.send({ type: 'PLAYER_SPEECH_FINISHED' })
+    actor.send({ type: 'ANSWER_SETTLED' })
     expect(path(actor)).toBe('choosing.resolving')
     tick(10_000)
     expect(nudges(actor)).toBe(0)

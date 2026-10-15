@@ -567,6 +567,8 @@ function selectArguments(instructions: string, audioText?: string): Record<strin
   }
 }
 
+const mockStall = /^(?:(?:э+|м+|хе|ха|щас|сейчас|секунду|подождите|дайте подумать|отвечу)[\s,.!…-]*)+$/i
+
 function judgeArguments(instructions: string): Record<string, unknown> {
   const heard = quoted(instructions, 'Реплика игрока')
   const answers = choiceForms(
@@ -578,8 +580,12 @@ function judgeArguments(instructions: string): Record<string, unknown> {
   )
   const correct = sharesAnswer(heard, answers)
   const clarify = !correct && nearHomophone(heard, answers)
+  // Имитация модели (только мок/демо): пусто — шум, заминки — stall, остальное — ответ.
+  const speech = !heard.trim() || heard === 'речь не распознана' ? 'noise' : !correct && mockStall.test(heard.trim()) ? 'stall' : 'answer'
   return {
-    status: correct ? 'correct' : clarify ? 'needs_clarification' : 'incorrect',
+    status: speech === 'noise' ? 'unintelligible' : correct ? 'correct' : clarify ? 'needs_clarification' : 'incorrect',
+    speech,
+    guessing: false,
     heard,
     reason: correct
       ? 'Смысл совпал с эталоном.'

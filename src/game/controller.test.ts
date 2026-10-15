@@ -550,7 +550,7 @@ describe('attachController answer listening', () => {
     ).toBe(true)
 
     client.hear('ответ', 800)
-    await vi.advanceTimersByTimeAsync(120)
+    await vi.advanceTimersByTimeAsync(120 + answerSilenceDecideMs)
     expect(actor.getSnapshot().context.players.find((player) => player.id === 2)?.score).toBe(scoreBefore + 400)
 
     stop()
@@ -571,7 +571,7 @@ describe('attachController answer listening', () => {
 
     client.deliverTranscript(itemId, 'ответ')
     client.emitSpeechStopped(itemId, 8_000)
-    await vi.advanceTimersByTimeAsync(120)
+    await vi.advanceTimersByTimeAsync(120 + answerSilenceDecideMs)
 
     expect(actor.getSnapshot().context.players.find((player) => player.id === 1)?.score).toBe(400)
     expect(playerLines().some((line) => line.includes('ответ'))).toBe(true)
@@ -612,7 +612,7 @@ describe('attachController answer listening', () => {
     actor.send({ type: 'BUZZER_PRESSED', playerId: 1 })
     const scoreBefore = actor.getSnapshot().context.players.find((player) => player.id === 1)?.score ?? 0
     client.hearAudio('ответ', 'ответ', 400)
-    await vi.advanceTimersByTimeAsync(400)
+    await vi.advanceTimersByTimeAsync(400 + answerSilenceDecideMs)
     expect(actor.getSnapshot().context.players.find((player) => player.id === 1)?.score).toBe(scoreBefore + 400)
     stop()
     actor.stop()
@@ -735,15 +735,16 @@ describe('attachController answer listening', () => {
     client.hear(hint, 800)
     expect(statePath(actor.getSnapshot().value)).toBe('answering.hearing')
     expect(client.prompts.at(-1)).toContain('Пылесосел')
-    await vi.advanceTimersByTimeAsync(80)
-    expect(statePath(actor.getSnapshot().value)).toBe('answering.waiting')
+    await vi.advanceTimersByTimeAsync(80 + answerSilenceDecideMs)
+    // Эхо подсказки — реплика «шум»: ответа нет, слушаем дальше до общего лимита.
+    expect(statePath(actor.getSnapshot().value)).toBe('answering.settling')
     expect(score()).toBe(0)
     expect(playerLines().some((line) => line.includes('Редкие слова') || line.includes('Пылесосел'))).toBe(false)
     expect(judgeLines().some((line) => line.includes('Пылесосел'))).toBe(false)
     expect(getTrace().some((entry) => entry.kind === 'note' && entry.title.includes('подсказку ответа'))).toBe(true)
 
     client.hear('пылесосел', 800)
-    await vi.advanceTimersByTimeAsync(120)
+    await vi.advanceTimersByTimeAsync(120 + answerSilenceDecideMs)
     expect(playerLines().some((line) => line.toLowerCase().includes('пылесосел'))).toBe(true)
     expect(judgeLines().some((line) => line.includes('correct') && line.toLowerCase().includes('пылесосел'))).toBe(true)
     expect(score()).toBe(100)
@@ -767,7 +768,7 @@ describe('specialListening — ранний слух', () => {
 })
 
 import { selectionInstructions } from './controller.ts'
-import { choiceClarifyAfterMs, choiceResolveTimeoutMs, transcriptWaitMs } from '../options.ts'
+import { answerSilenceDecideMs, choiceClarifyAfterMs, choiceResolveTimeoutMs, transcriptWaitMs } from '../options.ts'
 
 async function toChoosing(actor: { getSnapshot: () => { value: unknown } }) {
   for (let i = 0; i < 40 && statePath(actor.getSnapshot().value as never) !== 'choosing.listening'; i += 1) await vi.advanceTimersByTimeAsync(250)
@@ -870,7 +871,7 @@ describe('оценка: эталон засчитывается без моде�
     actor.send({ type: 'BUZZER_PRESSED', playerId: 1 })
     tool.mockClear()
     client.hear('Ответ.', 900)
-    await vi.advanceTimersByTimeAsync(300)
+    await vi.advanceTimersByTimeAsync(300 + answerSilenceDecideMs)
     expect(tool.mock.calls.some((call) => call[0] === 'judge')).toBe(false)
     expect(actor.getSnapshot().context.players[0]?.score).toBe(200)
     stop(); actor.stop()

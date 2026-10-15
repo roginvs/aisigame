@@ -47,7 +47,7 @@ export function conferenceTurnTitle(
     playerId = context.chooserId
     const finalRound = context.rounds.find((round) => round.index === context.roundIndex)?.kind === 'final'
     action = finalRound ? 'выбирает тему финала' : 'выбирает вопрос'
-  } else if (path === 'answering.waiting' || path === 'answering.hearing' || path === 'appealCue') {
+  } else if (path === 'answering.waiting' || path === 'answering.hearing' || path === 'answering.settling' || path === 'appealCue') {
     playerId = context.activePlayerId
     action = 'отвечает'
   } else if (path === 'finalBets.hearing') {

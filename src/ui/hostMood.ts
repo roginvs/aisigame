@@ -36,6 +36,7 @@ function baseMood(path: string, link: Pick<LinkStatus, 'host' | 'mic'>): HostMoo
       path === 'choosing.clarifying' ||
       path === 'answering.waiting' ||
       path === 'answering.hearing' ||
+      path === 'answering.settling' ||
       path === 'finalBets.hearing')
   ) {
     return 'listen'

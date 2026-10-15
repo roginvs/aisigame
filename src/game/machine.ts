@@ -3,7 +3,7 @@ import { auctionOptions, nextAuctionBidder, sameOption } from './auction.ts'
 import { autoCatRecipient, nextInCircle } from './cat.ts'
 import { appealMsLeft, appealRequestError, appealStake, appealWindowMs, eligibleAppealPlayers, settleOutcome } from './appeals.ts'
 import { gameConfig } from '../config.ts'
-import { catAwayWaitMs } from '../options.ts'
+import { answerOverrunSafetyMs, answerUtteranceJudgeMs, catAwayWaitMs } from '../options.ts'
 import { advanceIdle, enterIdle, idleDelay, idleIsFinal, idleThresholds, pauseIdle, type IdleKind } from './idle.ts'
 import { questionSpeech } from './choices.ts'
 import { earlyBuzzerMsFor } from './earlyBuzzer.ts'
@@ -362,6 +362,7 @@ export const gameMachine = setup({
     answerMs: gameConfig.answerMs,
     answerLeft: ({ context }) => (context.clarifications > 0 ? gameConfig.clarifyMs : gameConfig.answerMs),
     judgeMs: gameConfig.judgeMs,
+    answerSettleSafetyMs: answerOverrunSafetyMs + answerUtteranceJudgeMs,
     cellFlashMs: gameConfig.cellFlashMs,
     earlyLeft: ({ context }) => context.earlyLeftMs ?? gameConfig.earlyBuzzerMs,
     // С момента показа: пока играет звук/ролик — до max; потом (или без клипа) — добрать до min.
@@ -1844,13 +1845,27 @@ export const gameMachine = setup({
           after: { answerLeft: { target: '#game.announcing', actions: 'silencePenalty' } },
           on: {
             PLAYER_SPEECH_STARTED: { target: 'hearing', actions: 'clearTimer' },
-            PLAYER_SPEECH_FINISHED: '#game.judging',
+            PLAYER_SPEECH_FINISHED: { target: 'settling', actions: 'clearTimer' },
+            ANSWER_SETTLED: { target: '#game.judging', actions: 'clearTimer' },
+            ANSWER_NONE: { target: '#game.announcing', actions: 'silencePenalty' },
           },
         },
         hearing: {
           after: { judgeMs: { target: '#game.announcing', actions: 'silencePenalty' } },
           on: {
-            PLAYER_SPEECH_FINISHED: '#game.judging',
+            // Конец фразы — не вердикт: слушаем дальше, решает контроллер (тишина answerSilenceDecideMs).
+            PLAYER_SPEECH_FINISHED: 'settling',
+            ANSWER_SETTLED: '#game.judging',
+            ANSWER_NONE: { target: '#game.announcing', actions: 'silencePenalty' },
+          },
+        },
+        // Реплика закончилась, микрофон открыт: ждём ещё речь или решение контроллера.
+        settling: {
+          after: { answerSettleSafetyMs: { target: '#game.announcing', actions: 'judgeTimeout' } },
+          on: {
+            PLAYER_SPEECH_STARTED: 'hearing',
+            ANSWER_SETTLED: '#game.judging',
+            ANSWER_NONE: { target: '#game.announcing', actions: 'silencePenalty' },
           },
         },
       },
@@ -1863,6 +1878,7 @@ export const gameMachine = setup({
           { guard: 'judgmentMatches', target: 'announcing', actions: 'applyJudgment' },
         ],
         ANSWER_ECHO: { target: 'answering' },
+        ANSWER_JUDGE_FAILED: { target: 'announcing', actions: 'judgeTimeout' },
       },
     },
     announcing: {
@@ -1943,6 +1959,7 @@ export const gameMachine = setup({
           { guard: ({ context }) => context.resumePath === 'buzzing' || context.resumePath === 'buzzing.open' || context.resumePath === 'buzzing.reminding', target: 'buzzing', actions: 'resumeClock' },
           { guard: ({ context }) => context.resumePath === 'answering.waiting', target: 'answering.waiting', actions: 'resumeClock' },
           { guard: ({ context }) => context.resumePath === 'answering.hearing', target: 'answering.hearing', actions: 'resumeClock' },
+          { guard: ({ context }) => context.resumePath === 'answering.settling', target: 'answering.settling', actions: 'resumeClock' },
           { guard: ({ context }) => context.resumePath === 'judging', target: 'judging', actions: 'resumeClock' },
           {
             guard: ({ context }) => context.resumePath === 'announcing' || context.resumePath === 'announcing.speaking',

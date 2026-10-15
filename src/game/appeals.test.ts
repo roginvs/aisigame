@@ -25,6 +25,7 @@ function start(input = pack, ids = [1, 2, 3]): Actor {
 }
 function result(actor: Actor, status: JudgmentStatus) {
   actor.send({ type: 'PLAYER_SPEECH_FINISHED' })
+  actor.send({ type: 'ANSWER_SETTLED' })
   const c = actor.getSnapshot().context
   const judgment = { questionId: c.activeQuestionId!, playerId: c.activePlayerId!, attemptId: c.attemptId, status, heard: 'ответ', reason: 'проверка' }
   actor.send({ type: 'ANSWER_JUDGED', judgment })
@@ -92,7 +93,7 @@ describe('ручные апелляции', () => {
 
   it('таймаут оценки тоже нулевой результат с перехватом; при повторе возвращает минус', () => {
     const actor = start(); normal(actor, 1, 'incorrect'); request(actor, 1); cue(actor)
-    actor.send({ type: 'PLAYER_SPEECH_FINISHED' }); vi.advanceTimersByTime(gameConfig.judgeMs)
+    actor.send({ type: 'PLAYER_SPEECH_FINISHED' }); actor.send({ type: 'ANSWER_SETTLED' }); vi.advanceTimersByTime(gameConfig.judgeMs)
     expect(scores(actor)[0]).toBe(0); say(actor); expect(path(actor)).toBe('buzzing.open')
   })
 

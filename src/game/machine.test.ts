@@ -62,6 +62,7 @@ describe('game machine', () => {
     const actor = reachBuzzing()
     actor.send({ type: 'BUZZER_PRESSED', playerId: 1 })
     actor.send({ type: 'PLAYER_SPEECH_FINISHED' })
+    actor.send({ type: 'ANSWER_SETTLED' })
     actor.send({ type: 'ANSWER_JUDGED', judgment: { questionId: 'history-100', playerId: 1, attemptId: actor.getSnapshot().context.attemptId, status: 'correct', heard: 'x', reason: 'x' } })
     const snap = actor.getSnapshot()
     expect(statePath(snap.value)).toBe('announcing.speaking')
@@ -78,6 +79,7 @@ describe('game machine', () => {
     const actor = reachBuzzing()
     actor.send({ type: 'BUZZER_PRESSED', playerId: 1 })
     actor.send({ type: 'PLAYER_SPEECH_FINISHED' })
+    actor.send({ type: 'ANSWER_SETTLED' })
     actor.send({ type: 'ANSWER_JUDGED', judgment: { questionId: 'history-100', playerId: 1, attemptId: actor.getSnapshot().context.attemptId, status: 'incorrect', heard: 'x', reason: 'x' } })
     const snap = actor.getSnapshot()
     expect(statePath(snap.value)).toBe('announcing.speaking')
@@ -108,6 +110,7 @@ describe('game machine', () => {
     const actor = reachBuzzing()
     actor.send({ type: 'BUZZER_PRESSED', playerId: 2 })
     actor.send({ type: 'PLAYER_SPEECH_FINISHED' })
+    actor.send({ type: 'ANSWER_SETTLED' })
     actor.send({
       type: 'ANSWER_JUDGED',
       judgment: {
@@ -128,6 +131,7 @@ describe('game machine', () => {
     const actor = reachBuzzing()
     actor.send({ type: 'BUZZER_PRESSED', playerId: 1 })
     actor.send({ type: 'PLAYER_SPEECH_FINISHED' })
+    actor.send({ type: 'ANSWER_SETTLED' })
     actor.send({
       type: 'ANSWER_JUDGED',
       judgment: {
@@ -148,6 +152,7 @@ describe('game machine', () => {
     actor.send({ type: 'HOST_AUDIO_FINISHED', purpose: 'read' })
     actor.send({ type: 'BUZZER_PRESSED', playerId: 3 })
     actor.send({ type: 'PLAYER_SPEECH_FINISHED' })
+    actor.send({ type: 'ANSWER_SETTLED' })
     actor.send({
       type: 'ANSWER_JUDGED',
       judgment: {
@@ -168,6 +173,7 @@ describe('game machine', () => {
     const actor = reachBuzzing()
     actor.send({ type: 'BUZZER_PRESSED', playerId: 2 })
     actor.send({ type: 'PLAYER_SPEECH_FINISHED' })
+    actor.send({ type: 'ANSWER_SETTLED' })
     actor.send({
       type: 'ANSWER_JUDGED',
       judgment: {
@@ -191,6 +197,7 @@ describe('game machine', () => {
     expect(statePath(actor.getSnapshot().value)).toBe('buzzing.open')
     actor.send({ type: 'BUZZER_PRESSED', playerId: 1 })
     actor.send({ type: 'PLAYER_SPEECH_FINISHED' })
+    actor.send({ type: 'ANSWER_SETTLED' })
     actor.send({
       type: 'ANSWER_JUDGED',
       judgment: {
@@ -213,6 +220,7 @@ describe('game machine', () => {
     const actor = reachBuzzing()
     actor.send({ type: 'BUZZER_PRESSED', playerId: 1 })
     actor.send({ type: 'PLAYER_SPEECH_FINISHED' })
+    actor.send({ type: 'ANSWER_SETTLED' })
     actor.send({
       type: 'ANSWER_JUDGED',
       judgment: {
@@ -238,6 +246,7 @@ describe('game machine', () => {
     expect(actor.getSnapshot().context.phaseDurationMs).toBe(gameConfig.clarifyMs)
 
     actor.send({ type: 'PLAYER_SPEECH_FINISHED' })
+    actor.send({ type: 'ANSWER_SETTLED' })
     actor.send({
       type: 'ANSWER_JUDGED',
       judgment: {
@@ -263,6 +272,7 @@ describe('game machine', () => {
     const actor = reachBuzzing()
     actor.send({ type: 'BUZZER_PRESSED', playerId: 1 })
     actor.send({ type: 'PLAYER_SPEECH_FINISHED' })
+    actor.send({ type: 'ANSWER_SETTLED' })
     actor.send({ type: 'ANSWER_JUDGED', judgment: { questionId: 'history-100', playerId: 1, attemptId: 1, status: 'near_miss', heard: 'Читов', reason: 'созвучно' } })
     expect(statePath(actor.getSnapshot().value)).toBe('announcing.speaking')
     actor.send({ type: 'PLAYER_SPEECH_STARTED' })
@@ -275,6 +285,7 @@ describe('game machine', () => {
     const actor = reachBuzzing()
     actor.send({ type: 'BUZZER_PRESSED', playerId: 1 })
     actor.send({ type: 'PLAYER_SPEECH_FINISHED' })
+    actor.send({ type: 'ANSWER_SETTLED' })
     actor.send({ type: 'ANSWER_JUDGED', judgment: { questionId: 'history-100', playerId: 1, attemptId: 1, status: 'incorrect', heard: 'x', reason: 'нет' } })
     actor.send({ type: 'PLAYER_SPEECH_STARTED' })
     expect(statePath(actor.getSnapshot().value)).toBe('announcing.speaking')
@@ -285,6 +296,7 @@ describe('game machine', () => {
     const wrong = (playerId: 1 | 2 | 3, attemptId: number) => {
       actor.send({ type: 'BUZZER_PRESSED', playerId })
       actor.send({ type: 'PLAYER_SPEECH_FINISHED' })
+      actor.send({ type: 'ANSWER_SETTLED' })
       actor.send({
         type: 'ANSWER_JUDGED',
         judgment: {
@@ -315,6 +327,7 @@ describe('game machine', () => {
     expect(actor.getSnapshot().context.phaseDurationMs).toBe(gameConfig.buzzerMs)
     actor.send({ type: 'BUZZER_PRESSED', playerId: 2 })
     actor.send({ type: 'PLAYER_SPEECH_FINISHED' })
+    actor.send({ type: 'ANSWER_SETTLED' })
     actor.send({
       type: 'ANSWER_JUDGED',
       judgment: {
@@ -349,6 +362,7 @@ describe('game machine', () => {
     actor.send({ type: 'UNBUTTONED_TALK' })
     actor.send({ type: 'BUZZER_PRESSED', playerId: 1 })
     actor.send({ type: 'PLAYER_SPEECH_FINISHED' })
+    actor.send({ type: 'ANSWER_SETTLED' })
     actor.send({
       type: 'ANSWER_JUDGED',
       judgment: {
@@ -399,6 +413,7 @@ describe('game machine', () => {
     const actor = reachBuzzing()
     actor.send({ type: 'BUZZER_PRESSED', playerId: 1 })
     actor.send({ type: 'PLAYER_SPEECH_FINISHED' })
+    actor.send({ type: 'ANSWER_SETTLED' })
     actor.send({
       type: 'ANSWER_JUDGED',
       judgment: {
@@ -444,6 +459,7 @@ describe('game machine', () => {
     const actor = reachBuzzing()
     actor.send({ type: 'BUZZER_PRESSED', playerId: 1 })
     actor.send({ type: 'PLAYER_SPEECH_FINISHED' })
+    actor.send({ type: 'ANSWER_SETTLED' })
     actor.send({
       type: 'ANSWER_JUDGED',
       judgment: {
@@ -458,6 +474,7 @@ describe('game machine', () => {
     expect(actor.getSnapshot().context.wrongHeard).toEqual([])
     actor.send({ type: 'HOST_AUDIO_FINISHED', purpose: 'announce' })
     actor.send({ type: 'PLAYER_SPEECH_FINISHED' })
+    actor.send({ type: 'ANSWER_SETTLED' })
     actor.send({
       type: 'ANSWER_JUDGED',
       judgment: {
@@ -487,6 +504,7 @@ describe('game machine', () => {
     const wrong = (playerId: 1 | 2 | 3, attemptId: number, heard: string) => {
       actor.send({ type: 'BUZZER_PRESSED', playerId })
       actor.send({ type: 'PLAYER_SPEECH_FINISHED' })
+      actor.send({ type: 'ANSWER_SETTLED' })
       actor.send({
         type: 'ANSWER_JUDGED',
         judgment: {
@@ -528,6 +546,7 @@ describe('game machine', () => {
     const wrong = (playerId: 1 | 2, attemptId: number, heard: string) => {
       actor.send({ type: 'BUZZER_PRESSED', playerId })
       actor.send({ type: 'PLAYER_SPEECH_FINISHED' })
+      actor.send({ type: 'ANSWER_SETTLED' })
       actor.send({
         type: 'ANSWER_JUDGED',
         judgment: {
@@ -563,6 +582,7 @@ describe('game machine', () => {
     const actor = reachBuzzing()
     actor.send({ type: 'BUZZER_PRESSED', playerId: 1 })
     actor.send({ type: 'PLAYER_SPEECH_FINISHED' })
+    actor.send({ type: 'ANSWER_SETTLED' })
     actor.send({
       type: 'ANSWER_JUDGED',
       judgment: {
@@ -577,6 +597,7 @@ describe('game machine', () => {
     actor.send({ type: 'HOST_AUDIO_FINISHED', purpose: 'announce' })
     actor.send({ type: 'BUZZER_PRESSED', playerId: 2 })
     actor.send({ type: 'PLAYER_SPEECH_FINISHED' })
+    actor.send({ type: 'ANSWER_SETTLED' })
     actor.send({
       type: 'ANSWER_JUDGED',
       judgment: {
@@ -615,6 +636,7 @@ describe('game machine', () => {
     actor.send({ type: 'UNBUTTONED_TALK' })
     actor.send({ type: 'BUZZER_PRESSED', playerId: 1 })
     actor.send({ type: 'PLAYER_SPEECH_FINISHED' })
+    actor.send({ type: 'ANSWER_SETTLED' })
     actor.send({
       type: 'ANSWER_JUDGED',
       judgment: {
@@ -709,6 +731,7 @@ describe('game machine', () => {
     const clip = withMedia([{ kind: 'audio', name: 'song.mp3', url: 'blob:song' }])
     clip.send({ type: 'BUZZER_PRESSED', playerId: 1 })
     clip.send({ type: 'PLAYER_SPEECH_FINISHED' })
+    clip.send({ type: 'ANSWER_SETTLED' })
     clip.send({
       type: 'ANSWER_JUDGED',
       judgment: { questionId: 'history-100', playerId: 1, attemptId: clip.getSnapshot().context.attemptId, status: 'correct', heard: 'x', reason: '' },
@@ -892,6 +915,7 @@ describe('game machine', () => {
     actor.send({ type: 'HOST_AUDIO_FINISHED', purpose: 'read' })
     actor.send({ type: 'BUZZER_PRESSED', playerId: 1 })
     actor.send({ type: 'PLAYER_SPEECH_FINISHED' })
+    actor.send({ type: 'ANSWER_SETTLED' })
     actor.send({
       type: 'ANSWER_JUDGED',
       judgment: {
@@ -912,6 +936,7 @@ describe('game machine', () => {
     expect(statePath(actor.getSnapshot().value)).toBe('finalBets.asking')
     // Ранний слух: ставку можно сказать, пока ведущая ещё спрашивает.
     actor.send({ type: 'PLAYER_SPEECH_FINISHED' })
+    actor.send({ type: 'ANSWER_SETTLED' })
     expect(statePath(actor.getSnapshot().value)).toBe('finalBets.resolving')
     actor.send({ type: 'BET_PLACED', playerId: 1, amount: 40 })
     expect(statePath(actor.getSnapshot().value)).toBe('flashing')
@@ -934,6 +959,7 @@ describe('game machine', () => {
     actor.send({ type: 'PLAYER_SPEECH_STARTED' })
     expect(statePath(actor.getSnapshot().value)).toBe('answering.waiting')
     actor.send({ type: 'PLAYER_SPEECH_FINISHED' })
+    actor.send({ type: 'ANSWER_SETTLED' })
     actor.send({
       type: 'ANSWER_JUDGED',
       judgment: {
@@ -976,6 +1002,7 @@ describe('game machine', () => {
     actor.send({ type: 'HOST_AUDIO_FINISHED', purpose: 'read' })
     actor.send({ type: 'BUZZER_PRESSED', playerId: 3 })
     actor.send({ type: 'PLAYER_SPEECH_FINISHED' })
+    actor.send({ type: 'ANSWER_SETTLED' })
     actor.send({
       type: 'ANSWER_JUDGED',
       judgment: {
@@ -995,6 +1022,7 @@ describe('game machine', () => {
     actor.send({ type: 'HOST_AUDIO_FINISHED', purpose: 'announce' })
     actor.send({ type: 'BUZZER_PRESSED', playerId: 1 })
     actor.send({ type: 'PLAYER_SPEECH_FINISHED' })
+    actor.send({ type: 'ANSWER_SETTLED' })
     actor.send({
       type: 'ANSWER_JUDGED',
       judgment: {
@@ -1078,6 +1106,7 @@ describe('game machine', () => {
     actor.send({ type: 'HOST_AUDIO_FINISHED', purpose: 'read' })
     actor.send({ type: 'BUZZER_PRESSED', playerId: 1 })
     actor.send({ type: 'PLAYER_SPEECH_FINISHED' })
+    actor.send({ type: 'ANSWER_SETTLED' })
     actor.send({
       type: 'ANSWER_JUDGED',
       judgment: {
@@ -1351,6 +1380,7 @@ describe('game machine', () => {
     actor.send({ type: 'HOST_AUDIO_FINISHED', purpose: 'read' })
     actor.send({ type: 'BUZZER_PRESSED', playerId: 1 })
     actor.send({ type: 'PLAYER_SPEECH_FINISHED' })
+    actor.send({ type: 'ANSWER_SETTLED' })
     actor.send({
       type: 'ANSWER_JUDGED',
       judgment: {
@@ -1553,6 +1583,7 @@ describe('game machine', () => {
     actor.send({ type: 'BUZZER_PRESSED', playerId: 4 })
     expect(actor.getSnapshot().context.activePlayerId).toBe(4)
     actor.send({ type: 'PLAYER_SPEECH_FINISHED' })
+    actor.send({ type: 'ANSWER_SETTLED' })
     actor.send({
       type: 'ANSWER_JUDGED',
       judgment: {
@@ -1627,6 +1658,7 @@ describe('game machine', () => {
     actor.send({ type: 'HOST_AUDIO_FINISHED', purpose: 'read' })
     actor.send({ type: 'BUZZER_PRESSED', playerId: 1 })
     actor.send({ type: 'PLAYER_SPEECH_FINISHED' })
+    actor.send({ type: 'ANSWER_SETTLED' })
     actor.send({
       type: 'ANSWER_JUDGED',
       judgment: {
@@ -1745,6 +1777,7 @@ function closeStack(actor: ReturnType<typeof reachBuzzing>, questionId: string) 
   actor.send({ type: 'BUZZER_PRESSED', playerId: 1 })
   const attemptId = actor.getSnapshot().context.attemptId
   actor.send({ type: 'PLAYER_SPEECH_FINISHED' })
+  actor.send({ type: 'ANSWER_SETTLED' })
   actor.send({
     type: 'ANSWER_JUDGED',
     judgment: {

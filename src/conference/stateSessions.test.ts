@@ -200,7 +200,7 @@ it('апелляции: подтверждение, чужой playerId, дуб�
   await vi.advanceTimersByTimeAsync(1080)
   actor.send({ type: 'HOST_AUDIO_FINISHED', purpose: 'read' })
   const normal = (playerId: number, status: 'incorrect' | 'correct') => {
-    actor.send({ type: 'BUZZER_PRESSED', playerId }); actor.send({ type: 'PLAYER_SPEECH_FINISHED' })
+    actor.send({ type: 'BUZZER_PRESSED', playerId }); actor.send({ type: 'PLAYER_SPEECH_FINISHED' }); actor.send({ type: 'ANSWER_SETTLED' })
     actor.send({ type: 'ANSWER_JUDGED', judgment: { questionId: 'history-100', playerId, attemptId: actor.getSnapshot().context.attemptId, status, heard: 'ответ', reason: '' } })
     actor.send({ type: 'HOST_AUDIO_FINISHED', purpose: 'announce' })
   }

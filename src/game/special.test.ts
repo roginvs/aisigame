@@ -37,6 +37,7 @@ const heard = (actor: Actor, purpose: Parameters<typeof actor.send>[0] extends i
 function judge(actor: Actor, status: 'correct' | 'incorrect') {
   const c = ctx(actor)
   actor.send({ type: 'PLAYER_SPEECH_FINISHED' })
+  actor.send({ type: 'ANSWER_SETTLED' })
   actor.send({ type: 'ANSWER_JUDGED', judgment: { questionId: c.activeQuestionId!, playerId: c.activePlayerId!, attemptId: c.attemptId, status, heard: 'x', reason: '' } })
 }
 function readAndAnswer(actor: Actor) {

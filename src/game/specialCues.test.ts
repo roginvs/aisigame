@@ -89,7 +89,7 @@ describe('инструменты запасного разбора', () => {
     expect(finalBetToolFor(800).parameters.properties.amount).toMatchObject({ minimum: 0, maximum: 800 })
   })
   it('судья не возвращает questionId, playerId, attemptId — попытка по запросу', () => {
-    expect(submitAnswerJudgmentTool.parameters.required).toEqual(['status', 'heard', 'reason'])
+    expect(submitAnswerJudgmentTool.parameters.required).toEqual(['status', 'heard', 'reason', 'speech', 'guessing'])
     expect(Object.keys(submitAnswerJudgmentTool.parameters.properties)).not.toContain('attemptId')
   })
 })

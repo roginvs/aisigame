@@ -52,7 +52,7 @@ export function hostEarShown(path: string): boolean {
 export function hostEarSurvives(path: string, from = ''): boolean {
   // Из уточнения речь сама возвращает в listening/picking.
   if (from.endsWith('clarifying')) return true
-  return path === 'answering.hearing' || path === 'judging' || path.endsWith('.resolving') || path === 'finalBets.hearing'
+  return path === 'answering.hearing' || path === 'answering.settling' || path === 'judging' || path.endsWith('.resolving') || path === 'finalBets.hearing'
 }
 
 export function readHostEar(value: unknown): HostEar | null {
