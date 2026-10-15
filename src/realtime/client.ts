@@ -1105,10 +1105,7 @@ export class RealtimeClient {
     const sameTurn = purpose === '' || (purpose === this.speech.purpose && (Number.isNaN(turn) || turn === this.speech.turn))
     if (!sameTurn) return
     if (this.speech.expect) {
-      const said = assistantUtterances(response)
-        .map(({ line }) => line)
-        .join(' ')
-        .trim()
+      const said = assistantUtterances(response).join(' ').trim()
       if (!said) return
       if (!speechMatches(said, this.speech.expect)) {
         this.rejectSpokenLine(responseId, said)
@@ -1191,7 +1188,6 @@ export class RealtimeClient {
     speech.mustSay = undefined
     pushTrace('note', `в реплике раскрытия нет эталона, говорю его дословно: ${said}`)
     speech.expect = answer
-    speech.liveTranscript = ''
     speech.started = false
     speech.done = false
     speech.ended = false
@@ -1212,7 +1208,6 @@ export class RealtimeClient {
     const heardId = responseId || speech.liveResponseId
     if (heardId && speech.dropResponseId === heardId) return
     speech.dropResponseId = heardId
-    speech.liveTranscript = ''
     if (!speech.ignoreResponseId) speech.ignoreResponseId = heardId || speech.liveResponseId
     speech.started = false
     speech.done = false
