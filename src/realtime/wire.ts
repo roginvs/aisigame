@@ -10,6 +10,8 @@ export interface VoiceWire {
   close(): void
   setMicEnabled(enabled: boolean): void
   setOutputMuted(muted: boolean): void
+  /** Мастер Jitsi: false — ведущую слушаем из комнаты, локально не играем (поток в комнату идёт). */
+  setLocalPlayback?(enabled: boolean): void
   attachHostOutput(handler: (stream: MediaStream) => void): void
   setInputStream(stream: MediaStream | null): void
 }

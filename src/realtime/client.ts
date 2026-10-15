@@ -109,6 +109,8 @@ export class RealtimeClient {
   private audio = new Audio()
   /** Android: после микрофона голос ведущей играет новый элемент — в потоке «звонок», под качелькой. */
   private stopReopen: () => void = () => undefined
+  private outputMuted = false
+  private localPlayback = true
   private audioItems = new AudioItems()
   private judgeRequests = new Map<string, {
     context: JudgeRequestContext
@@ -436,8 +438,23 @@ export class RealtimeClient {
   }
 
   setOutputMuted(muted: boolean): void {
+    this.outputMuted = muted
     if (this.wire) this.wire.setOutputMuted(muted)
-    else this.audio.muted = muted
+    else this.applyLocalMute()
+  }
+
+  /**
+   * Мастер Jitsi: false — свой `<audio>` ведущей молчит (но играет, чтобы шли события и поток в комнату),
+   * ведущую мастер слышит из комнаты, как все. Одиночная игра — true.
+   */
+  setLocalPlayback(enabled: boolean): void {
+    this.localPlayback = enabled
+    if (this.wire) this.wire.setLocalPlayback?.(enabled)
+    else this.applyLocalMute()
+  }
+
+  private applyLocalMute(): void {
+    this.audio.muted = this.outputMuted || !this.localPlayback
   }
 
   /** Пауза: выбросить недослушанную речь игрока. Звук ведущей тут ни при чём. */
@@ -1504,6 +1521,7 @@ export type GameVoice = Pick<
   | 'connect'
   | 'setMicEnabled'
   | 'setOutputMuted'
+  | 'setLocalPlayback'
   | 'discardInputAudio'
   | 'setSpeechSpeed'
   | 'setTranscriptionPrompt'

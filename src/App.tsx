@@ -632,6 +632,8 @@ export default function App() {
     transportDisposeRef.current = null
     conferenceHandleRef.current = null
     conferenceLobbyRef.current = false
+    // После конференции ведущая снова играет локально (одиночная игра).
+    voiceClientRef.current?.setLocalPlayback(true)
     try {
       masterSession?.dispose()
       joinerSession?.dispose()
@@ -805,6 +807,8 @@ export default function App() {
         if (!publish) return
         void publish.then(
           () => {
+            // Jitsi: ведущая уже в комнате — мастер слушает её оттуда, как все; локально не играем.
+            if (!useBroadcast) voiceClientRef.current?.setLocalPlayback(false)
             if (!firstHostOutput) return
             firstHostOutput = false
             resolveHostOutput?.()

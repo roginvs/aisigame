@@ -115,6 +115,12 @@ export class MockRealtimeClient implements GameVoice {
   /** Последняя суженная схема инструмента — для тестов. */
   lastTool: { name: string } | null = null
 
+  /** Сколько раз мастер выключал/включал локальную ведущую — для тестов. */
+  localPlayback = true
+  setLocalPlayback(enabled: boolean): void {
+    this.localPlayback = enabled
+  }
+
   setOutputMuted(muted: boolean): void {
     if (muted) this.onLink({ host: 'idle' })
   }

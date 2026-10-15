@@ -43,6 +43,7 @@ export class PcmPlayer {
   private started = false
   private finishing = false
   private muted = false
+  private localPlayback = true
   private epoch = 0
   private nodes: AudioBufferSourceNode[] = []
   private hostTap: MediaStreamAudioDestinationNode | null = null
@@ -65,7 +66,7 @@ export class PcmPlayer {
     for (let index = 0; index < pcm.length; index += 1) channel[index] = (pcm[index] ?? 0) / 32768
     const source = ctx.createBufferSource()
     source.buffer = buffer
-    source.connect(gameOutput(ctx))
+    if (this.localPlayback || !this.hostTap) source.connect(gameOutput(ctx))
     if (this.hostTap) source.connect(this.hostTap)
     const epoch = this.epoch
     const startAt = Math.max(ctx.currentTime + 0.02, this.next)
@@ -106,6 +107,11 @@ export class PcmPlayer {
     this.started = false
     this.finishing = false
     this.next = 0
+  }
+
+  /** false — только в поток комнаты (hostTap), без локального динамика. */
+  setLocalPlayback(enabled: boolean): void {
+    this.localPlayback = enabled
   }
 
   setMuted(muted: boolean): void {

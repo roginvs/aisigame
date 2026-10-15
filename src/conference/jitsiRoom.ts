@@ -569,11 +569,7 @@ export async function connectJitsiConference(input: {
     const entry = remoteAudioTracks.get(track)
     if (!entry) return
     const owner = trackOwner(track)
-    if (botHandle && owner === botHandle.localParticipantId()) {
-      conferenceAudio.remove(entry.key)
-      syncModelMixer()
-      return
-    }
+    // Свою «Ведущую» мастер тоже слушает из комнаты, как все (в микс модели она не идёт — syncModelMixer).
     const stream = conferenceAudioStream(track)
     // Скрытых/ещё не пришедших участников не проигрываем (как раньше); userJoined дозовёт.
     if (!stream || !remoteNames.has(owner)) {

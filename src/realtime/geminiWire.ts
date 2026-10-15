@@ -167,6 +167,10 @@ export class GeminiWire implements VoiceWire {
     this.player.setMuted(muted)
   }
 
+  setLocalPlayback(enabled: boolean): void {
+    this.player.setLocalPlayback(enabled)
+  }
+
   attachHostOutput(handler: (stream: MediaStream) => void): void {
     this.player.attachHostOutput(handler)
   }
