@@ -1175,6 +1175,13 @@ button.continue-with-file .continue-file {
   overflow-wrap: anywhere;
 }
 
+/* Шрифт подгоняет `questionFit.ts`; если не влез и минимальный — текст листается внутри карточки. */
+.question h2.question-text-scroll {
+  overflow-y: auto;
+  padding-right: 6px;
+  scrollbar-width: thin;
+}
+
 .choices {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -1532,7 +1539,9 @@ button.continue-with-file .continue-file {
 .players.conference-players > .conference-player {
   flex: 1 1 0;
   min-width: min(160px, 100%);
-  max-width: min(400px, 100%);
+  /* Кадр 4:3 по ширине карточки: на коротком широком экране (ноутбук с зумом) 400px ширины дают
+     300px видео, и ряд игроков съедал карточку вопроса. Высота кадра ≤ 26dvh → ширина ≤ 26dvh·4/3. */
+  max-width: min(400px, 100%, calc(26dvh * 4 / 3 + 20px));
 }
 
 .player { display: grid; gap: 10px; min-width: 0; }

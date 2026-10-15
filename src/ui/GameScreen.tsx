@@ -28,6 +28,7 @@ import { AirStatus } from './airStatus.tsx'
 import { buzzerLabel } from './buzzerLabel.ts'
 import { nudgeActive, nudgeLevelOverride } from './buzzNudge.ts'
 import { useBuzzNudge } from './useBuzzNudge.ts'
+import { useFitQuestionText } from './questionFit.ts'
 import { buzzKeyLabel, isKeyboardPlayer, playerFromBuzzKey } from './buzzKeys.ts'
 import { ConversationChat } from './DebugChat.tsx'
 import { packProgressLabel } from '../conference/packProgress.ts'
@@ -554,7 +555,7 @@ export function GameScreen(props: {
             <p className="eyebrow">
               {question.themeName} · {question.value}
             </p>
-            <h2>{question.text}</h2>
+            <QuestionText text={question.text} />
             {question.choices?.length ? (
               <ul className="choices" aria-label="Варианты ответа">
                 {question.choices.map((choice) => (
@@ -863,4 +864,11 @@ function Countdown(props: { startedAt: number; durationMs: number }) {
       <span className="visually-hidden">Осталось {secondsLeft} с</span>
     </div>
   )
+}
+
+/** Текст вопроса: шрифт подгоняется, чтобы текст был виден целиком (см. `questionFit.ts`). */
+function QuestionText({ text }: { text: string }) {
+  const ref = useRef<HTMLHeadingElement>(null)
+  useFitQuestionText(ref, text)
+  return <h2 ref={ref}>{text}</h2>
 }
