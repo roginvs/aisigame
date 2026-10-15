@@ -8,7 +8,7 @@ describe('choicePrompt', () => {
     const prompt = choicePrompt('normal', [
       { theme: 'Реки', value: 100 },
       { theme: 'Музыка', value: 200 },
-    ])
+    ], true)
     expect(prompt).toContain('Реки 100 сто')
     expect(prompt).toContain('Музыка 200 двести')
     expect(prompt.length).toBeLessThanOrEqual(1024)
@@ -17,7 +17,7 @@ describe('choicePrompt', () => {
   it('укладывает шесть тем в лимит подсказки распознавания', () => {
     const themes = ['Поехали', 'Апрель', 'Столицы мира', 'Холодное оружие', 'Б.Б.', 'Известные люди']
     const cells = themes.flatMap((theme) => [100, 200, 300, 400, 500].map((value) => ({ theme, value })))
-    const prompt = choicePrompt('normal', cells)
+    const prompt = choicePrompt('normal', cells, true)
     expect(prompt.length).toBeLessThanOrEqual(1024)
     expect(prompt).toContain('Б.Б.')
     expect(prompt).toContain('сто')
@@ -27,7 +27,7 @@ describe('choicePrompt', () => {
   it('убирает словесные цены, если иначе подсказка длиннее 1024', () => {
     const themes = Array.from({ length: 6 }, (_, index) => `Очень длинное название темы номер ${index + 1} ${'слово '.repeat(12)}`.trim())
     const cells = themes.flatMap((theme) => [100, 200, 300, 400, 500, 600, 700, 800].map((value) => ({ theme, value })))
-    const prompt = choicePrompt('normal', cells)
+    const prompt = choicePrompt('normal', cells, true)
     expect(prompt.length).toBeLessThanOrEqual(1024)
     expect(prompt).toContain(themes[0]?.slice(0, 24))
     expect(prompt).not.toContain('двести')
@@ -48,7 +48,7 @@ describe('choicePrompt', () => {
       { theme: 'Музыка', value: 400 },
       { theme: 'Кино', value: 500 },
     ]
-    const prompt = choicePrompt('normal', cells)
+    const prompt = choicePrompt('normal', cells, true)
     expect(prompt.startsWith('Тема и цена')).toBe(false)
     expect(prompt.length).toBeLessThanOrEqual(1024)
     const body = prompt.replace(/^\{/, '').replace(/\}$/, '')
@@ -63,7 +63,7 @@ describe('choicePrompt', () => {
     expect(echoesChoicePrompt('Супчики 100 сто', prompt)).toBe(false)
     expect(echoesChoicePrompt('кхе', prompt)).toBe(false)
     expect(echoesChoicePrompt('Пока', prompt)).toBe(false)
-    const alone = choicePrompt('normal', [{ theme: 'Супчики', value: 100 }])
+    const alone = choicePrompt('normal', [{ theme: 'Супчики', value: 100 }], true)
     expect(echoesChoicePrompt('Супчики сто', alone)).toBe(false)
     expect(echoesChoicePrompt('Супчики 100 сто', alone)).toBe(false)
     expect(echoesChoicePrompt(alone, alone)).toBe(false)
@@ -78,7 +78,7 @@ describe('choicePrompt', () => {
       [200, 400, 600, 800, 1000].map((value) => ({ theme: 'ВОЛГА', value })),
       [200, 400, 600, 1000].map((value) => ({ theme: 'БОГИ И ГЕРОИ', value })),
     ].flat()
-    const prompt = choicePrompt('normal', cells)
+    const prompt = choicePrompt('normal', cells, true)
     expect(prompt.length).toBeLessThanOrEqual(1024)
     expect(prompt.startsWith('{')).toBe(true)
     const body = prompt.slice(1, -1)
@@ -90,5 +90,13 @@ describe('choicePrompt', () => {
     expect(echoesChoicePrompt('Известные фамилии за 500', prompt)).toBe(false)
     expect(echoesChoicePrompt('Пиздец 400', prompt)).toBe(false)
     expect(echoesChoicePrompt('ПЦ 400', prompt)).toBe(false)
+  })
+
+  it('по умолчанию — только названия тем, без номиналов (короткая подсказка)', () => {
+    const cells = ['Глобус и меридианы', 'Кисточка и камертон'].flatMap((theme) => [10, 20, 30].map((value) => ({ theme, value })))
+    const prompt = choicePrompt('normal', cells)
+    expect(prompt).toBe('{Глобус и меридианы; Кисточка и камертон}')
+    expect(echoesChoicePrompt('Глобус и меридианы; Кисточка и камертон.', prompt)).toBe(true)
+    expect(echoesChoicePrompt('Глобус и меридианы 30', prompt)).toBe(false)
   })
 })

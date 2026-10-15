@@ -1,3 +1,4 @@
+import { asrChoicePromptPrices } from '../options.ts'
 import { echoesTranscriptionPrompt } from './promptEcho.ts'
 const hundreds: Record<number, string> = {
   0: 'ноль',
@@ -24,9 +25,11 @@ export function priceWords(value: number): string {
 
 const transcriptionPromptMax = 1024
 
-export function choicePrompt(kind: 'normal' | 'final', cells: { theme: string; value: number }[]): string {
+export function choicePrompt(kind: 'normal' | 'final', cells: { theme: string; value: number }[], prices = asrChoicePromptPrices): string {
   if (!cells.length) return 'Игрок выбирает ячейку на табло.'
-  if (kind === 'final') {
+  // Только темы: номиналы — обычные числительные, их распознавание слышит и так,
+  // а длинный каталог с ценами на шуме распознавание выдаёт целиком вместо речи.
+  if (kind === 'final' || !prices) {
     const themes = [...new Set(cells.map((cell) => cell.theme))]
     return wrapCatalog(themes.join('; '))
   }
