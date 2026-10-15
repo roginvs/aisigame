@@ -71,3 +71,33 @@ test.describe('телефон ландшафт 844×390', () => {
     expect(board.y + board.height).toBeLessThanOrEqual(390)
   })
 })
+
+test.describe('телефон 412×915: плотная вёрстка', () => {
+  test.use({ viewport: { width: 412, height: 915 }, hasTouch: true, isMobile: true })
+  test('верхняя панель низкая, табло невысокое, разговор на ~2 реплики', async ({ page }) => {
+    await startDemo(page)
+    const top = (await page.locator('.topbar').boundingBox())!
+    expect(top.height).toBeLessThan(80)
+    const board = (await page.getByRole('grid', { name: 'Игровое поле' }).boundingBox())!
+    expect(board.height).toBeLessThanOrEqual(300)
+    const chat = (await page.locator('.chat-scroll').boundingBox())!
+    expect(chat.height).toBeLessThan(160)
+    await expect(page.getByRole('button', { name: 'Выход' })).toBeVisible()
+  })
+})
+
+test.describe('телефон 412×915: выход по иконке', () => {
+  test.use({ viewport: { width: 412, height: 915 }, hasTouch: true, isMobile: true })
+  test('иконка выхода спрашивает подтверждение: отмена остаётся, согласие выходит', async ({ page }) => {
+    await startDemo(page)
+    const exit = page.getByRole('button', { name: 'Выход' })
+    let asked = ''
+    page.once('dialog', async (dialog) => { asked = `${dialog.type()}:${dialog.message()}`; await dialog.dismiss() })
+    await exit.click()
+    await expect.poll(() => asked).toBe('confirm:Выйти из игры?')
+    await expect(page.getByRole('grid', { name: 'Игровое поле' })).toBeVisible()
+    page.once('dialog', (dialog) => dialog.accept())
+    await exit.click()
+    await expect(page.getByRole('button', { name: 'Начать игру' })).toBeVisible()
+  })
+})

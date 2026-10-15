@@ -2125,3 +2125,36 @@ button.buzzer.chooser:disabled {
 .host.host-with-hear-less figcaption {
   padding-bottom: 26px;
 }
+
+/* Телефон: плотная верхняя панель (кнопки-иконки), ниже табло, разговор на ~2 реплики. */
+@media (max-width: 700px) {
+  .table { align-content: start; }
+  .topbar { flex-direction: row; align-items: center; flex-wrap: wrap; align-content: flex-start; gap: 4px 6px; }
+  .topbar > div:first-child { flex: 1 1 auto; min-width: 0; }
+  .topbar h1 { display: none; }
+  .topbar .model-line { font-size: 0.66rem; line-height: 1.25; }
+  .topbar .pills { width: auto; flex: 0 1 auto; flex-wrap: nowrap; gap: 4px; margin-left: auto; }
+  .topbar .pills > button {
+    flex: 0 0 auto;
+    min-width: 34px;
+    min-height: 34px;
+    padding: 4px 7px;
+    font-size: 0.95rem;
+    line-height: 1;
+  }
+  .topbar .pills .btn-label { display: none; }
+  .topbar .cost { font-size: 0.72rem; }
+  .stage > .board,
+  .board,
+  .stage > .question,
+  .question { min-height: max(150px, min(250px, 32dvh)); }
+  .cell { min-height: 36px; }
+  .talk { flex: 0 0 auto; height: auto; }
+  .chat-column, .talk .chat-column { flex: 0 0 auto; min-height: 0; height: auto; }
+  .chat-head { padding: 6px 10px; }
+  .chat-head .chat-hint { display: none; }
+  .chat-scroll { flex: 0 0 auto; height: 8.5rem; }
+  .chat-log { padding: 6px 10px; gap: 6px; }
+}
+
+.topbar .pills > button { display: inline-flex; align-items: center; justify-content: center; gap: 6px; }

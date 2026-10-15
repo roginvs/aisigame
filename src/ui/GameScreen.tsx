@@ -449,8 +449,9 @@ export function GameScreen(props: {
             </>
           )}
           {conference && !conference.isMaster ? null : (
-            <button type="button" className={paused ? 'ghost pause-on' : 'ghost'} onClick={onPause} disabled={stopped}>
-              {paused ? '▶ Дальше' : '⏸ Пауза'}
+            <button type="button" className={paused ? 'ghost pause-on' : 'ghost'} onClick={onPause} disabled={stopped} aria-label={paused ? 'Дальше' : 'Пауза'} title={paused ? 'Дальше' : 'Пауза'}>
+              <span aria-hidden="true">{paused ? '▶' : '⏸'}</span>
+              <span className="btn-label" aria-hidden="true">{paused ? 'Дальше' : 'Пауза'}</span>
             </button>
           )}
           {conference?.onCopyInvite ? (
@@ -458,31 +459,37 @@ export function GameScreen(props: {
               type="button"
               className="ghost invite-link"
               aria-haspopup="dialog"
+              aria-label="Ссылка для игры"
+              title="Ссылка для игры"
               onClick={() => setInviteOpen(true)}
             >
               <span aria-hidden="true">🔗</span>
-              <span>Ссылка для игры</span>
+              <span className="btn-label" aria-hidden="true">Ссылка для игры</span>
             </button>
           ) : null}
           <button
             type="button"
             className="ghost"
+            aria-label="Выход"
+            title="Выход"
             onClick={() => {
               if (window.confirm('Выйти из игры?')) {
                 (conference?.onConferenceExit ?? onReset)()
               }
             }}
           >
-            🚪 Выход
+            <span aria-hidden="true">🚪</span>
+            <span className="btn-label" aria-hidden="true">Выход</span>
           </button>
           <button
             type="button"
             className="ghost debug-copy"
             aria-label={copyFeedback ?? 'Скопировать дебаг'}
+            title={copyFeedback ?? 'Скопировать дебаг'}
             onClick={() => void copyDebug()}
           >
             <span aria-hidden="true">🔧</span>
-            <span className="debug-copy-label" aria-hidden="true">
+            <span className="debug-copy-label btn-label" aria-hidden="true">
               <span className={copyFeedback ? 'debug-copy-hidden' : undefined}>Скопировать дебаг</span>
               <span className={copyFeedback ? undefined : 'debug-copy-hidden'}>
                 {copyFeedback ?? 'Скопировано ~0 КБ'}
@@ -495,10 +502,12 @@ export function GameScreen(props: {
               type="button"
               className="ghost"
               title="Для проверки: закончить раунд с тем же счётом"
+              aria-label="Пропустить раунд"
               onClick={onNextRound}
               disabled={!snapshot.can({ type: 'NEXT_ROUND' })}
             >
-              ⏭ Пропустить раунд
+              <span aria-hidden="true">⏭</span>
+              <span className="btn-label" aria-hidden="true">Пропустить раунд</span>
             </button>
           )}
         </div>
