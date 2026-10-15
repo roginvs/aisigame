@@ -565,7 +565,7 @@ export class MasterSession {
     }
   }
 
-  private stateSent = createDiagSummary('снимок', 'мастер отправил (байт за ~10 с)', 10_000)
+  private stateSent = createDiagSummary('снимок', 'мастер отправил изменения (байт, за минуту)', 60_000)
 
   /** Снимок/изменение с часами мастера (`sentAt`) — игрок пишет задержку доставки. */
   private sendState(message: SnapshotMessage | PartialUpdateMessage, reason: string): void {

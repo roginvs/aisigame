@@ -23,7 +23,7 @@ export type SharedDebugEntry = {
 
 const limit = 1500
 const remoteClientLimit = 32
-const remoteEntryLimit = 400
+const remoteEntryLimit = 160
 let sequence = 0
 let snapshot: TraceEntry[] = []
 const listeners = new Set<() => void>()
