@@ -1,3 +1,4 @@
+import { createDiagSummary } from '../debug/diag.ts'
 import type { AppealRequest } from '../game/types.ts'
 import { masterBuildMismatchMessage } from './buildMatch.ts'
 import { decidePackGate } from './packGate.ts'
@@ -317,10 +318,14 @@ export class JoinerSession {
     } else {
       return
     }
+    const sentAt = (message as { sentAt?: unknown }).sentAt
+    if ((message.type === 'snapshot' || message.type === 'partialUpdate') && typeof sentAt === 'number') {
+      this.stateLatency(Date.now() - sentAt, message.type === 'snapshot' ? 'полный' : 'изменение')
+    }
     if (message.type === 'snapshot') {
       this.noteMasterAlive()
       if (this.stateRevision !== null && message.revision < this.stateRevision) return
-      const { type: _type, authorityToken: _token, revision, ...state } = message
+      const { type: _type, authorityToken: _token, revision, sentAt: _sentAt, ...state } = message as typeof message & { sentAt?: number }
       this.masterState = state
       this.stateRevision = revision
       this.waitingStatus = false
@@ -613,7 +618,15 @@ export class JoinerSession {
     return false
   }
 
+  /**
+   * Задержка снимков: часы игрока минус часы мастера. Включает разницу часов устройств,
+   * поэтому рядом пишем то же для ping (`clockMs`): реальная задержка ≈ state − ping + RTT/2.
+   */
+  private stateLatency = createDiagSummary('снимок', 'игрок получил: задержка мс (часы игрока − мастера)', 10_000)
+  private pingClock = createDiagSummary('снимок', 'ping: часы игрока − мастера, мс', 30_000)
+
   private answerPing(message: { authorityToken: string; seq: number; sentAt: number }, senderId: string): void {
+    this.pingClock(Date.now() - message.sentAt)
     if (!this.acceptMaster(message.authorityToken, senderId, false)) return
     this.transport.send({ type: 'pong', clientId: this.clientId, authToken: this.authToken, seq: message.seq, sentAt: message.sentAt })
     this.noteMasterAlive()

@@ -1,3 +1,4 @@
+import { diag } from '../debug/diag.ts'
 import { pushTrace } from '../debug/trace.ts'
 
 type AudioSessionHost = {
@@ -88,6 +89,7 @@ export function createConferenceAudioOutput(takeSink: () => ConferenceAudioSink 
   function drop(participantId: string): void {
     const sink = sinks.get(participantId)
     if (!sink) return
+    diag('звук', 'дорожка конференции снята с <audio>', { participantId })
     sinks.delete(participantId)
     sink.pause()
     sink.setStream(null)
@@ -103,6 +105,7 @@ export function createConferenceAudioOutput(takeSink: () => ConferenceAudioSink 
         sinks.set(participantId, sink)
       }
       sink.setStream(stream)
+      diag('звук', 'дорожка конференции → <audio>', () => ({ participantId, tracks: stream.getAudioTracks().map((track) => String(track.id ?? '').slice(0, 8)).join(',') }))
       void Promise.resolve(sink.play()).catch((error: unknown) => {
         pushTrace('note', 'Не удалось включить звук конференции', {
           participantId,
@@ -154,6 +157,7 @@ function createDomSink(): ConferenceAudioSink & { prime: () => void } {
       if (audio.getAttribute('src')) audio.removeAttribute('src')
       audio.srcObject = stream
       if (!stream) return
+      audio.addEventListener?.('error', () => diag('звук', '<audio> конференции: ошибка', { code: audio.error?.code ?? null }), { once: true })
       for (const track of stream.getAudioTracks()) {
         track.addEventListener?.(
           'unmute',

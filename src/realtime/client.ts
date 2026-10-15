@@ -1,3 +1,4 @@
+import { diag } from '../debug/diag.ts'
 import { onAudioOutputsReopen, recreateStreamElement, reopenAudioOutputs, unlockAudio } from '../audio/beep.ts'
 import { gameConfig, hostInstructions, withHostRules } from '../config.ts'
 import { recordResponseUsage, resetUsage } from './usage.ts'
@@ -111,6 +112,8 @@ export class RealtimeClient {
   private stopReopen: () => void = () => undefined
   private outputMuted = false
   private localPlayback = true
+  /** itemId → когда пришёл speech_stopped (для задержки расшифровки в дебаге). */
+  private speechStoppedAt = new Map<string, number>()
   private audioItems = new AudioItems()
   private judgeRequests = new Map<string, {
     context: JudgeRequestContext
@@ -224,7 +227,11 @@ export class RealtimeClient {
 
   /** Caption is exactly the authoritative heard; late ASR cannot rewrite it. */
   publishAudioPlayerChat(itemId: string | null, heard: string): void {
-    if (!itemId || this.playerChatPublished.has(itemId)) return
+    if (!itemId || this.playerChatPublished.has(itemId)) {
+      diag('чат', 'строка оценки: уже показана — дубль отброшен', { itemId, source: 'оценка' })
+      return
+    }
+    diag('чат', 'строка оценки показана', { itemId, source: 'оценка', chars: heard.length })
     this.suppressPlayerChat(itemId)
     this.playerChatPublished.add(itemId)
     pushPlayerLine(heard.trim() || 'речь не распознана')
@@ -448,6 +455,9 @@ export class RealtimeClient {
    * ведущую мастер слышит из комнаты, как все. Одиночная игра — true.
    */
   setLocalPlayback(enabled: boolean): void {
+    if (enabled !== this.localPlayback) {
+      diag('ведущая-звук', enabled ? 'локальный звук ведущей включён (без комнаты)' : 'локальный звук ведущей выключен: слышим её из комнаты')
+    }
     this.localPlayback = enabled
     if (this.wire) this.wire.setLocalPlayback?.(enabled)
     else this.applyLocalMute()
@@ -579,12 +589,16 @@ export class RealtimeClient {
   }
 
   private offerPlayerChat(itemId: string, text: string): void {
-    if (this.isPromptEcho(text)) return
-    if (this.playerChatSuppressed.has(itemId) || this.playerChatPublished.has(itemId)) return
+    const chat = (decision: string) => diag('чат', `строка игрока: ${decision}`, { itemId, source: 'расшифровка', chars: text.length })
+    if (this.isPromptEcho(text)) return chat('эхо подсказки — не показываем')
+    if (this.playerChatPublished.has(itemId)) return chat('уже показана — дубль отброшен')
+    if (this.playerChatSuppressed.has(itemId)) return chat('подавлена (будет текст оценки)')
     if (this.playerChatGated && !this.playerChatAllowed.has(itemId)) {
       this.playerChatPending.set(itemId, text)
+      chat('отложена до кнопки')
       return
     }
+    chat('показана')
     this.publishPlayerChat(itemId, text)
   }
 
@@ -614,7 +628,12 @@ export class RealtimeClient {
     else this.transcriptWaiters.delete(itemId)
   }
 
-  interruptSpeech(): void {
+  interruptSpeech(reason = ''): void {
+    diag('обрыв', `ведущую обрываем: ${reason || 'без причины'}`, {
+      speaking: this.speech !== null || this.playbackResponseId !== null,
+      responseId: this.playbackResponseId ?? this.speech?.liveResponseId ?? null,
+      purpose: this.speech?.purpose ?? null,
+    })
     this.speech = null
     this.pendingSpeak = null
     this.clearFlushTimer()
@@ -1014,6 +1033,13 @@ export class RealtimeClient {
       }
       const itemId = readItemId(event) ?? this.inputItemId ?? `anon-${Date.now()}`
       const failed = type.endsWith('.failed')
+      const stoppedAt = this.speechStoppedAt.get(itemId)
+      diag('слух', failed ? 'расшифровка не удалась' : 'расшифровка готова', {
+        itemId,
+        afterStopMs: stoppedAt === undefined ? null : Math.round(performance.now() - stoppedAt),
+        chars: failed ? 0 : readTranscript(event).length,
+      })
+      this.speechStoppedAt.delete(itemId)
       this.rememberTranscript(itemId, failed ? '' : readTranscript(event), failed ? null : transcriptionConfidence(event.logprobs))
     }
 
@@ -1033,6 +1059,15 @@ export class RealtimeClient {
       this.inputAudioStartMs = null
       const itemId = readItemId(event) ?? this.inputItemId
       this.inputStartedAt = null
+      if (itemId) {
+        this.speechStoppedAt.set(itemId, performance.now())
+        if (this.speechStoppedAt.size > 50) this.speechStoppedAt.delete(this.speechStoppedAt.keys().next().value as string)
+      }
+      diag('слух', 'модель: конец речи', {
+        itemId,
+        speechMs: Math.round(durationMs),
+        detectLagMs: started === null ? null : Math.round(performance.now() - started - durationMs),
+      })
       this.onSpeechStopped({ durationMs, itemId })
     }
   }

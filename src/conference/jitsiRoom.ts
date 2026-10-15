@@ -1,3 +1,4 @@
+import { diag } from '../debug/diag.ts'
 import { reopenAudioOutputs } from '../audio/beep.ts'
 import { gameSoundsRetryDelayMs } from './gameSoundsRetry.ts'
 import {
@@ -634,6 +635,7 @@ export async function connectJitsiConference(input: {
       return
     }
     // <audio> по ключу дорожки: смена владельца не рвёт воспроизведение.
+    if (isHostRemote(owner)) diag('ведущая-звук', 'дорожка «Ведущей» из комнаты → <audio>', { track: entry.key, participantId: owner })
     conferenceAudio.attach(entry.key, stream)
     syncModelMixer()
   }
@@ -668,6 +670,7 @@ export async function connectJitsiConference(input: {
   function dropRemoteAudioTrack(track: JitsiTrack): void {
     const entry = remoteAudioTracks.get(track)
     if (!entry) return
+    if (isHostRemote(trackOwner(track))) diag('ведущая-звук', 'дорожка «Ведущей» из комнаты снята', { track: entry.key })
     entry.unsubOwner()
     conferenceAudio.remove(entry.key)
     remoteAudioTracks.delete(track)

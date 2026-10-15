@@ -228,7 +228,7 @@ export class MockRealtimeClient implements GameVoice {
     else this.transcriptWaiters.delete(itemId)
   }
 
-  interruptSpeech(): void {
+  interruptSpeech(_reason = ''): void {
     this.speechToken += 1
     this.onLink({ host: 'idle' })
   }

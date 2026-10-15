@@ -1,3 +1,4 @@
+import { diag } from '../debug/diag.ts'
 import { auctionBidToolFor, finalBetToolFor, selectQuestionToolFor } from '../realtime/tools.ts'
 import type { Actor, SnapshotFrom } from 'xstate'
 import { clearHostEar, getHostEar, subscribeHostEar, hostEarHearing, hostEarHostSpoke, hostEarMicClosed, hostEarProcessing, hostEarShown, hostEarSurvives, settleHostEar } from './hostEar.ts'
@@ -254,6 +255,7 @@ export function attachController(options: {
       return
     }
     if (earlyAnswerCue(path) && hostTalking) {
+      diag('окно', 'речь поверх обращения ведущей — ждём, не эхо ли', { path, itemId })
       armBargeIn(itemId, () => statePath(actor.getSnapshot().value) === path, 'ответ', () => {
         earlyAnswer = true
         actor.send({ type: 'PLAYER_SPEECH_STARTED' })
@@ -264,17 +266,18 @@ export function attachController(options: {
     if (path.startsWith('answering')) lastAnswerSpeechAt = Date.now()
     if (isReadingPath(path) || path === 'falseStartCue') {
       overRead = true
+      diag('обрыв', 'модель услышала речь во время чтения — чтение НЕ обрываем, только отмечаем', { path, itemId, hostTalking })
       return
     }
     if (path === 'choosing.clarifying' || specialClarifying(path) || path === 'chooserHandoff') {
-      client.interruptSpeech()
+      client.interruptSpeech('речь на переспросе выбора')
       if (path === 'chooserHandoff') actor.send({ type: 'PLAYER_SPEECH_STARTED' })
       else actor.send({ type: 'PLAYER_SPEECH_STARTED' })
       return
     }
     if (path === 'finalBets.asking') {
       // Речь началась во время объявления ставки — обрываем ведущую, ждём конец фразы как в hearing.
-      client.interruptSpeech()
+      client.interruptSpeech('речь на объявлении ставки')
       return
     }
     if (path === 'answering.waiting' || path === 'answering.hearing') {
@@ -285,7 +288,7 @@ export function attachController(options: {
       }
       liveSpeechItemId = itemId ?? liveSpeechItemId
       // Подсказка про выключенный микрофон не должна звучать поверх ответа.
-      if (path === 'answering.waiting') client.interruptSpeech()
+      if (path === 'answering.waiting') client.interruptSpeech('игрок заговорил на ответе')
       actor.send({ type: 'PLAYER_SPEECH_STARTED' })
     }
   }
@@ -347,7 +350,7 @@ export function attachController(options: {
       return
     }
     if (path === 'choosing.clarifying') {
-      client.interruptSpeech()
+      client.interruptSpeech('конец речи на переспросе выбора')
       actor.send({ type: 'PLAYER_SPEECH_STARTED' })
     }
     if (statePath(actor.getSnapshot().value) === 'choosing.listening') {
@@ -415,7 +418,7 @@ export function attachController(options: {
         return
       }
       pushTrace('note', `${where}: игрок перебил ведущую — замолкаем и слушаем`)
-      client.interruptSpeech()
+      client.interruptSpeech('перебивание ведущей игроком')
       onCut?.()
     }, LOBBY_BARGE_IN_MIN_MS)
   }
@@ -448,6 +451,7 @@ export function attachController(options: {
         if (path === 'choosing.listening' && chooserMicOffNow(snapshot.context)) {
           // Микрофон выбирающего выключен: обычное напоминание говорит про микрофон (не больше N раз за ход).
           chooserMic = { ...chooserMic, reminded: chooserMic.reminded + 1 }
+          diag('микрофон', 'напоминание выбирающему: про выключенный микрофон', { chooserId: chooserMic.chooserId, reminded: chooserMic.reminded })
           choosingOffer = null
           speakWhileListening('micWarning', mutedMicCue(playerName(snapshot.context.players, snapshot.context.chooserId)))
         } else if (path === 'choosing.listening') {
@@ -548,7 +552,7 @@ export function attachController(options: {
     // Без conversation:none приветствие продолжает лобби и отвечает на «ты меня слышишь».
     // Подтверждённая апелляция по закрытому вопросу: прежняя реплика обрывается, решение объявит announcing.
     if (path === 'appealConfirm') {
-      client.interruptSpeech()
+      client.interruptSpeech('подтверждённая апелляция')
       return
     }
     if (path === 'appealCue') {
@@ -559,7 +563,7 @@ export function attachController(options: {
       openSpeechStartedAt = 0
       expectingToolTurn = null
       dropAnswerAttempt()
-      client.interruptSpeech()
+      client.interruptSpeech('сброс попытки')
       client.setTranscriptionPrompt(answerPromptFor(context))
       client.setMicEnabled(true)
       speakWhileListening('appeal', hostCue({
@@ -571,14 +575,14 @@ export function attachController(options: {
     if (path === 'appealWindow') {
       client.setMicEnabled(false)
       if (context.appeal?.summary === 'pending') speak('roundSummary', roundSummaryInstructions(context), undefined, true)
-      else client.interruptSpeech()
+      else client.interruptSpeech('окно апелляции')
     }
     if (specialIntroTimer && !path.endsWith('.announcing')) { clearTimeout(specialIntroTimer); specialIntroTimer = null }
     if (path === 'cat.announcing' || path === 'auction.announcing') {
       specialEpoch += 1
       choiceEpoch += 1
       expectingToolTurn = null
-      client.interruptSpeech()
+      client.interruptSpeech('объявление кота/аукциона')
       // Слушаем сразу: на табло уже кнопки получателя / ставки, речь ведущей не блокирует.
       client.setTranscriptionPrompt(specialPrompt(path, context))
       client.setMicEnabled(true)
@@ -601,7 +605,7 @@ export function attachController(options: {
       client.setMicEnabled(true)
     }
     if (path === 'cat.resolving' || path === 'cat.staking.resolving' || path === 'auction.resolving') {
-      client.interruptSpeech()
+      client.interruptSpeech('разбор кота/аукциона')
       client.setMicEnabled(false)
       requestSpecialResolve(path, context)
     }
@@ -630,7 +634,7 @@ export function attachController(options: {
     if (path === 'specialAway') {
       specialEpoch += 1
       dropAnswerAttempt()
-      client.interruptSpeech()
+      client.interruptSpeech('спецвопрос ушёл')
       client.setMicEnabled(false)
       speak('specialAway', specialAwayCue(context), undefined, true)
     }
@@ -652,7 +656,7 @@ export function attachController(options: {
       client.setMicEnabled(true)
     }
     if (path === 'choosing.resolving') {
-      client.interruptSpeech()
+      client.interruptSpeech('разбор выбора')
       client.setMicEnabled(false)
       requestSelection(context)
     }
@@ -662,7 +666,7 @@ export function attachController(options: {
     }
     if (path === 'flashing') {
       choiceTheme = null
-      client.interruptSpeech()
+      client.interruptSpeech('вспышка ячейки')
       client.setMicEnabled(false)
     }
     if (path === 'reading.sealed') {
@@ -684,7 +688,7 @@ export function attachController(options: {
       // Как на чтении: микрофон открыт, чтобы запомнить перебивание для лекции про кнопку.
       client.setMicEnabled(true)
     }
-    if ((from.startsWith('reading') || from === 'falseStartCue') && path.startsWith('answering')) client.interruptSpeech()
+    if ((from.startsWith('reading') || from === 'falseStartCue') && path.startsWith('answering')) client.interruptSpeech('кнопка во время чтения → ответ')
     if (path === 'buzzing.open') {
       buzzEpoch += 1
       openBuzzerEar()
@@ -821,6 +825,7 @@ export function attachController(options: {
     speechTurn += 1
     lastHostSpoken = expect ?? spokenPayload(instructions)
     hostPurpose = purpose
+    diag('окно', `ведущая говорит и слушает (можно перебить): ${purpose}`)
     // conversation:none — подсказка про микрофон и уточнение выбора не продолжают лобби/партию.
     client.requestSpeech(purpose, speechTurn, expect ? instructions : withCommentary(instructions, actor.getSnapshot().context, publicHistory()), expect, true)
     client.setMicEnabled(true)
@@ -888,7 +893,7 @@ export function attachController(options: {
     if (!late.arrived || !late.text.trim() || epoch !== choiceEpoch) return
     if (statePath(actor.getSnapshot().value) !== 'choosing.clarifying') return
     pushTrace('note', `расшифровка пришла после переспроса: ${late.text}`)
-    client.interruptSpeech()
+    client.interruptSpeech('поздняя расшифровка выбора')
     actor.send({ type: 'PLAYER_SPEECH_STARTED' })
     if (statePath(actor.getSnapshot().value) !== 'choosing.listening') return
     decideChoice(late, durationMs)
@@ -1011,14 +1016,14 @@ export function attachController(options: {
       const candidates = context.players.filter((player) => player.id !== special.giverId)
       const playerId = matchSpokenPlayer(text, candidates)
       if (playerId !== null) {
-        client.interruptSpeech()
+        client.interruptSpeech('кот: назван игрок')
         pushJudgeLine(`Услышала: «${text}» — кот уходит игроку ${nameOf(context, playerId)}`)
         actor.send({ type: 'CAT_RECIPIENT', playerId })
         return
       }
       const self = matchSpokenPlayer(text, context.players.filter((player) => player.id === special.giverId)) !== null
       if (self && spokenPlayers(text, candidates).length === 0) {
-        client.interruptSpeech()
+        client.interruptSpeech('кот: назвал себя')
         pushJudgeLine(`Услышала: «${text}», себе оставить нельзя`)
         actor.send({ type: 'CAT_PICK_UNCLEAR', reason: 'себе оставить нельзя' })
         return
@@ -1027,7 +1032,7 @@ export function attachController(options: {
     if ((path === 'cat.staking.asking' || path === 'cat.staking.listening') && special.recipientId !== null) {
       const amount = matchCatStake(text, special.stakeOptions)
       if (amount !== null) {
-        client.interruptSpeech()
+        client.interruptSpeech('кот: названа ставка')
         pushJudgeLine(`Ставка: ${amount}`)
         actor.send({ type: 'CAT_STAKE', playerId: special.recipientId, amount })
         return
@@ -1037,7 +1042,7 @@ export function attachController(options: {
       const money = context.players.find((player) => player.id === special.recipientId)?.score ?? 0
       const option = matchAuctionSpeech(text, { options: special.options, nominal: special.nominal, current: special.bid, money })
       if (option) {
-        client.interruptSpeech()
+        client.interruptSpeech('аукцион: названа ставка')
         pushJudgeLine(`Аукцион: ${optionLabel(option)}`)
         actor.send({ type: 'AUCTION_BID', playerId: special.recipientId, option })
         return
@@ -1475,11 +1480,16 @@ export function attachController(options: {
   onActions?.({
     remindMutedAnswerer(playerName) {
       if (statePath(actor.getSnapshot().value) !== 'answering.waiting') return
-      if (Date.now() - lastAnswerSpeechAt < gameConfig.mutedAnswerReminderMs) return
+      if (Date.now() - lastAnswerSpeechAt < gameConfig.mutedAnswerReminderMs) {
+        diag('микрофон', 'напоминание отвечающему пропущено: недавно была речь', { playerName })
+        return
+      }
+      diag('микрофон', 'напоминание отвечающему: микрофон выключен', { playerName })
       speakWhileListening('micWarning', mutedAnswerMicCue(playerName))
     },
     setChooserMicOff(off) {
       const chooserId = actor.getSnapshot().context.chooserId
+      if (off !== chooserMic.off) diag('микрофон', off ? 'микрофон выбирающего выключен (стабильно)' : 'микрофон выбирающего включён', { chooserId })
       if (!off) { chooserMic = { chooserId, off: false, reminded: 0 }; return }
       // Повторное «выключен» того же выбирающего счётчик не сбрасывает.
       chooserMic = chooserMic.chooserId === chooserId ? { ...chooserMic, off: true } : { chooserId, off: true, reminded: 0 }

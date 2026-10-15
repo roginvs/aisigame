@@ -1,3 +1,5 @@
+import type { PartialUpdateMessage, SnapshotMessage } from './messages.ts'
+import { createDiagSummary, diag } from '../debug/diag.ts'
 import { getHostEar, subscribeHostEar, type HostEar } from '../game/hostEar.ts'
 import { hostMood } from '../ui/hostMood.ts'
 import type { LinkStatus } from '../realtime/client.ts'
@@ -557,10 +559,21 @@ export class MasterSession {
     this.onSnapshotCb?.(snapshot)
     if (!this.statePublisher) {
       this.statePublisher = new ConferenceStatePublisher(snapshot, this.authorityToken)
-      this.transport.send(this.statePublisher.full())
+      this.sendState(this.statePublisher.full(), 'первый')
     } else {
-      this.transport.send(this.statePublisher.update(snapshot))
+      this.sendState(this.statePublisher.update(snapshot), 'изменение')
     }
+  }
+
+  private stateSent = createDiagSummary('снимок', 'мастер отправил (байт за ~10 с)', 10_000)
+
+  /** Снимок/изменение с часами мастера (`sentAt`) — игрок пишет задержку доставки. */
+  private sendState(message: SnapshotMessage | PartialUpdateMessage, reason: string): void {
+    const stamped = { ...message, sentAt: Date.now() }
+    const bytes = JSON.stringify(stamped).length
+    if (message.type === 'snapshot') diag('снимок', `мастер отправил полный снимок (${reason})`, { revision: message.revision, bytes })
+    else this.stateSent(bytes, Object.keys(message.changes).slice(0, 3).join('+'))
+    this.transport.send(stamped)
   }
 
   private broadcastFullStatus(): void {
@@ -568,12 +581,12 @@ export class MasterSession {
     this.onSnapshotCb?.(snapshot)
     if (!this.statePublisher) this.statePublisher = new ConferenceStatePublisher(snapshot, this.authorityToken)
     else this.statePublisher.update(snapshot)
-    this.transport.send(this.statePublisher.full())
+    this.sendState(this.statePublisher.full(), 'статус')
   }
 
   private broadcastMessage(line: ConferenceHistoryMessage): void {
     if (!this.statePublisher) this.broadcastFullStatus()
-    this.transport.send(this.statePublisher!.appendMessage(line))
+    this.sendState(this.statePublisher!.appendMessage(line), 'чат')
     this.onHistory(this.statePublisher!.history())
   }
 

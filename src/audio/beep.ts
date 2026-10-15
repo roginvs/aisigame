@@ -1,3 +1,4 @@
+import { audioEnvironment, diag } from '../debug/diag.ts'
 import { primeConferencePlayback, refreshConferenceSinks, setConferenceElementRecreate } from '../conference/conferenceAudio.ts'
 import { buzzerBeepMs } from '../options.ts'
 
@@ -90,7 +91,8 @@ export function gameOutput(ctx: AudioContext = ensureContext()): AudioNode {
     element.style.cssText = 'position:fixed;left:0;bottom:0;width:1px;height:1px;opacity:0;pointer-events:none'
     element.srcObject = stream
     document.body.append(element)
-    void element.play().catch(() => undefined)
+    void element.play().catch((error: unknown) => diag('звук', 'звук игры: play() отклонён', { error: String(error) }))
+    diag('звук', 'звук игры через <audio> (Android)', audioEnvironment(ctx))
   } else {
     input.connect(ctx.destination)
   }
@@ -103,10 +105,12 @@ export function gameOutput(ctx: AudioContext = ensureContext()): AudioNode {
  * чтобы на Android он попал в поток «звонок», которым управляет качелька.
  */
 export function reopenAudioOutputs(): void {
+  diag('звук', 'микрофон открыт', { ...audioEnvironment(bus?.ctx ?? null), rerouting: routesGameAudioThroughElement(), reopeners: reopeners.size })
   if (!routesGameAudioThroughElement()) return
   if (bus?.element && bus.stream) bus.element = recreateStreamElement(bus.element, bus.stream)
   for (const reopen of reopeners) reopen()
   refreshConferenceSinks()
+  diag('звук', 'выводы пересозданы после микрофона (Android → «звонок»)', audioEnvironment(bus?.ctx ?? null))
 }
 
 const reopeners = new Set<() => void>()
@@ -134,7 +138,8 @@ export function recreateStreamElement(old: HTMLAudioElement, stream: MediaStream
   old.remove?.()
   next.srcObject = stream
   if (old.isConnected !== false && document.body) document.body.append(next)
-  void next.play().catch(() => undefined)
+  void next.play().catch((error: unknown) => diag('звук', 'пересозданный <audio>: play() отклонён', { error: String(error) }))
+  diag('звук', 'пересоздан <audio>', { kind: next.getAttributeNames?.().filter((name) => name.startsWith('data-')).join(',') ?? '', muted: next.muted })
   return next
 }
 
