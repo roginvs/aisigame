@@ -6,7 +6,7 @@ import type { TraceEntry } from '../debug/trace.ts'
  */
 export type MeterMarkerGroup =
   | 'reading' | 'buzzing' | 'answering' | 'choosing' | 'special' | 'appeal' | 'phase'
-  | 'hostStart' | 'hostEnd' | 'vadStart' | 'vadStop' | 'transcript' | 'mixer' | 'gate'
+  | 'hostStart' | 'hostEnd' | 'vadStart' | 'vadStop' | 'transcript' | 'mixer'
   | 'response' | 'cancel' | 'buzzer'
 
 export const meterMarkerColors: Record<MeterMarkerGroup, string> = {
@@ -23,7 +23,6 @@ export const meterMarkerColors: Record<MeterMarkerGroup, string> = {
   vadStop: '#0e7490',
   transcript: '#a3e635',
   mixer: '#e879f9',
-  gate: '#fb7185',
   response: '#34d399',
   cancel: '#ef4444',
   buzzer: '#fde047',
@@ -44,13 +43,12 @@ export const meterMarkerLegend: Array<[MeterMarkerGroup, string]> = [
   ['vadStop', 'VAD: речь кончилась'],
   ['transcript', 'расшифровка готова'],
   ['mixer', 'фокус микшера'],
-  ['gate', 'вход модели открыт/закрыт'],
   ['response', 'response.create'],
   ['cancel', 'cancel / interrupt / clear'],
 ]
 
 export function meterLegendText(): string {
-  return ['Что слышит модель (выход микшера). Метки:', ...meterMarkerLegend.map(([g, label]) => `${colorName(g)} — ${label}`)].join('\n')
+  return ['Что слышит модель (выход микшера). Серый отрезок — вход модели закрыт, в модель не ушло. Метки:', ...meterMarkerLegend.map(([g, label]) => `${colorName(g)} — ${label}`)].join('\n')
 }
 
 function colorName(group: MeterMarkerGroup): string {
@@ -97,11 +95,6 @@ export function classifyTraceEntry(entry: Pick<TraceEntry, 'kind' | 'title'>, pr
   return []
 }
 
-/** Метка входа модели из строки noteLink «… микрофон live/muted …» — только при смене. */
-export function gateFromLinkTitle(title: string): 'live' | 'muted' | null {
-  const match = /микрофон (live|muted)/.exec(title)
-  return match ? (match[1] as 'live' | 'muted') : null
-}
 
 export type MeterMarker = { at: number; group: MeterMarkerGroup }
 
@@ -109,7 +102,6 @@ export type MeterMarker = { at: number; group: MeterMarkerGroup }
 export function createMarkerCollector(maxAgeMs = 20_000) {
   let lastId = 0
   let prevPath = ''
-  let mic: 'live' | 'muted' | null = null
   let markers: MeterMarker[] = []
   return {
     ingest(entries: readonly TraceEntry[], now = Date.now()): MeterMarker[] {
@@ -119,13 +111,6 @@ export function createMarkerCollector(maxAgeMs = 20_000) {
         const at = Date.parse(entry.at)
         const groups = classifyTraceEntry(entry, prevPath)
         if (entry.kind === 'state') prevPath = entry.title
-        if (entry.kind === 'note') {
-          const gate = gateFromLinkTitle(entry.title)
-          if (gate && gate !== mic) {
-            if (mic !== null) groups.push('gate')
-            mic = gate
-          }
-        }
         for (const group of groups) markers.push({ at, group })
       }
       markers = markers.filter((marker) => now - marker.at <= maxAgeMs)

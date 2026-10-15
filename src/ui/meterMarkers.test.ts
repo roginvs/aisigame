@@ -32,12 +32,24 @@ describe('метки индикатора модели', () => {
     expect(classifyTraceEntry({ kind: 'note', title: 'Модель: фокус микшера' })).toEqual(['mixer'])
     expect(classifyTraceEntry({ kind: 'in', title: 'response.audio.delta' })).toEqual([])
   })
-  it('сборщик: только новые записи, вход модели — по смене микрофона, старые уходят', () => {
+  it('сборщик: только новые записи, старые уходят', () => {
     const c = createMarkerCollector(5000)
     const list = [e('note', 'связь connected, микрофон muted, звук idle'), e('state', 'buzzing.open'), e('note', 'связь connected, микрофон live, звук idle'), e('state', 'answering.waiting', 2000)]
     const first = c.ingest(list, 2000).map((m) => m.group)
-    expect(first).toEqual(['buzzing', 'gate', 'buzzer', 'answering'])
-    expect(c.ingest(list, 2000)).toHaveLength(4)
+    expect(first).toEqual(['buzzing', 'buzzer', 'answering'])
+    expect(c.ingest(list, 2000)).toHaveLength(3)
     expect(c.ingest(list, 6500).map((m) => m.group)).toEqual(['buzzer', 'answering'])
+  })
+})
+
+describe('закрытый вход модели', () => {
+  it('серый цвет и вуаль, только mic=live открыт', async () => {
+    const m = await import('./ModelInputMeter.tsx')
+    expect(m.modelInputOpen('live')).toBe(true)
+    expect(m.modelInputOpen('muted')).toBe(false)
+    expect(m.modelInputOpen('idle')).toBe(false)
+    expect(m.waveColor(true, true)).toBe('#4ade80')
+    expect(m.waveColor(true, false)).not.toBe(m.waveColor(true, true))
+    expect(m.CLOSED_OVERLAY).toMatch(/rgba\(.*0\.\d+\)/)
   })
 })

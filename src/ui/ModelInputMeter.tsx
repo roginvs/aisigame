@@ -1,5 +1,5 @@
 import { useEffect, useRef } from 'react'
-import { getTrace, subscribeTrace } from '../debug/trace.ts'
+import { getLinkStatus, getTrace, subscribeTrace } from '../debug/trace.ts'
 import { createMarkerCollector, meterLegendText, meterMarkerColors, type MeterMarker } from './meterMarkers.ts'
 
 /** RMS уровня по time-domain байтам AnalyserNode (128 = тишина) → 0..1, с усилением для речи. */
@@ -15,6 +15,19 @@ export function meterLevel(samples: Uint8Array): number {
 }
 
 export const METER_WIDTH = 320
+/** Полупрозрачная серая вуаль поверх отрезка, когда вход модели закрыт. */
+export const CLOSED_OVERLAY = 'rgba(148, 163, 184, 0.35)'
+
+/** Вход модели открыт только при mic === 'live' (client.setMicEnabled). */
+export function modelInputOpen(mic: string): boolean {
+  return mic === 'live'
+}
+
+/** Цвет волны: зелёная — ушло в модель; серая — вход закрыт (звук есть, но модели не отправлен). */
+export function waveColor(live: boolean, open: boolean): string {
+  if (!live) return '#888'
+  return open ? '#4ade80' : '#6b7280'
+}
 const WIDTH = METER_WIDTH
 const HEIGHT = 20
 
@@ -33,6 +46,8 @@ export function ModelInputMeter({ getAnalyser, getLevel }: { getAnalyser?: () =>
     let head = 0
     // Время каждого столбца: метки ставим по реальному времени, а не по числу кадров.
     const times = new Float64Array(WIDTH)
+    // Открыт ли вход модели (setMicEnabled) в момент каждого столбца: закрытое — серым, в модель не ушло.
+    const open = new Uint8Array(WIDTH)
     let samples: Uint8Array<ArrayBuffer> | null = null
     const collector = createMarkerCollector()
     let markers: MeterMarker[] = collector.ingest(getTrace())
@@ -52,13 +67,21 @@ export function ModelInputMeter({ getAnalyser, getLevel }: { getAnalyser?: () =>
       }
       history[head] = level
       times[head] = Date.now()
+      open[head] = modelInputOpen(getLinkStatus().mic) ? 1 : 0
       head = (head + 1) % WIDTH
       ctx.clearRect(0, 0, WIDTH, HEIGHT)
-      ctx.fillStyle = analyser || getLevel ? '#4ade80' : '#888'
+      const live = Boolean(analyser || getLevel)
       for (let x = 0; x < WIDTH; x += 1) {
-        const value = history[(head + x) % WIDTH] ?? 0
+        const i = (head + x) % WIDTH
+        const value = history[i] ?? 0
+        const isOpen = open[i] === 1
         const h = Math.max(1, Math.round(value * HEIGHT))
+        ctx.fillStyle = waveColor(live, isOpen)
         ctx.fillRect(x, HEIGHT - h, 1, h)
+        if (!isOpen && times[i]) {
+          ctx.fillStyle = CLOSED_OVERLAY
+          ctx.fillRect(x, 0, 1, HEIGHT)
+        }
       }
       drawMarkers(ctx, markers, times, head)
     }
