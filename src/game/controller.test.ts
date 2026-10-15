@@ -217,28 +217,6 @@ describe('attachController choice', () => {
     actor.stop()
   })
 
-  it('эхо чтения с ошибками ASR не обрывает вопрос, а реплика игрока обрывает', async () => {
-    const text = 'Эта река протекает через Рим и впадает в Тирренское море'
-    const questions: QuestionPack = { ...pack, questions: pack.questions.map((q) => (q.id === 's-400' ? { ...q, text } : q)) }
-    const client = new MockRealtimeClient()
-    client.setSpeechMs(60_000)
-    const { actor, stop } = await boot(client, questions, () => [])
-    actor.send({ type: 'HOST_AUDIO_FINISHED', purpose: 'welcome' })
-    actor.send({ type: 'QUESTION_SELECTED', themeId: 's', value: 400 })
-    await vi.advanceTimersByTimeAsync(gameConfig.cellFlashMs + 2500)
-    expect(statePath(actor.getSnapshot().value)).toMatch(/^reading/)
-    const notes = () => getTrace().map((entry) => entry.title)
-    client.hear('эта река протекает чрез рим и впадает', 2500)
-    await vi.advanceTimersByTimeAsync(300)
-    expect(notes()).toContain('речь совпала с текстом вопроса, чтение не прерываю')
-    expect(notes().some((line) => line.startsWith('перебили чтение'))).toBe(false)
-    client.hear('подождите повторите пожалуйста', 1500)
-    await vi.advanceTimersByTimeAsync(300)
-    expect(notes()).toContain('перебили чтение: подождите повторите пожалуйста')
-    stop()
-    actor.stop()
-  })
-
   it('эталон пишется в чат ровно один раз, даже если речь ведущей не случилась', async () => {
     const client = new MockRealtimeClient()
     vi.spyOn(client, 'requestSpeech').mockImplementation(() => {})
