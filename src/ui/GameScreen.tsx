@@ -1,3 +1,4 @@
+import { timerFlashKey } from './flash.ts'
 import { auctionDingSound, catMeowSound, preloadPublicSound } from '../audio/beep.ts'
 import { specialListenerId } from '../game/controller.ts'
 import { SpecialPanel, type SpecialPick } from './SpecialPanel.tsx'
@@ -243,6 +244,7 @@ export function GameScreen(props: {
   }
   useEffect(() => () => window.clearTimeout(copyResetRef.current), [])
   const question = questionById(context.questions, context.activeQuestionId)
+  const timerKey = timerFlashKey(path, context.activeQuestionId, context.attemptId)
   const round = currentRound(context, context.roundIndex)
   const prices = roundPrices(context.questions, context.roundIndex)
   const boardThemes = roundThemes(context.questions, context.roundIndex)
@@ -527,7 +529,7 @@ export function GameScreen(props: {
               props.onSpecialPick?.(pick, pick.target === 'player' ? special.giverId : (special.recipientId ?? special.giverId))
             }}
             timer={showTimer && context.phaseStartedAt !== null && context.phaseDurationMs !== null
-              ? <Countdown startedAt={context.phaseStartedAt} durationMs={context.phaseDurationMs} />
+              ? <Countdown key={timerKey} startedAt={context.phaseStartedAt} durationMs={context.phaseDurationMs} />
               : null}
           />
         ) : showQuestion && question ? (
@@ -572,7 +574,7 @@ export function GameScreen(props: {
               answerUrls={new Set(staged.answerVisual.map((item) => item.url))}
             />
             {showTimer && context.phaseStartedAt !== null && context.phaseDurationMs !== null ? (
-              <Countdown startedAt={context.phaseStartedAt} durationMs={context.phaseDurationMs} />
+              <Countdown key={timerKey} startedAt={context.phaseStartedAt} durationMs={context.phaseDurationMs} />
             ) : null}
             {showAnswerMedia ? <QuestionMedia media={staged.answerAudio} play={answerLive} answer onAnswerEnded={onAnswerMediaEnded} /> : null}
           </article>
