@@ -179,3 +179,12 @@ export const asrChoicePromptPrices = false
  * оборвал переспрос. Ответ после «Вася, отвечайте» сюда не относится — там 600 мс (`LOBBY_BARGE_IN_MIN_MS`).
  */
 export const bargeInSustainMs = 1500
+
+/**
+ * Выбор ячейки из нескольких реплик: если ни одна реплика хода не дала ячейку, ведущая молчит
+ * столько мс тишины и только потом переспрашивает (игрок часто договаривает: «шутки… за триста»).
+ */
+export const choiceClarifyAfterMs = 3000
+
+/** Сколько ждать ответ модели selectQuestion по одной реплике, потом реплика считается «без ячейки». */
+export const choiceResolveTimeoutMs = 8000

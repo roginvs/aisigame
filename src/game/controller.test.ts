@@ -317,6 +317,8 @@ describe('attachController choice', () => {
     const { actor, stop } = await boot(client)
     client.hear('просто болтовня без темы', 1200)
     await vi.advanceTimersByTimeAsync(80)
+    expect(statePath(actor.getSnapshot().value)).toBe('choosing.listening')
+    await vi.advanceTimersByTimeAsync(choiceClarifyAfterMs)
     expect(statePath(actor.getSnapshot().value)).toBe('choosing.clarifying')
     const judge = judgeLines().at(-1) ?? ''
     expect(judge).toContain('Услышала: просто болтовня без темы')
@@ -436,15 +438,15 @@ describe('attachController answer listening', () => {
     const { actor, stop } = await boot(client)
     expect(statePath(actor.getSnapshot().value)).toBe('choosing.listening')
 
-    // Длинная фраза без ячейки → resolving и selectQuestion, ответ инструмента не шлём.
+    // Длинная фраза без ячейки → selectQuestion (слушаем дальше, микрофон открыт), ответ инструмента не шлём.
     client.hear('назовите пожалуйста какую-нибудь открытую тему', 1200)
     await vi.advanceTimersByTimeAsync(80)
-    expect(statePath(actor.getSnapshot().value)).toBe('choosing.resolving')
+    expect(statePath(actor.getSnapshot().value)).toBe('choosing.listening')
     expect(client.lastToolTurn).toBeGreaterThan(0)
     const staleTurn = client.lastToolTurn
 
-    await vi.advanceTimersByTimeAsync(gameConfig.judgeMs)
-    expect(statePath(actor.getSnapshot().value)).toBe('choosing.listening')
+    await vi.advanceTimersByTimeAsync(choiceResolveTimeoutMs)
+    expect(getTrace().some((entry) => entry.kind === 'note' && entry.title.includes('модель не ответила'))).toBe(true)
 
     client.onToolCall(
       {
@@ -765,7 +767,7 @@ describe('specialListening — ранний слух', () => {
 })
 
 import { selectionInstructions } from './controller.ts'
-import { transcriptWaitMs } from '../options.ts'
+import { choiceClarifyAfterMs, choiceResolveTimeoutMs, transcriptWaitMs } from '../options.ts'
 
 async function toChoosing(actor: { getSnapshot: () => { value: unknown } }) {
   for (let i = 0; i < 40 && statePath(actor.getSnapshot().value as never) !== 'choosing.listening'; i += 1) await vi.advanceTimersByTimeAsync(250)
@@ -802,7 +804,7 @@ describe('выбор ячейки голосом: тема в любой фор�
     const { actor, stop } = await boot(client)
     await toChoosing(actor)
     client.hear('Волжское что-то такое длинное', 1500)
-    await vi.advanceTimersByTimeAsync(200)
+    await vi.advanceTimersByTimeAsync(200 + choiceClarifyAfterMs)
     expect(getTrace().some((line) => line.kind === 'state' && JSON.stringify(line.detail).includes('«ВОЛГА» понятна'))).toBe(true)
     for (let i = 0; i < 20 && statePath(actor.getSnapshot().value) !== 'choosing.listening'; i += 1) await vi.advanceTimersByTimeAsync(100)
     client.hear('двести', 800)
@@ -817,20 +819,15 @@ describe('выбор ячейки голосом: тема в любой фор�
     expect(transcriptWaitMs(60_000)).toBe(6000)
   })
 
-  it('расшифровка пришла после переспроса — ведущая обрывается, ячейка открывается', async () => {
+  it('расшифровка не пришла — selectQuestion решает по звуку реплики, без немедленного переспроса', async () => {
     const client = new MockRealtimeClient()
-    const interrupt = vi.spyOn(client, 'interruptSpeech')
+    const tools = vi.spyOn(client, 'requestTool')
     const { actor, stop } = await boot(client)
     await toChoosing(actor)
-    client.setSpeechMs(15_000)
     const item = client.hearDeferred(10_000)
     await vi.advanceTimersByTimeAsync(transcriptWaitMs(10_000) + 500)
-    expect(statePath(actor.getSnapshot().value)).toBe('choosing.clarifying')
-    interrupt.mockClear()
-    client.deliverTranscript(item, 'Волга 200')
-    await vi.advanceTimersByTimeAsync(50)
-    expect(interrupt).toHaveBeenCalled()
-    expect(actor.getSnapshot().context.activeQuestionId).toBe('v-200')
+    expect(tools.mock.calls.some((call) => call[2] === 'selectQuestion' && call[6] === item)).toBe(true)
+    expect(statePath(actor.getSnapshot().value)).toBe('choosing.listening')
     stop(); actor.stop()
   })
 
@@ -841,7 +838,7 @@ describe('выбор ячейки голосом: тема в любой фор�
     await toChoosing(actor)
     client.setSpeechMs(15_000)
     client.hear('просто болтовня без темы', 1200)
-    await vi.advanceTimersByTimeAsync(300)
+    await vi.advanceTimersByTimeAsync(300 + choiceClarifyAfterMs)
     expect(statePath(actor.getSnapshot().value)).toBe('choosing.clarifying')
     interrupt.mockClear()
     client.hearAudio('', '', 1000)
@@ -970,5 +967,64 @@ describe('выбор голосом: шум и посторонняя речь �
   })
   it('«Приложение 900» по-прежнему открывает ячейку', async () => {
     expect((await hearIn('Приложение 900', { themeId: 'a', value: 900, confident: true })).opened).toBe('a-900')
+  })
+})
+
+describe('выбор из нескольких реплик хода', () => {
+  afterEach(() => { vi.useRealTimers(); vi.unstubAllGlobals() })
+
+  it('тема с номиналом, потом болтовня → берём ячейку из первой реплики', async () => {
+    const client = new MockRealtimeClient()
+    const { actor, stop } = await boot(client)
+    await toChoosing(actor)
+    client.hearSlow('берём Волга за 200', 1200, 1500)
+    await vi.advanceTimersByTimeAsync(1300)
+    client.hearSlow('ну давайте посмотрим что там', 1500, 300)
+    await vi.advanceTimersByTimeAsync(1700)
+    // первая разобрана локально, вторая в модели/разборе — решение только когда обе готовы
+    for (let i = 0; i < 30 && statePath(actor.getSnapshot().value) === 'choosing.listening'; i += 1) await vi.advanceTimersByTimeAsync(100)
+    expect(actor.getSnapshot().context.activeQuestionId).toBe('v-200')
+    expect(getTrace().some((entry) => entry.kind === 'note' && entry.title.includes('выбор: берём реплику #'))).toBe(true)
+    stop(); actor.stop()
+  })
+
+  it('не решаем, пока игрок говорит: длинная реплика с болтовнёй, ячейка в середине', async () => {
+    const client = new MockRealtimeClient()
+    const { actor, stop } = await boot(client)
+    await toChoosing(actor)
+    client.hear('Волга 200', 600)
+    // игрок сразу продолжает говорить: speech_started до разбора — решение ждёт
+    client.hearDeferred(2000)
+    await vi.advanceTimersByTimeAsync(100)
+    expect(statePath(actor.getSnapshot().value)).toBe('choosing.listening')
+    for (let i = 0; i < 80 && statePath(actor.getSnapshot().value) === 'choosing.listening'; i += 1) await vi.advanceTimersByTimeAsync(100)
+    expect(actor.getSnapshot().context.activeQuestionId).toBe('v-200')
+    stop(); actor.stop()
+  })
+
+  it('фраза — пауза — тема: без ячейки молчим, вторая реплика открывает ячейку без переспроса', async () => {
+    const client = new MockRealtimeClient()
+    const tools = vi.spyOn(client, 'requestTool')
+    const { actor, stop } = await boot(client)
+    await toChoosing(actor)
+    client.hear('так, что бы такое выбрать', 1200)
+    await vi.advanceTimersByTimeAsync(choiceClarifyAfterMs / 2)
+    expect(statePath(actor.getSnapshot().value)).toBe('choosing.listening')
+    client.hear('Свободная 400', 900)
+    await vi.advanceTimersByTimeAsync(200)
+    expect(actor.getSnapshot().context.activeQuestionId).toBe('s-400')
+    expect(getTrace().some((entry) => entry.kind === 'chat' && entry.title === 'Ведущая' && JSON.stringify(entry.detail).includes('clarify'))).toBe(false)
+    const select = tools.mock.calls.filter((call) => call[2] === 'selectQuestion')
+    expect(select.length).toBeGreaterThan(0)
+    stop(); actor.stop()
+  })
+
+  it('модель получает прошлые реплики хода по порядку', async () => {
+    const client = new MockRealtimeClient()
+    const { actor, stop } = await boot(client)
+    const text = selectionInstructions(actor.getSnapshot().context, 'за триста', null, null, ['ну шутки', 'наверное'])
+    stop(); actor.stop()
+    expect(text).toContain('1. «ну шутки»')
+    expect(text).toContain('2. «наверное»')
   })
 })

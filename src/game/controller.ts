@@ -3,7 +3,7 @@ import { auctionBidToolFor, finalBetToolFor, selectQuestionToolFor } from '../re
 import type { Actor, SnapshotFrom } from 'xstate'
 import { clearHostEar, getHostEar, subscribeHostEar, hostEarHearing, hostEarHostSpoke, hostEarMicClosed, hostEarProcessing, hostEarShown, hostEarSurvives, settleHostEar } from './hostEar.ts'
 import { playTimeoutBeep } from '../audio/beep.ts'
-import { bargeInSustainMs, mutedChooserMaxReminders, auctionDingMs, audioJudgmentTimings, catMeowMs, lateTranscriptMs, transcriptWaitMs } from '../options.ts'
+import { bargeInSustainMs, choiceClarifyAfterMs, choiceResolveTimeoutMs, mutedChooserMaxReminders, auctionDingMs, audioJudgmentTimings, catMeowMs, transcriptWaitMs } from '../options.ts'
 import { matchAuctionSpeech, optionLabel } from './auction.ts'
 import { matchCatStake, nextInCircle } from './cat.ts'
 import { idleThresholds } from './idle.ts'
@@ -109,9 +109,6 @@ export function attachController(options: {
   let buzzEpoch = 0
   /** Инвалидирует talkover после нового чтения. */
   let readEpoch = 0
-  let choiceHeard = ''
-  /** Реплика выбора (item_id), которую разбирает модель: её звук идёт в selectQuestion, подпись в чат — после решения. */
-  let choiceItemId: string | null = null
   /** Тема, понятая из прошлой реплики без номинала (до открытия ячейки). */
   let choiceTheme: string | null = null
   /** Попытка, для которой сейчас принимаем речь ответа. */
@@ -268,6 +265,8 @@ export function attachController(options: {
       // Расшифровка выбора — только подпись: в чат после решения (модель по звуку), черновик не показываем.
       client.suppressPlayerChat(itemId)
       diag('чат', 'реплика выбора: подпись в чат после разбора', { itemId })
+      window.clearTimeout(choiceSilenceTimer)
+      choiceSilenceTimer = 0
     }
     if (path === 'choosing.listening' && hostTalking && (hostPurpose === 'idleNudge' || hostPurpose === 'micWarning')) armBargeIn(itemId, () => statePath(actor.getSnapshot().value) === 'choosing.listening')
     if (path.startsWith('answering')) lastAnswerSpeechAt = Date.now()
@@ -691,10 +690,10 @@ export function attachController(options: {
       client.setMicEnabled(true)
     }
     if (path === 'choosing.resolving') {
-      client.interruptSpeech('разбор выбора')
-      client.setMicEnabled(false)
-      requestSelection(context)
+      // Сюда больше не входим (реплики разбираются в listening); старое сохранение — назад к слушанию.
+      actor.send({ type: 'SELECTION_FAILED', message: 'Назовите тему и стоимость' })
     }
+    if (!path.startsWith('choosing')) resetChoiceTurn(path)
     if (path === 'choosing.clarifying') {
       client.setTranscriptionPrompt(listeningPrompt(context))
       speakWhileListening('clarify', clarifyInstructions(context))
@@ -899,39 +898,127 @@ export function attachController(options: {
     client.requestSpeech(purpose, speechTurn, expect ? instructions : withCommentary(instructions, actor.getSnapshot().context, publicHistory()), expect, isolated || !expect, chatNote)
   }
 
-  function requestSelection(context: GameContext): void {
+  /**
+   * Реплики выбирающего за этот ход (по порядку). Каждая разбирается сама (локально или моделью),
+   * прежние разборы не отменяются. Решаем, когда игрок молчит и ни одна реплика не в разборе:
+   * с последней назад берём ту, что дала ячейку («берём шутки за 300» + «ну давайте посмотрим» → шутки 300).
+   */
+  type ChoiceUtterance = {
+    order: number
+    itemId: string | null
+    text: string
+    state: 'pending' | 'cell' | 'none' | 'noise'
+    cell?: { themeId: string; value: number; label: string }
+    reason?: string
+    /** Уже переспрошено после этой реплики — повторно не переспрашиваем. */
+    asked?: boolean
+  }
+  let choiceTurn: ChoiceUtterance[] = []
+  let choiceSeq = 0
+  const choiceQueue: ChoiceUtterance[] = []
+  let choiceInModel: ChoiceUtterance | null = null
+  let choiceModelTimer = 0
+  let choiceSilenceTimer = 0
+
+  function resetChoiceTurn(why: string): void {
+    if (choiceTurn.length) diag('слух', `выбор: реплики хода сброшены (${why})`, { count: choiceTurn.length })
+    choiceTurn = []
+    choiceQueue.length = 0
+    choiceInModel = null
+    window.clearTimeout(choiceModelTimer)
+    window.clearTimeout(choiceSilenceTimer)
+    choiceSilenceTimer = 0
+  }
+
+  function choiceTurnLog(): string {
+    return choiceTurn.map((u) => `#${u.order} ${u.state}${u.cell ? ` ${u.cell.label}` : ''} «${u.text.slice(0, 40)}»`).join('; ')
+  }
+
+  function runNextSelection(): void {
+    if (choiceInModel) return
+    const next = choiceQueue.shift()
+    if (!next) return
+    const context = actor.getSnapshot().context
+    choiceInModel = next
     toolTurn += 1
     expectingToolTurn = toolTurn
     const cells = openChoiceCells(context)
     const offer = choosingOffer
     choosingOffer = null
-    client.requestTool('select', toolTurn, 'selectQuestion', selectionInstructions(context, choiceHeard, offer, choiceTheme), true,
-      selectQuestionToolFor(cells.map((cell) => cell.themeId), cells.map((cell) => cell.value)), choiceItemId ?? undefined)
+    const earlier = choiceTurn.filter((u) => u.order < next.order && u.state !== 'noise').map((u) => u.text)
+    diag('слух', `выбор: реплика #${next.order} — в модель`, { itemId: next.itemId, earlier: earlier.length })
+    client.requestTool('select', toolTurn, 'selectQuestion', selectionInstructions(context, next.text, offer, choiceTheme, earlier), true,
+      selectQuestionToolFor(cells.map((cell) => cell.themeId), cells.map((cell) => cell.value)), next.itemId ?? undefined)
+    window.clearTimeout(choiceModelTimer)
+    const turn = toolTurn
+    choiceModelTimer = window.setTimeout(() => {
+      if (choiceInModel !== next || expectingToolTurn !== turn) return
+      pushTrace('note', `выбор: модель не ответила за ${choiceResolveTimeoutMs} мс по реплике #${next.order}`)
+      expectingToolTurn = null
+      finishUtterance(next, 'none', undefined, 'Я не уверена, какую ячейку вы назвали. Повторите тему и стоимость.')
+    }, choiceResolveTimeoutMs)
+  }
+
+  function finishUtterance(u: ChoiceUtterance, state: ChoiceUtterance['state'], cell?: ChoiceUtterance['cell'], reason?: string): void {
+    u.state = state
+    u.cell = cell
+    u.reason = reason
+    if (choiceInModel === u) {
+      choiceInModel = null
+      window.clearTimeout(choiceModelTimer)
+    }
+    pushTrace('note', `выбор: реплика #${u.order} → ${state}${cell ? ` ${cell.label}` : ''}`)
+    runNextSelection()
+    settleChoice()
+  }
+
+  /** Решение по всем репликам хода: только когда игрок молчит и разборов нет. */
+  function settleChoice(): void {
+    window.clearTimeout(choiceSilenceTimer)
+    choiceSilenceTimer = 0
+    if (statePath(actor.getSnapshot().value) !== 'choosing.listening' || !choiceTurn.length) return
+    if (openSpeechItemId !== null) {
+      diag('слух', 'выбор: игрок ещё говорит — не решаем', { turn: choiceTurnLog() })
+      return
+    }
+    if (choiceTurn.some((u) => u.state === 'pending')) {
+      diag('слух', 'выбор: реплики ещё в разборе — не решаем', { turn: choiceTurnLog() })
+      return
+    }
+    const chosen = [...choiceTurn].reverse().find((u) => u.state === 'cell')
+    if (chosen?.cell) {
+      pushTrace('note', `выбор: берём реплику #${chosen.order} (${chosen.cell.label}) из ${choiceTurn.length}: ${choiceTurnLog()}`)
+      const { themeId, value } = chosen.cell
+      choiceTheme = null
+      resetChoiceTurn('ячейка выбрана')
+      actor.send({ type: 'QUESTION_SELECTED', themeId, value })
+      return
+    }
+    const unclear = [...choiceTurn].reverse().find((u) => u.state === 'none' && !u.asked)
+    if (!unclear) return
+    diag('слух', `выбор: ячейки нет — молчим ${choiceClarifyAfterMs} мс, потом переспрос`, { turn: choiceTurnLog() })
+    choiceSilenceTimer = window.setTimeout(() => {
+      choiceSilenceTimer = 0
+      if (statePath(actor.getSnapshot().value) !== 'choosing.listening' || openSpeechItemId !== null) return
+      if (choiceTurn.some((u) => u.state === 'pending' || u.state === 'cell')) return
+      for (const u of choiceTurn) u.asked = true
+      pushTrace('note', `выбор: ${choiceClarifyAfterMs} мс тишины без ячейки — переспрос`)
+      actor.send({ type: 'QUESTION_UNCLEAR', reason: unclear.reason ?? 'Я не уверена, какую ячейку вы назвали. Повторите тему и стоимость.' })
+    }, choiceClarifyAfterMs)
   }
 
   async function considerChoice(durationMs: number, itemId: string | null): Promise<void> {
     const epoch = choiceEpoch
+    const utterance: ChoiceUtterance = { order: ++choiceSeq, itemId, text: '', state: 'pending' }
+    choiceTurn.push(utterance)
+    diag('слух', `выбор: реплика #${utterance.order} — жду расшифровку`, { itemId, durationMs })
     const heard = await client.waitForTranscript(itemId, transcriptWaitMs(durationMs))
-    if (epoch !== choiceEpoch) return
-    if (statePath(actor.getSnapshot().value) !== 'choosing.listening') return
-    decideChoice(heard, durationMs, itemId)
-    if (!heard.arrived && itemId && statePath(actor.getSnapshot().value) === 'choosing.clarifying') void lateChoice(itemId, durationMs)
-  }
-
-  /**
-   * Расшифровка длинной реплики может прийти после переспроса. Если ведущая ещё уточняет —
-   * обрываем её и выбираем ячейку по опоздавшему тексту.
-   */
-  async function lateChoice(itemId: string, durationMs: number): Promise<void> {
-    const epoch = choiceEpoch
-    const late = await client.waitForTranscript(itemId, lateTranscriptMs)
-    if (!late.arrived || !late.text.trim() || epoch !== choiceEpoch) return
-    if (statePath(actor.getSnapshot().value) !== 'choosing.clarifying') return
-    pushTrace('note', `расшифровка пришла после переспроса: ${late.text}`)
-    client.interruptSpeech('поздняя расшифровка выбора')
-    actor.send({ type: 'PLAYER_SPEECH_STARTED' })
-    if (statePath(actor.getSnapshot().value) !== 'choosing.listening') return
-    decideChoice(late, durationMs, itemId)
+    if (epoch !== choiceEpoch || !choiceTurn.includes(utterance)) {
+      choiceTurn = choiceTurn.filter((u) => u !== utterance)
+      return
+    }
+    utterance.text = heard.text
+    decideChoice(heard, durationMs, itemId, utterance)
   }
 
   /** Подпись реплики выбора в чат; пустая — «речь не распознана». Расшифровку-эхо подсказки сюда не передают. */
@@ -940,48 +1027,43 @@ export function attachController(options: {
     else pushPlayerLine(text.trim() || 'речь не распознана')
   }
 
-  function decideChoice(heard: { text: string; arrived: boolean }, durationMs: number, itemId: string | null = null): void {
+  function decideChoice(heard: { text: string; arrived: boolean }, durationMs: number, itemId: string | null, u: ChoiceUtterance): void {
     if (echoesChoicePrompt(heard.text, listeningPrompt(actor.getSnapshot().context))) {
       pushTrace('note', 'распознавание повторило подсказку тем, это не выбор')
       choiceCaption(itemId, '')
-      return
+      return finishUtterance(u, 'noise')
     }
     if (echoesHost(heard.text)) {
       pushTrace('note', 'речь совпала с репликой ведущей, это эхо, не выбор')
-      return
+      return finishUtterance(u, 'noise')
     }
     const round = currentRound(actor.getSnapshot().context, actor.getSnapshot().context.roundIndex)
-    // После предложения ячейки короткое «да», «го», «ок» — тоже ответ: решает модель.
-    const gate = choosingOffer && isChoiceUtterance(heard.text, 2) ? 'select' : choiceGate(heard.text, durationMs, round?.kind === 'final' ? 2 : 4)
+    // Расшифровка не пришла — у модели есть звук реплики: пусть решает она.
+    const gate = !heard.arrived && itemId ? 'select'
+      // После предложения ячейки короткое «да», «го», «ок» — тоже ответ: решает модель.
+      : choosingOffer && isChoiceUtterance(heard.text, 2) ? 'select' : choiceGate(heard.text, durationMs, round?.kind === 'final' ? 2 : 4)
     const shown = heard.text || 'речь не распознана'
     if (gate !== 'select') choiceCaption(itemId, heard.text)
     if (gate === 'ignore') {
       pushTrace('note', `короткий звук ${durationMs} мс, ячейку не открываю: ${shown}`)
-      return
+      return finishUtterance(u, 'noise')
     }
     if (gate === 'ask-again') {
       pushTrace('note', `реплика не похожа на выбор: ${shown}`)
       pushJudgeLine(selectionChatText(shown, false, 'нужны тема и стоимость'))
-      actor.send({
-        type: 'QUESTION_UNCLEAR',
-        reason: 'Не расслышала тему и стоимость. Повторите, пожалуйста.',
-      })
-      return
+      return finishUtterance(u, 'none', undefined, 'Не расслышала тему и стоимость. Повторите, пожалуйста.')
     }
     const snapshot = actor.getSnapshot()
     const kind = round?.kind === 'final' ? 'final' : 'normal'
     const local = matchSpokenCell(heard.text, openChoiceCells(snapshot.context), kind, choiceTheme)
-    choiceHeard = heard.text
-    choiceItemId = itemId
     if (local) {
       choiceCaption(itemId, heard.text)
-      choiceTheme = null
       const price = kind === 'final' ? '' : ` ${local.value}`
       pushTrace('note', `ячейка по словам: ${local.themeName}${price}`)
-      actor.send({ type: 'QUESTION_SELECTED', themeId: local.themeId, value: local.value })
-      return
+      return finishUtterance(u, 'cell', { themeId: local.themeId, value: local.value, label: `${local.themeName}${price}` })
     }
-    actor.send({ type: 'PLAYER_SPEECH_FINISHED' })
+    choiceQueue.push(u)
+    runNextSelection()
   }
 
   async function considerBlurt(durationMs: number, itemId: string | null): Promise<void> {
@@ -1398,7 +1480,8 @@ export function attachController(options: {
   }
 
   function handleSelection(call: ToolCall | null, turn: number): void {
-    if (expectingToolTurn === null || turn !== expectingToolTurn) {
+    const u = choiceInModel
+    if (expectingToolTurn === null || turn !== expectingToolTurn || !u) {
       if (call) client.sendToolOutput(call.callId, { accepted: false, reason: 'Выбор уже не актуален' })
       return
     }
@@ -1413,47 +1496,24 @@ export function attachController(options: {
     const value = typeof args.value === 'number' ? args.value : Number(args.value) || 0
     const confident = args.confident === true
     const speech = args.speech === 'noise' || args.speech === 'other' || args.speech === 'choice' ? args.speech : 'choice'
-    const itemId = choiceItemId
-    choiceItemId = null
+    const transcript = u.text.trim()
     if (speech === 'noise') {
       // Модель по звуку: речи нет. Расшифровку (часто выдуманную подсказку) не показываем.
-      pushTrace('note', `модель по звуку: не речь, выбор не открываю (расшифровка: ${choiceHeard.trim() || '—'})`)
-      choiceCaption(itemId, '')
+      pushTrace('note', `модель по звуку: не речь, выбор не открываю (расшифровка: ${transcript || '—'})`)
+      choiceCaption(u.itemId, '')
       if (call) client.sendToolOutput(call.callId, { accepted: false, reason: 'Не речь' })
-      actor.send({ type: 'SELECTION_FAILED', message: 'Назовите тему и стоимость' })
-      return
+      return finishUtterance(u, 'noise')
     }
-    choiceCaption(itemId, choiceHeard)
+    choiceCaption(u.itemId, transcript)
     const snapshotNow = actor.getSnapshot()
     const kind = currentRound(snapshotNow.context, snapshotNow.context.roundIndex)?.kind ?? 'normal'
-    const transcript = choiceHeard.trim()
     const played = snapshotNow.context.playedIds
     const local = matchSpokenCell(transcript, openChoiceCells(snapshotNow.context), kind)
-    const knownQuestion = findQuestion(
-      snapshotNow.context.questions,
-      snapshotNow.context.roundIndex,
-      themeId,
-      value,
-      kind,
-    )
-    const modelQuestion = findQuestion(
-      snapshotNow.context.questions,
-      snapshotNow.context.roundIndex,
-      themeId,
-      value,
-      kind,
-      played,
-    )
+    const knownQuestion = findQuestion(snapshotNow.context.questions, snapshotNow.context.roundIndex, themeId, value, kind)
+    const modelQuestion = findQuestion(snapshotNow.context.questions, snapshotNow.context.roundIndex, themeId, value, kind, played)
     const modelOk = Boolean(modelQuestion && confident && !played.includes(modelQuestion.id))
     const picked = local
-      ? findQuestion(
-          snapshotNow.context.questions,
-          snapshotNow.context.roundIndex,
-          local.themeId,
-          local.value,
-          kind,
-          played,
-        )
+      ? findQuestion(snapshotNow.context.questions, snapshotNow.context.roundIndex, local.themeId, local.value, kind, played)
       : modelOk
         ? modelQuestion
         : undefined
@@ -1468,18 +1528,12 @@ export function attachController(options: {
           ? 'Этот вопрос недоступен. Назовите другую тему и стоимость.'
           : themeOnly
             ?? 'Я не уверена, какую ячейку вы назвали. Повторите тему и стоимость.'
-      choiceTheme = themeOnly ? themeId : null
+      if (themeOnly) choiceTheme = themeId
       if (call) client.sendToolOutput(call.callId, { accepted: false, reason })
-      actor.send({ type: 'QUESTION_UNCLEAR', reason })
-      return
+      return finishUtterance(u, "none", undefined, reason)
     }
-    choiceTheme = null
-    client.sendToolOutput(call.callId, {
-      accepted: true,
-      theme: picked.themeName,
-      value: picked.value,
-    })
-    actor.send({ type: 'QUESTION_SELECTED', themeId: picked.themeId, value: picked.value })
+    client.sendToolOutput(call.callId, { accepted: true, theme: picked.themeName, value: picked.value })
+    finishUtterance(u, 'cell', { themeId: picked.themeId, value: picked.value, label: cellLabel })
   }
 
   function handleJudgment(call: ToolCall | null, turn: number): void {
@@ -1938,7 +1992,15 @@ export function unclearSituation(context: GameContext): string {
 /** Модель не видит картинку/звук вопроса: это не повод сомневаться в ответе, совпавшем с эталоном. */
 export const judgmentMediaNote = 'Картинку, звук или ролик вопроса видят и слышат только игроки; ты их не видишь, и это не причина для ambiguous. Ответ, совпадающий с эталоном или его другой записью (транслитерация, латиница/кириллица, другое написание того же названия), — correct.'
 
-export function selectionInstructions(context: GameContext, heard: string, offer: ChoosingOffer | null = null, themeHint: string | null = null): string {
+/** Прошлые реплики этого хода — контекст для модели: решает она, а не код. */
+function earlierPhrasesNote(earlier: readonly string[]): string {
+  if (!earlier.length) return ''
+  return `Раньше в этот ход выбирающий сказал (по порядку):
+${earlier.map((text, index) => `${index + 1}. «${text || 'пусто'}»`).join('\n')}
+Оцени последнюю реплику с учётом прошлых: если она продолжает прошлую (например, называет номинал к уже названной теме), это выбор. Болтовня после выбора — не новый выбор: confident=false.`
+}
+
+export function selectionInstructions(context: GameContext, heard: string, offer: ChoosingOffer | null = null, themeHint: string | null = null, earlier: readonly string[] = []): string {
   const round = currentRound(context, context.roundIndex)
   if (round?.kind === 'final') {
     const themes = roundThemes(context.questions, context.roundIndex)
@@ -1953,6 +2015,7 @@ confident=true только если названа одна тема из сп�
 Кашель и шум: confident=false. Не угадывай. heard — дословно, что сказано.
 Если в названии темы стоят точки или многоточие, это та же тема, сказанная без точек.
 ${selectionAudioNote}
+${earlierPhrasesNote(earlier)}
 `.trim()
   }
   return `
@@ -1968,6 +2031,7 @@ confident=true, только когда тема названа и номина�
 heard — дословно, что сказал игрок.
 Если в названии темы стоят точки или многоточие, это та же тема, сказанная без точек.
 ${selectionAudioNote}
+${earlierPhrasesNote(earlier)}
 ${offer ? offerSelectionNote(offer) : ''}
 ${themeHintNote(context, themeHint)}
 `.trim()
