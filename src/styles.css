@@ -36,13 +36,18 @@ h1, h2, p { margin: 0; }
 
 .model-meter {
   display: inline-block;
-  width: 160px;
+  width: 320px;
   height: 20px;
   vertical-align: middle;
   background: rgba(255, 255, 255, 0.06);
   border: 1px solid rgba(255, 255, 255, 0.25);
   border-radius: 3px;
   box-sizing: content-box;
+}
+
+/* Телефон: та же история, ужата по ширине (фиксированная — без сдвига раскладки). */
+@media (max-width: 600px) {
+  .model-meter { width: 160px; }
 }
 
 .model-line {

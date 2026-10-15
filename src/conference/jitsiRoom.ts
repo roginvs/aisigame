@@ -984,7 +984,10 @@ export async function connectJitsiConference(input: {
       const changed = participantId !== modelHearOnlyId
       modelHearOnlyId = participantId
       syncModelMixer()
-      if (changed) openHearWindow(participantId)
+      if (changed) {
+        pushTrace('note', 'Модель: фокус микшера', { focus: participantId })
+        openHearWindow(participantId)
+      }
     },
     anyoneSpeaking,
     localParticipantId: localId,

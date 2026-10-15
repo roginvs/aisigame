@@ -1,4 +1,6 @@
 import { useEffect, useRef } from 'react'
+import { getTrace, subscribeTrace } from '../debug/trace.ts'
+import { createMarkerCollector, meterLegendText, meterMarkerColors, type MeterMarker } from './meterMarkers.ts'
 
 /** RMS уровня по time-domain байтам AnalyserNode (128 = тишина) → 0..1, с усилением для речи. */
 export function meterLevel(samples: Uint8Array): number {
@@ -12,7 +14,8 @@ export function meterLevel(samples: Uint8Array): number {
   return Math.min(1, rms * 4)
 }
 
-const WIDTH = 160
+export const METER_WIDTH = 320
+const WIDTH = METER_WIDTH
 const HEIGHT = 20
 
 /**
@@ -28,7 +31,12 @@ export function ModelInputMeter({ getAnalyser, getLevel }: { getAnalyser?: () =>
     let stopped = false
     const history = new Float32Array(WIDTH)
     let head = 0
+    // Время каждого столбца: метки ставим по реальному времени, а не по числу кадров.
+    const times = new Float64Array(WIDTH)
     let samples: Uint8Array<ArrayBuffer> | null = null
+    const collector = createMarkerCollector()
+    let markers: MeterMarker[] = collector.ingest(getTrace())
+    const unsubscribe = subscribeTrace(() => { markers = collector.ingest(getTrace()) })
     const tick = () => {
       if (stopped) return
       frame = requestAnimationFrame(tick)
@@ -43,6 +51,7 @@ export function ModelInputMeter({ getAnalyser, getLevel }: { getAnalyser?: () =>
         level = meterLevel(samples)
       }
       history[head] = level
+      times[head] = Date.now()
       head = (head + 1) % WIDTH
       ctx.clearRect(0, 0, WIDTH, HEIGHT)
       ctx.fillStyle = analyser || getLevel ? '#4ade80' : '#888'
@@ -51,10 +60,12 @@ export function ModelInputMeter({ getAnalyser, getLevel }: { getAnalyser?: () =>
         const h = Math.max(1, Math.round(value * HEIGHT))
         ctx.fillRect(x, HEIGHT - h, 1, h)
       }
+      drawMarkers(ctx, markers, times, head)
     }
     frame = requestAnimationFrame(tick)
     return () => {
       stopped = true
+      unsubscribe()
       cancelAnimationFrame(frame)
     }
   }, [getAnalyser, getLevel])
@@ -65,9 +76,28 @@ export function ModelInputMeter({ getAnalyser, getLevel }: { getAnalyser?: () =>
       className="model-meter"
       width={WIDTH}
       height={HEIGHT}
-      title="Что слышит модель (выход микшера)"
+      title={meterLegendText()}
       aria-label="Уровень звука, который слышит модель"
       data-testid="model-meter"
     />
   )
+}
+
+/** Вертикальные метки событий: столбец — первый, чьё время ≥ времени события. */
+function drawMarkers(ctx: CanvasRenderingContext2D, markers: readonly MeterMarker[], times: Float64Array, head: number): void {
+  for (const marker of markers) {
+    let x = -1
+    let seenSample = false
+    for (let i = 0; i < WIDTH; i += 1) {
+      const time = times[(head + i) % WIDTH] ?? 0
+      if (!time) continue
+      // Событие старше самого старого столбца — за левым краем.
+      if (!seenSample && marker.at < time) break
+      seenSample = true
+      if (time >= marker.at) { x = i; break }
+    }
+    if (x < 0) continue
+    ctx.fillStyle = meterMarkerColors[marker.group]
+    ctx.fillRect(x, 0, marker.group === 'buzzer' ? 3 : 1, HEIGHT)
+  }
 }
