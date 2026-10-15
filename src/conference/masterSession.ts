@@ -65,6 +65,8 @@ export type MasterSessionOptions = {
    * Broadcast-транспорт оставляет куски на общем канале.
    */
   usePackPipe?: boolean
+  /** Каждый разосланный снимок: мастер рисует экран из него же, как гости. */
+  onSnapshot?: (snapshot: ConferenceSnapshot) => void
 }
 
 export class MasterSession {
@@ -81,6 +83,7 @@ export class MasterSession {
   private verified = new Set<string>()
   private gameStarted = false
   private hearTurnOnly = false
+  private onSnapshotCb?: (snapshot: ConferenceSnapshot) => void
   private gameStartedAt = 0
   private lobbyOpenedSpeech = false
   private spokenLobbySignature = ''
@@ -123,6 +126,7 @@ export class MasterSession {
 
   constructor(options: MasterSessionOptions) {
     clearRemoteDebug()
+    this.onSnapshotCb = options.onSnapshot
     this.masterClientId = options.masterClientId
     this.transport = options.transport
     this.client = options.client
@@ -550,6 +554,7 @@ export class MasterSession {
   }
 
   private publishSnapshot(snapshot: ConferenceSnapshot): void {
+    this.onSnapshotCb?.(snapshot)
     if (!this.statePublisher) {
       this.statePublisher = new ConferenceStatePublisher(snapshot, this.authorityToken)
       this.transport.send(this.statePublisher.full())
@@ -560,6 +565,7 @@ export class MasterSession {
 
   private broadcastFullStatus(): void {
     const snapshot = this.buildSnapshot(this.gameStarted ? statePath(this.actor.getSnapshot().value) : 'lobby')
+    this.onSnapshotCb?.(snapshot)
     if (!this.statePublisher) this.statePublisher = new ConferenceStatePublisher(snapshot, this.authorityToken)
     else this.statePublisher.update(snapshot)
     this.transport.send(this.statePublisher.full())

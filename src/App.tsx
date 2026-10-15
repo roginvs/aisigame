@@ -145,6 +145,8 @@ export default function App() {
   /** Мастер: вне выбора/ответа модель глуха; на ходе — только этот игрок. В снимке партии. */
   const [hearTurnOnly, setHearTurnOnly] = useState(() => hearTurnOnlyOf(readSavedGame()))
   const hearTurnOnlyRef = useRef(hearTurnOnly)
+  /** Последний разосланный мастером снимок: экран мастера рисуется из него, как у гостей. */
+  const [masterSnapshot, setMasterSnapshot] = useState<ConferenceSnapshot | null>(null)
   useEffect(() => {
     hearTurnOnlyRef.current = hearTurnOnly
     masterSessionRef.current?.setHearTurnOnly(hearTurnOnly)
@@ -631,6 +633,7 @@ export default function App() {
     const unsubscribeHostSpeaking = hostSpeakingUnsubRef.current
     const disposeTransport = transportDisposeRef.current
     masterSessionRef.current = null
+    setMasterSnapshot(null)
     joinerSessionRef.current = null
     tilesUnsubRef.current = null
     hostSpeakingUnsubRef.current = null
@@ -880,6 +883,7 @@ export default function App() {
         isRoomSpeaking: () => conferenceHandleRef.current?.anyoneSpeaking() ?? false,
         resumePlayers: restoringGame ? resume?.saved.players : undefined,
         usePackPipe: !useBroadcast,
+        onSnapshot: setMasterSnapshot,
       })
       masterSessionRef.current = session
       session.setHearTurnOnly(hearTurnOnlyRef.current)
@@ -1285,6 +1289,10 @@ export default function App() {
             joinerPack,
           )
         : null
+  // Мастер и гость рисуют экран из одного снимка: у мастера — из того, что он разослал.
+  const masterViewContext = conferenceRole === 'master' && masterSnapshot && pack ? contextFromSnapshot(masterSnapshot, pack) : null
+  const viewSnapshot = conferenceRole === 'master' ? (masterViewContext ? masterSnapshot : null) : joinerSnapshot
+  const viewContext = conferenceRole === 'master' ? masterViewContext : joinerViewContext
   const joinerSelfId = conferenceRole === 'joiner' ? readJoinClientId() : masterClientId
   const joinerGameStarted = Boolean(joinerSnapshot && joinerSnapshot.phase !== 'lobby')
   const joinerPackReady = Boolean(joinerPack) && joinerLobby.hashOk
@@ -1294,7 +1302,7 @@ export default function App() {
   return (
     <GameScreen
       snapshot={snapshot}
-      link={conferenceRole === 'joiner' && joinerSnapshot?.hostLink ? { ...link, ...joinerSnapshot.hostLink } : link}
+      link={link}
       onAppeal={async (request) => {
         if (conferenceRole === 'joiner') return joinerSessionRef.current?.sendAppeal(request) ?? { accepted: false, reason: 'Нет связи с мастером' }
         const current = actor.getSnapshot()
@@ -1411,9 +1419,9 @@ export default function App() {
               inviteUrl,
               onCopyInvite: conferenceRole === 'master' ? copyInvite : undefined,
               selfClientId: joinerSelfId,
-              remoteSnapshot: joinerSnapshot,
-              remoteContext: joinerViewContext,
-              remotePath: joinerSnapshot?.phase ?? path,
+              remoteSnapshot: viewSnapshot,
+              remoteContext: viewContext,
+              remotePath: viewSnapshot?.phase ?? path,
               tiles: conferenceTiles,
               hostSpeaking: conferenceHostSpeaking,
               mediaBusy,
@@ -1429,6 +1437,7 @@ export default function App() {
               messageRing: conferenceRole === 'master' ? masterHistory : joinerSnapshot ?? emptyMessageRing(),
               onConferenceExit: conferenceRole === 'joiner' ? leaveConferenceToMenu : exitToMenu,
               hiddenClientIds: hiddenConferenceClientIds,
+              // Переключатель мастера — его собственный; гостю то же значение приходит снимком.
               hearTurnOnly: conferenceRole === 'master' ? hearTurnOnly : joinerSnapshot?.hearTurnOnly,
               onHearTurnOnlyChange: conferenceRole === 'master' ? setHearTurnOnly : undefined,
             }

@@ -267,7 +267,7 @@ export function GameScreen(props: {
     window.addEventListener('aisigame-beep', onBeep)
     return () => window.removeEventListener('aisigame-beep', onBeep)
   }, [])
-  const usage = useSyncExternalStore(subscribeUsage, getUsageSnapshot)
+  const usage = useSyncExternalStore(subscribeUsage, getUsageSnapshot, getUsageSnapshot)
   const localEar = useSyncExternalStore(subscribeHostEar, getHostEar, getHostEar)
   useEffect(() => {
     void preloadPublicSound(catMeowSound)
@@ -743,8 +743,8 @@ export function GameScreen(props: {
         <aside className="talk">
           <HostPresence
             path={path}
-            link={link}
-            ear={conference && !conference.isMaster && conference.remoteSnapshot ? conference.remoteSnapshot.hostEar ?? 'idle' : localEar}
+            link={conference?.remoteSnapshot?.hostLink ? { ...link, ...conference.remoteSnapshot.hostLink } : link}
+            ear={conference?.remoteSnapshot ? conference.remoteSnapshot.hostEar ?? 'idle' : localEar}
             title={turnTitle}
             titleHint={soloListenHint}
             lobbyInvite={Boolean(conference?.lobby)}
@@ -773,7 +773,7 @@ export function GameScreen(props: {
           />
           <ConversationChat
             messageRing={conference?.messageRing ?? conference?.remoteSnapshot ?? undefined}
-            liveSpeech={conference && !conference.isMaster && conference.remoteSnapshot ? conference.remoteSnapshot.liveSpeech ?? null : undefined}
+            liveSpeech={conference?.remoteSnapshot ? conference.remoteSnapshot.liveSpeech ?? null : undefined}
             onSendChat={conference?.onSendChat}
             aboveComposer={
               conference?.layout ? (
