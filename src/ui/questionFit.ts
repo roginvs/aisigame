@@ -29,14 +29,20 @@ export function useFitQuestionText(ref: RefObject<HTMLElement | null>, text: str
     const el = ref.current
     if (!el) return
     let frame = 0
+    // Конференция: камеры-превью (15 %) только когда вопрос не влез при обычных камерах (26 %).
+    const layout = el.closest('.conference-layout')
     const fit = () => {
       el.style.fontSize = ''
       el.classList.remove('question-text-scroll')
+      // Замер всегда с обычными камерами; класс снимается и ставится в одном синхронном проходе —
+      // до отрисовки, поэтому мигания нет, а итоговый размер стабилен (ResizeObserver ниже не зациклится).
+      layout?.classList.remove('cams-compact')
       const base = Number.parseFloat(getComputedStyle(el).fontSize)
       // Влезает и сам текст, и вся карточка (варианты ответа под текстом тоже должны поместиться).
       const card = el.parentElement
       const fits = () => el.scrollHeight <= el.clientHeight + 1 && (!card || card.scrollHeight <= card.clientHeight + 1)
       if (!(base > 0) || fits()) return
+      layout?.classList.add('cams-compact')
       // Пришлось подгонять (места мало) — не крупнее `fittedMaxFontPx`: на тесном экране спокойнее читать.
       const result = fitFontSize(Math.min(base, questionFit.fittedMaxFontPx), questionFit.minFontPx, (size) => {
         el.style.fontSize = `${size}px`
@@ -62,6 +68,7 @@ export function useFitQuestionText(ref: RefObject<HTMLElement | null>, text: str
     return () => {
       observer.disconnect()
       cancelAnimationFrame(frame)
+      layout?.classList.remove('cams-compact')
     }
   }, [ref, text])
 }
