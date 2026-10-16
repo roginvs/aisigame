@@ -355,7 +355,47 @@ it('правка строки ведущей (наш обрыв) доходит 
   master.dispose()
 })
 
-it('пометка реплики игрока (заминка, засчитано, ячейка) доходит до гостя по id и попадает в историю', async () => {
+it('реплика игрока: имя говорящего и «… оцениваю» → вердикт правятся у гостя и в истории', async () => {
+  const { markPlayerLine, pushPlayerLine, setPlayerSpeakerSource } = await import('../debug/trace.ts')
+  const room = new Room()
+  const guestTransport = room.connect('guest')
+  const guest = new JoinerSession({
+    transport: guestTransport, clientId: 'guest', authToken: 'guest-token', name: 'Гость',
+    callbacks: { onSnapshot: vi.fn(), onLobby: vi.fn(), onPackReady: vi.fn(), onError: vi.fn(), onFatalError: vi.fn() },
+    packCache: { get: async () => null, put: async () => {}, delete: async () => {} },
+  })
+  const transport = room.connect('master')
+  const actor = createActor(gameMachine).start()
+  const bytes = new Uint8Array([7, 8, 9])
+  const saved: string[][] = []
+  const show = (message: { text: string; speakerId?: number; mark?: { kind: string; verdict?: string; cell?: string } }) =>
+    `${message.speakerId ?? '-'}|${message.text}|${message.mark?.kind ?? ''}${message.mark?.verdict ? `:${message.mark.verdict}` : ''}${message.mark?.cell ? `:${message.mark.cell}` : ''}`
+  const master = new MasterSession({
+    transport, actor, client: { requestSpeech: vi.fn() } as unknown as GameVoice,
+    masterClientId: 'master', masterName: 'Мастер', pack: demoPack, packBytes: bytes,
+    packHash: await sha256Hex(bytes), authorityToken: 'master-token', onRoster: () => {},
+    onHistory: (ring) => saved.push(messageRingEntries(ring).flatMap(({ message }) => message.kind === 'conversation' && message.role === 'player' ? [show(message)] : [])),
+  })
+  await vi.advanceTimersByTimeAsync(PRESENCE_HEARTBEAT_MS)
+  const lines = () => messageRingEntries(guest.snapshot()!).flatMap(({ message }) => message.kind === 'conversation' && message.role === 'player' ? [show(message)] : [])
+  pushPlayerLine('привет', 'v0') // лобби: имени нет
+  setPlayerSpeakerSource(() => 2)
+  pushPlayerLine('Реки двести', 'v1')
+  pushPlayerLine('Земля', 'v2')
+  await vi.advanceTimersByTimeAsync(0)
+  markPlayerLine('v1', { kind: 'picked', cell: 'Реки 200' })
+  markPlayerLine('v2', { kind: 'counted' })
+  await vi.advanceTimersByTimeAsync(0)
+  expect(lines()).toEqual(['-|привет|', '2|Реки двести|picked:Реки 200', '2|Земля|counted'])
+  markPlayerLine('v2', { kind: 'counted', verdict: 'incorrect' })
+  await vi.advanceTimersByTimeAsync(0)
+  expect(lines().at(-1)).toBe('2|Земля|counted:incorrect')
+  expect(saved.at(-1)).toEqual(lines())
+  setPlayerSpeakerSource(null)
+  master.dispose(); guest.dispose(); actor.stop()
+})
+
+it('пометка реплики игрока (заминка, взята как ответ, ячейка) доходит до гостя по id и попадает в историю', async () => {
   const { markPlayerLine, pushPlayerLine } = await import('../debug/trace.ts')
   const room = new Room()
   const guestTransport = room.connect('guest')

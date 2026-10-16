@@ -6,7 +6,7 @@ async function hear(page: Page, text: string, ms = 900): Promise<void> {
   await page.evaluate(([line, duration]) => (window as unknown as { __aisigame: { hear: (t: string, d: number) => void } }).__aisigame.hear(line as string, duration as number), [text, ms])
 }
 
-test('чат: пометки реплик выбора и ответа (не выбор, выбрано, заминка, засчитано)', async ({ page }) => {
+test('чат: пометки реплик выбора и ответа (не выбор, ✓ ячейка, заминка, вердикт) и подпись — имя игрока', async ({ page }) => {
   await page.goto('/')
   await page.getByLabel('Модель').selectOption('mock')
   await page.getByLabel('Пакет вопросов').selectOption('demo')
@@ -16,7 +16,11 @@ test('чат: пометки реплик выбора и ответа (не в�
   await hear(page, 'ну давайте посмотрим что там', 1500)
   await expect(chat.locator('.chat-mark[data-mark="other"]')).toHaveText('не выбор')
   await hear(page, 'Космос сто')
-  await expect(chat.locator('.chat-mark[data-mark="picked"]')).toContainText('✓ выбрано')
+  await expect(chat.locator('.chat-mark[data-mark="picked"]')).toHaveText(/^✓ \S.* \d+$/)
+  await expect(chat.locator('.chat-mark[data-mark="picked"]')).not.toContainText('выбрано')
+  // Подпись реплики — имя выбирающего, а не «Услышано».
+  await expect(chat.locator('.bubble.from-player', { has: page.locator('.chat-mark[data-mark="picked"]') })).toContainText('Игрок')
+  await expect(chat.locator('.bubble.from-player', { has: page.locator('.chat-mark[data-mark="picked"]') })).not.toContainText('Услышано')
   await chat.screenshot({ path: process.env.CHAT_MARKS_DIR ? `${process.env.CHAT_MARKS_DIR}/chat-marks-choosing.png` : test.info().outputPath('chat-marks-choosing.png') })
 
   await expect(page.getByRole('status').filter({ hasText: 'Жмите кнопку' })).toBeVisible()
@@ -26,7 +30,10 @@ test('чат: пометки реплик выбора и ответа (не в�
   await hear(page, 'щас-щас, отвечу')
   await page.waitForTimeout(800)
   await hear(page, 'Титов')
-  await expect(chat.locator('.chat-mark[data-mark="counted"]')).toHaveText('✓ засчитано')
+  const counted = chat.locator('.chat-mark[data-mark="counted"]')
+  await expect(counted).toHaveAttribute('data-verdict', /.+/)
+  await expect(counted).toHaveText(/^(✓ верно|✗ неверно|≈ близко|\? уточнение|\? неоднозначно|\? неразборчиво)$/)
+  await expect(counted).not.toHaveText('… оцениваю')
   await expect(chat.locator('.chat-mark[data-mark="stall"]')).toHaveCount(2)
   await chat.screenshot({ path: process.env.CHAT_MARKS_DIR ? `${process.env.CHAT_MARKS_DIR}/chat-marks.png` : test.info().outputPath('chat-marks.png') })
 })

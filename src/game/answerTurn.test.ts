@@ -231,15 +231,18 @@ describe('длинная реплика', () => {
 
 describe('пометки реплик в чате', () => {
   const playerMarks = () => getTrace().filter((e) => e.kind === 'chat' && (e.detail as { role?: string }).role === 'player')
-    .map((e) => { const d = e.detail as { text: string; mark?: { kind: string } }; return `${d.text}:${d.mark?.kind ?? ''}` })
+    .map((e) => { const d = e.detail as { text: string; mark?: { kind: string; verdict?: string } }; return `${d.text}:${d.mark?.kind ?? ''}${d.mark?.verdict ? `:${d.mark.verdict}` : ''}` })
+  const speakers = () => getTrace().filter((e) => e.kind === 'chat' && (e.detail as { role?: string }).role === 'player')
+    .map((e) => (e.detail as { speakerId?: number }).speakerId)
 
-  it('ответ: заминка и шум помечены, засчитанная реплика — «засчитано»', async () => {
+  it('ответ: заминка и шум помечены, взятая реплика — с вердиктом оценки, подпись — имя отвечающего', async () => {
     const client = new MockRealtimeClient()
     await boot(client)
     client.hear('хе-хе', 600); await vi.advanceTimersByTimeAsync(800)
     client.hear('пылесосел', 700); await vi.advanceTimersByTimeAsync(800)
     client.hear('эээ', 500); await vi.advanceTimersByTimeAsync(answerSilenceDecideMs + 300)
-    expect(playerMarks().slice(-3)).toEqual(['хе-хе:stall', 'пылесосел:counted', 'эээ:stall'])
+    expect(playerMarks().slice(-3)).toEqual(['хе-хе:stall', 'пылесосел:counted:correct', 'эээ:stall'])
+    expect(speakers().slice(-3)).toEqual([1, 1, 1]) // отвечает игрок 1 — в строке его id, не имя
   })
 
   it('ответ: перебор помечен «перебор»', async () => {
@@ -248,6 +251,7 @@ describe('пометки реплик в чате', () => {
     await boot(client)
     client.hear('Бетельгейзе', 700); await vi.advanceTimersByTimeAsync(800)
     client.hear('пылесосел', 700); await vi.advanceTimersByTimeAsync(answerSilenceDecideMs + 300)
+    // Перебор: вердикта нет — бейдж «✗ перебор», а не «✗ неверно».
     expect(playerMarks().slice(-2)).toEqual(['Бетельгейзе:', 'пылесосел:guessing'])
   })
 })

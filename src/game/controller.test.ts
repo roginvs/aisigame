@@ -1084,7 +1084,7 @@ describe('выбор из нескольких реплик хода', () => {
 
 describe('пометки реплик выбора в чате', () => {
   afterEach(() => { vi.useRealTimers(); vi.unstubAllGlobals() })
-  it('реплика без ячейки — «не выбор», реплика, по которой выбрана ячейка, — «выбрано: …»', async () => {
+  it('реплика без ячейки — «не выбор», реплика, по которой выбрана ячейка, — «✓ Тема 200»', async () => {
     const client = new MockRealtimeClient()
     const { actor, stop } = await boot(client)
     await toChoosing(actor)

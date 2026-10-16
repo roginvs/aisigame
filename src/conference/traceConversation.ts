@@ -8,7 +8,9 @@ export function conversationLineFromTrace(entry: TraceEntry): ConferenceConversa
   const note = entry.detail && typeof entry.detail === 'object' && 'note' in entry.detail && typeof entry.detail.note === 'string'
     ? entry.detail.note : undefined
   const mark = entry.detail && typeof entry.detail === 'object' && 'mark' in entry.detail ? readChatMark(entry.detail.mark) : undefined
-  return text ? { id: chatLineId(entry.id), role: chatRole(entry.detail), text, at: entry.at, ...(note ? { note } : {}), ...(mark ? { mark } : {}) } : null
+  const speakerId = entry.detail && typeof entry.detail === 'object' && 'speakerId' in entry.detail && Number.isInteger(entry.detail.speakerId)
+    ? entry.detail.speakerId as number : undefined
+  return text ? { id: chatLineId(entry.id), role: chatRole(entry.detail), text, at: entry.at, ...(note ? { note } : {}), ...(mark ? { mark } : {}), ...(speakerId !== undefined ? { speakerId } : {}) } : null
 }
 
 function chatRole(detail: unknown): ChatRole {

@@ -789,6 +789,7 @@ export function GameScreen(props: {
           <ConversationChat
             messageRing={conference?.messageRing ?? conference?.remoteSnapshot ?? undefined}
             liveSpeech={conference?.remoteSnapshot ? conference.remoteSnapshot.liveSpeech ?? null : undefined}
+            players={context.players}
             onSendChat={conference?.onSendChat}
             aboveComposer={
               conference?.layout ? (

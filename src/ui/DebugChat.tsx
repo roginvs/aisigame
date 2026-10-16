@@ -1,5 +1,6 @@
 import { useEffect, useLayoutEffect, useRef, useState, useSyncExternalStore, type ReactNode } from 'react'
-import { chatMarkLabel, getLivePlayerLine, getTrace, readChatMark, subscribeLivePlayerLine, subscribeTrace, type ChatRole, type TraceEntry } from '../debug/trace.ts'
+import { roleLabel, speakerName } from './chatRoleLabel.ts'
+import { chatMarkLabel, chatMarkTone, getLivePlayerLine, getTrace, readChatMark, subscribeLivePlayerLine, subscribeTrace, type ChatMark, type ChatRole, type TraceEntry } from '../debug/trace.ts'
 import type { ConferenceMessageRing } from '../conference/messages.ts'
 import { chatPinKey, isAtTail, pinColumn } from './chatScroll.ts'
 import { formatChatTime } from './chatTime.ts'
@@ -13,6 +14,8 @@ export function ConversationChat(props?: {
   aboveComposer?: ReactNode
   /** Joiner: черновик речи из снимка мастера. undefined — берём локальный. */
   liveSpeech?: { text: string; at: string } | null
+  /** Игроки полученного снимка: подпись реплики игрока — имя по speakerId. */
+  players?: readonly { id: number; name: string }[]
 }) {
   const entries = useSyncExternalStore(subscribeTrace, getTrace, getTrace)
   const localLive = useSyncExternalStore(subscribeLivePlayerLine, getLivePlayerLine, getLivePlayerLine)
@@ -25,6 +28,7 @@ export function ConversationChat(props?: {
       at: entry.at,
       ...(chatNote(entry.detail) ? { note: chatNote(entry.detail) } : {}),
       ...(chatMark(entry.detail) ? { mark: chatMark(entry.detail) } : {}),
+      ...(chatSpeakerId(entry.detail) !== undefined ? { speakerId: chatSpeakerId(entry.detail) } : {}),
     }))
   const stream = props?.messageRing ? conversationStreamFromRing(props.messageRing) : mergeConversationStream(voiceLines, [])
   const [draft, setDraft] = useState('')
@@ -49,16 +53,18 @@ export function ConversationChat(props?: {
             ) : (
               <Bubble
                 key={item.key}
+                players={props?.players}
                 entry={{
                   id: 0,
                   at: item.at,
                   kind: 'chat',
-                  title: roleLabel(item.role),
+                  title: roleLabel(item.role, speakerName(props?.players, item.speakerId)),
                   detail: {
                     role: item.role,
                     text: item.text,
                     ...(item.note ? { note: item.note } : {}),
                     ...(item.mark ? { mark: item.mark } : {}),
+                    ...(item.speakerId !== undefined ? { speakerId: item.speakerId } : {}),
                   },
                 }}
               />
@@ -166,16 +172,16 @@ function usePinColumn(signature: string) {
   return [scroller, log] as const
 }
 
-function Bubble(props: { entry: TraceEntry }) {
+function Bubble(props: { entry: TraceEntry; players?: readonly { id: number; name: string }[] }) {
   const role = chatRole(props.entry.detail)
   const text = chatText(props.entry.detail) || props.entry.title
   const note = role === 'host' ? chatNote(props.entry.detail) : ''
   const mark = role === 'player' ? chatMark(props.entry.detail) : undefined
   return (
     <p className={`bubble ${bubbleClass(role)}`}>
-      <BubbleHead label={roleLabel(role)} at={props.entry.at} />
+      <BubbleHead label={roleLabel(role, role === 'player' ? speakerName(props.players, chatSpeakerId(props.entry.detail)) : '')} at={props.entry.at} />
       {text}
-      {mark ? <span className={`chat-mark chat-mark-${mark.kind}`} data-mark={mark.kind}>{chatMarkLabel(mark)}</span> : null}
+      {mark ? <ChatMarkBadge mark={mark} /> : null}
       {note ? <small className="bubble-note">{note}</small> : null}
     </p>
   )
@@ -229,10 +235,21 @@ function chatMark(detail: unknown) {
   return detail && typeof detail === 'object' && 'mark' in detail ? readChatMark(detail.mark) : undefined
 }
 
-function roleLabel(role: ChatRole): string {
-  if (role === 'player') return 'Услышано'
-  if (role === 'judge') return 'Оценка'
-  if (role === 'error') return 'Ошибка'
-  if (role === 'system') return 'Игра'
-  return 'Ведущая'
+function ChatMarkBadge(props: { mark: ChatMark }) {
+  const tone = chatMarkTone(props.mark)
+  return (
+    <span
+      className={`chat-mark chat-mark-${props.mark.kind}${tone ? ` chat-mark-${tone}` : ''}`}
+      data-mark={props.mark.kind}
+      {...(props.mark.verdict ? { 'data-verdict': props.mark.verdict } : {})}
+    >
+      {chatMarkLabel(props.mark)}
+    </span>
+  )
 }
+
+function chatSpeakerId(detail: unknown): number | undefined {
+  return detail && typeof detail === 'object' && 'speakerId' in detail && Number.isInteger(detail.speakerId) ? detail.speakerId as number : undefined
+}
+
+

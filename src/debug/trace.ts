@@ -1,5 +1,6 @@
 import { stageWordsIn } from './stageWords.ts'
 import { buildCommit, pageOrigin } from '../buildInfo.ts'
+import type { JudgmentStatus } from '../game/types.ts'
 
 export type TraceKind = 'in' | 'out' | 'state' | 'chat' | 'note'
 
@@ -116,10 +117,13 @@ export function chatLineId(entryId: number): string {
 
 /**
  * Пометка реплики игрока в чате: как модель её поняла. Структурное поле, текст не разбирается.
- * Ответ: stall (заминка), noise (шум), counted (засчитано как ответ), guessing (перебор, не засчитано).
+ * Ответ: stall (заминка), noise (шум), counted (взята как ответ; verdict — вердикт оценки, без него «… оцениваю»),
+ * guessing (перебор, не засчитано).
  * Выбор: noise, other (не выбор), cell (дала ячейку), picked (по ней выбрана ячейка); cell — подпись ячейки.
  */
-export type ChatMark = { kind: 'stall' | 'noise' | 'counted' | 'guessing' | 'other' | 'cell' | 'picked'; cell?: string }
+export type ChatMark = { kind: 'stall' | 'noise' | 'counted' | 'guessing' | 'other' | 'cell' | 'picked'; cell?: string; verdict?: JudgmentStatus }
+
+const verdicts: readonly JudgmentStatus[] = ['correct', 'incorrect', 'near_miss', 'needs_clarification', 'ambiguous', 'unintelligible']
 
 export function readChatMark(value: unknown): ChatMark | undefined {
   if (!value || typeof value !== 'object') return undefined
@@ -127,7 +131,22 @@ export function readChatMark(value: unknown): ChatMark | undefined {
   const cell = (value as { cell?: unknown }).cell
   if (kind !== 'stall' && kind !== 'noise' && kind !== 'counted' && kind !== 'guessing' && kind !== 'other' && kind !== 'cell' && kind !== 'picked') return undefined
   if (cell !== undefined && (typeof cell !== 'string' || cell.length > 120)) return undefined
-  return cell ? { kind, cell } : { kind }
+  const verdict = (value as { verdict?: unknown }).verdict
+  if (verdict !== undefined && (kind !== 'counted' || !verdicts.includes(verdict as JudgmentStatus))) return undefined
+  return { kind, ...(cell ? { cell } : {}), ...(verdict ? { verdict: verdict as JudgmentStatus } : {}) }
+}
+
+/** Цвет бейджа: good — зелёный, bad — красный, close — жёлтый, unsure — серый; null — обычный. */
+export type ChatMarkTone = 'good' | 'bad' | 'close' | 'unsure' | 'pending'
+export function chatMarkTone(mark: ChatMark): ChatMarkTone | null {
+  if (mark.kind !== 'counted') return null
+  switch (mark.verdict) {
+    case undefined: return 'pending'
+    case 'correct': return 'good'
+    case 'incorrect': return 'bad'
+    case 'near_miss': return 'close'
+    default: return 'unsure'
+  }
 }
 
 /** Короткая подпись пометки для бейджа. */
@@ -135,12 +154,30 @@ export function chatMarkLabel(mark: ChatMark): string {
   switch (mark.kind) {
     case 'stall': return 'заминка'
     case 'noise': return 'шум'
-    case 'counted': return '✓ засчитано'
+    case 'counted': return countedLabel(mark.verdict)
     case 'guessing': return '✗ перебор'
     case 'other': return 'не выбор'
     case 'cell': return mark.cell ? `→ ${mark.cell}` : 'ячейка'
-    case 'picked': return mark.cell ? `✓ выбрано: ${mark.cell}` : '✓ выбрано'
+    case 'picked': return mark.cell ? `✓ ${mark.cell}` : '✓'
   }
+}
+
+function countedLabel(verdict: JudgmentStatus | undefined): string {
+  switch (verdict) {
+    case undefined: return '… оцениваю'
+    case 'correct': return '✓ верно'
+    case 'incorrect': return '✗ неверно'
+    case 'near_miss': return '≈ близко'
+    case 'needs_clarification': return '? уточнение'
+    case 'ambiguous': return '? неоднозначно'
+    case 'unintelligible': return '? неразборчиво'
+  }
+}
+
+/** Кто сейчас говорит (id игрока для подписи реплики); ставит контроллер мастера. null — «Услышано». */
+let speakerSource: () => number | null = () => null
+export function setPlayerSpeakerSource(source: (() => number | null) | null): void {
+  speakerSource = source ?? (() => null)
 }
 
 export type ChatLineEdit = { id: string; text: string | null; mark?: ChatMark }
@@ -173,7 +210,8 @@ export function pushPlayerLine(text: string, itemId?: string | null): void {
   if (!clean) return
   const mark = itemId ? pendingMarks.get(itemId) : undefined
   if (itemId) pendingMarks.delete(itemId)
-  pushTrace('chat', 'Игрок', { role: 'player' satisfies ChatRole, text: clean, ...(itemId ? { itemId } : {}), ...(mark ? { mark } : {}) })
+  const speakerId = speakerSource() ?? undefined
+  pushTrace('chat', 'Игрок', { role: 'player' satisfies ChatRole, text: clean, ...(speakerId !== undefined ? { speakerId } : {}), ...(itemId ? { itemId } : {}), ...(mark ? { mark } : {}) })
 }
 
 /** Пометки, пришедшие раньше самой строки (подпись публикуется после оценки). */

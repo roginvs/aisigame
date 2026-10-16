@@ -11,7 +11,8 @@ import { matchSpokenPlayer, spokenPlayers } from './nameMatch.ts'
 import type { JudgmentInputMode, JudgmentSource, JudgeRequestContext } from '../realtime/judgmentRequest.ts'
 import { JudgmentClock } from './judgmentClock.ts'
 import { gameConfig } from '../config.ts'
-import { markPlayerLine, noteLink, pushJudgeLine, pushPlayerLine, pushSystemLine, pushTrace } from '../debug/trace.ts'
+import { speakingPlayerId } from './speaker.ts'
+import { markPlayerLine, setPlayerSpeakerSource, noteLink, pushJudgeLine, pushPlayerLine, pushSystemLine, pushTrace } from '../debug/trace.ts'
 import type { GameVoice, LinkStatus, ToolCall } from '../realtime/client.ts'
 import { verbatimSpeech } from '../realtime/speechMatch.ts'
 import { echoesTranscriptionPrompt } from './promptEcho.ts'
@@ -105,6 +106,10 @@ export function attachController(options: {
     })
   }
   let previousPath = statePath(actor.getSnapshot().value)
+  setPlayerSpeakerSource(() => {
+    const snapshot = actor.getSnapshot()
+    return speakingPlayerId(statePath(snapshot.value), snapshot.context)
+  })
   let connectToken = 0
   let speechTurn = 0
   let toolTurn = 0
@@ -157,7 +162,7 @@ export function attachController(options: {
   let answerPausedLeft: number | null = null
   let answerLimitHit = false
   let answerSpeechEndAt = 0
-  let answerDecision: { judgment: AnswerJudgment; guessing: boolean } | { failed: true } | null = null
+  let answerDecision: { judgment: AnswerJudgment; guessing: boolean; itemId: string | null } | { failed: true } | null = null
   /** Решение по попытке — перебор вариантов: ведущая своими словами подмечает это в вердикте. */
   let decisionGuessing: { attemptId: number; questionId: string } | null = null
   let shadowRun: { context: GameContext; abort: AbortController; clock: JudgmentClock; text?: ReturnType<typeof settleJudgment>; audio?: ReturnType<typeof settleJudgment> } | null = null
@@ -1875,8 +1880,9 @@ export function attachController(options: {
     window.clearTimeout(answerModelTimer)
     if (chosen?.judgment) {
       const judgment = chosen.guessing ? { ...chosen.judgment, status: 'incorrect' as const } : chosen.judgment
-      answerDecision = { judgment, guessing: Boolean(chosen.guessing) }
+      answerDecision = { judgment, guessing: Boolean(chosen.guessing), itemId: chosen.itemId }
       decisionGuessing = chosen.guessing ? { attemptId: judgment.attemptId, questionId: judgment.questionId } : null
+      // Взятая реплика: «… оцениваю», вердикт — когда решение применится (applyAnswerDecision).
       markPlayerLine(chosen.itemId, { kind: chosen.guessing ? 'guessing' : 'counted' })
       pushTrace('note', `ответ: берём реплику #${chosen.order} из ${answerTurn.length}${chosen.guessing ? ' — перебор вариантов, не засчитано' : ''}: ${answerTurnLog()}`)
       actor.send({ type: 'ANSWER_SETTLED' })
@@ -1907,6 +1913,7 @@ export function attachController(options: {
       actor.send({ type: 'ANSWER_JUDGE_FAILED' })
       return
     }
+    if (!decision.guessing) markPlayerLine(decision.itemId, { kind: 'counted', verdict: decision.judgment.status })
     pushJudgeLine(judgmentChatText(decision.judgment.status, decision.judgment.heard))
     actor.send({ type: 'ANSWER_JUDGED', judgment: decision.judgment })
   }
@@ -1931,6 +1938,7 @@ export function attachController(options: {
   })
 
   return () => {
+    setPlayerSpeakerSource(null)
     earUnsub()
     clearLobbyBargeIn()
     clearHostEar()

@@ -2284,7 +2284,7 @@ button.buzzer.buzz-nudge {
   }
 }
 
-/* Пометка реплики игрока: как её поняла модель (заминка/шум/засчитано/ячейка). */
+/* Пометка реплики игрока: как её поняла модель (заминка/шум/вердикт ответа/ячейка). */
 .chat-mark {
   display: inline-block;
   margin-left: 0.4em;
@@ -2298,7 +2298,11 @@ button.buzzer.buzz-nudge {
   color: inherit;
   opacity: 0.85;
 }
-.chat-mark-counted,
-.chat-mark-picked { background: rgba(46, 160, 67, 0.25); opacity: 1; font-weight: 600; }
+.chat-mark-picked,
+.chat-mark-good { background: rgba(46, 160, 67, 0.25); opacity: 1; font-weight: 600; }
+.chat-mark-bad { background: rgba(218, 54, 51, 0.25); opacity: 1; font-weight: 600; }
+.chat-mark-close { background: rgba(212, 167, 44, 0.32); opacity: 1; font-weight: 600; }
+.chat-mark-unsure { background: rgba(127, 127, 127, 0.28); opacity: 1; font-weight: 600; }
+.chat-mark-pending { background: rgba(127, 127, 127, 0.14); font-style: italic; }
 .chat-mark-guessing { background: rgba(218, 54, 51, 0.25); opacity: 1; font-weight: 600; }
 .chat-mark-cell { background: rgba(56, 132, 255, 0.18); }

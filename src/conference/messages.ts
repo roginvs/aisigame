@@ -16,6 +16,8 @@ export type ConferenceConversationLine = {
   note?: string
   /** Реплика игрока: как модель её поняла (заминка, шум, засчитано, ячейка…). Старые клиенты игнорируют. */
   mark?: ChatMark
+  /** Реплика игрока: id говорившего игрока (ставит мастер); имя каждый экран берёт из players снимка. Нет — «Услышано». */
+  speakerId?: number
   /** ISO-время для общего хронологического потока с текстовым чатом. */
   at?: string
 }
@@ -627,7 +629,8 @@ function validConversationLine(value: unknown): boolean {
     (value.note === undefined || (typeof value.note === 'string' && value.note.length <= 20_000)) &&
     (value.at === undefined || shortString(value.at, 40)) &&
     (value.id === undefined || shortString(value.id, 80)) &&
-    (value.mark === undefined || readChatMark(value.mark) !== undefined)
+    (value.mark === undefined || readChatMark(value.mark) !== undefined) &&
+    (value.speakerId === undefined || (value.role === 'player' && integer(value.speakerId, 1)))
 }
 
 function validChatLine(value: unknown): boolean {
