@@ -3,6 +3,28 @@ import type { HostEar } from '../game/hostEar.ts'
 
 export type HostMood = 'listen' | 'speak' | 'buzz' | 'think' | 'hear' | 'process'
 
+/** Фазы, где ход ждёт речь игрока: при открытом мике карточка «Можно говорить». Кот и аукцион — как выбор. */
+export const listeningPaths: ReadonlySet<string> = new Set([
+  'choosing.listening',
+  'choosing.clarifying',
+  'answering.waiting',
+  'answering.hearing',
+  'answering.settling',
+  'finalBets.hearing',
+  'cat.picking',
+  'cat.clarifying',
+  'cat.staking.listening',
+  'cat.staking.clarifying',
+  'auction.listening',
+  'auction.clarifying',
+])
+
+/** Ухо в снимке для гостей: «listening» (мик открыт, речи нет) выводим у мастера тем же hostMood. */
+export function publicHostEar(phase: string, link: Pick<LinkStatus, 'host' | 'mic'>, ear: HostEar, gameStarted: boolean): HostEar {
+  if (ear !== 'idle' || !gameStarted) return ear
+  return hostMood(phase, link, 'idle') === 'listen' ? 'listening' : 'idle'
+}
+
 const speechPaths = new Set([
   'welcoming',
   'reading',
@@ -30,15 +52,7 @@ export function hostMood(path: string, link: Pick<LinkStatus, 'host' | 'mic'>, e
 }
 
 function baseMood(path: string, link: Pick<LinkStatus, 'host' | 'mic'>): HostMood {
-  if (
-    link.mic === 'live' &&
-    (path === 'choosing.listening' ||
-      path === 'choosing.clarifying' ||
-      path === 'answering.waiting' ||
-      path === 'answering.hearing' ||
-      path === 'answering.settling' ||
-      path === 'finalBets.hearing')
-  ) {
+  if (link.mic === 'live' && listeningPaths.has(path)) {
     return 'listen'
   }
   if (path === 'announcing.holding') return 'think'

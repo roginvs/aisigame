@@ -1,7 +1,7 @@
 import type { PartialUpdateMessage, SnapshotMessage } from './messages.ts'
 import { createDiagSummary, diag } from '../debug/diag.ts'
 import { getHostEar, subscribeHostEar, type HostEar } from '../game/hostEar.ts'
-import { hostMood } from '../ui/hostMood.ts'
+import { publicHostEar } from '../ui/hostMood.ts'
 import type { LinkStatus } from '../realtime/client.ts'
 import { appealRequestError } from '../game/appeals.ts'
 import type { Actor, SnapshotFrom } from 'xstate'
@@ -646,10 +646,8 @@ export class MasterSession {
 
   /** Для гостей: «слушаю» (мик открыт, речи нет) выводим у мастера — у гостя нет его микрофона. */
   private publicEar(phase: string): HostEar {
-    const ear = getHostEar()
-    if (ear !== 'idle' || !this.gameStarted) return ear
     const link = getLinkStatus()
-    return hostMood(phase, { host: link.host as LinkStatus['host'], mic: link.mic as LinkStatus['mic'] }, 'idle') === 'listen' ? 'listening' : 'idle'
+    return publicHostEar(phase, { host: link.host as LinkStatus['host'], mic: link.mic as LinkStatus['mic'] }, getHostEar(), this.gameStarted)
   }
 
   /** Ведущей: кто в комнате, но ещё не игрок партии (качает пакет). */

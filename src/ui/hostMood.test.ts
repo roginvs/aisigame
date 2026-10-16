@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { hostCaption, hostCopy, hostMood } from './hostMood.ts'
+import { hostCaption, hostCopy, hostMood, listeningPaths, publicHostEar } from './hostMood.ts'
 
 const quiet = { host: 'idle' as const, mic: 'muted' as const }
 const open = { host: 'idle' as const, mic: 'live' as const }
@@ -99,5 +99,33 @@ describe('hostCaption', () => {
       'Слышу вас, засчитаю только после кнопки',
       'Время вышло',
     ])
+  })
+})
+
+describe('cat/auction listening', () => {
+  const catAuction = ['cat.picking', 'cat.clarifying', 'cat.staking.listening', 'cat.staking.clarifying', 'auction.listening', 'auction.clarifying']
+  it('карточка «Можно говорить» и ухо «listening» у гостей — как на выборе', () => {
+    for (const path of catAuction) {
+      expect(listeningPaths.has(path)).toBe(true)
+      expect(hostMood(path, open, 'idle')).toBe('listen')
+      expect(hostMood(path, open, 'listening')).toBe('listen')
+      expect(hostMood(path, quiet, 'idle')).toBe('think')
+      expect(hostMood(path, talking, 'idle')).toBe('speak')
+      expect(publicHostEar(path, open, 'idle', true)).toBe('listening')
+      expect(publicHostEar(path, quiet, 'idle', true)).toBe('idle')
+    }
+  })
+  it('паритет: снимок гостя даёт то же настроение, что у мастера', () => {
+    for (const path of [...listeningPaths, 'cat.resolving', 'auction.asking', 'auction.resolving', 'judging', 'buzzing.open']) {
+      for (const link of [open, quiet, talking]) {
+        expect(hostMood(path, link, publicHostEar(path, link, 'idle', true))).toBe(hostMood(path, link, 'idle'))
+      }
+    }
+  })
+  it('неслушающие фазы кота/аукциона не открывают ухо', () => {
+    for (const path of ['cat.announcing', 'cat.resolving', 'cat.staking.asking', 'auction.announcing', 'auction.asking', 'auction.resolving']) {
+      expect(publicHostEar(path, open, 'idle', true)).toBe('idle')
+    }
+    expect(publicHostEar('cat.picking', open, 'idle', false)).toBe('idle')
   })
 })
