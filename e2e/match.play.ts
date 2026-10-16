@@ -1,4 +1,8 @@
-import { expect, test, type Page } from '@playwright/test'
+import { expect as baseExpect, test, type Page } from '@playwright/test'
+
+// Вердикт ответа — после answerSilenceDecideMs (2,5 с) тишины после реплики (ответ из нескольких реплик),
+// плюс реплика 1,4 с и оценка: 5 с по умолчанию не хватает.
+const expect = baseExpect.configure({ timeout: 15_000 })
 
 test.describe.configure({ mode: 'parallel' })
 
@@ -125,6 +129,9 @@ test('созвучие просит повторить', async ({ page }) => {
   await startDemo(page)
   await pick(page, 'Космос, 100')
   await buzz(page, 'Игрок 1')
+  // Просьба повторить в заглушке звучит ~200 мс, и статус сразу сменяется новым «Отвечает Игрок 1»:
+  // растягиваем речь ведущей, чтобы проверить сам статус, а не гонку опроса.
+  await page.evaluate(() => (window as unknown as { __aisigame: { setSpeechMs: (ms: number) => void } }).__aisigame.setSpeechMs(4000))
   await hear(page, 'Читов')
   await expect(page.getByRole('status').filter({ hasText: 'Повторите, пожалуйста' })).toBeVisible()
   await expect(page.getByRole('group', { name: 'Игрок 1: 0' })).toBeVisible()
