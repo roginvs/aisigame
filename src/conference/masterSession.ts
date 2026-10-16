@@ -31,13 +31,14 @@ import { paceAfterAck, type TransferPace } from './packProgress.ts'
 import { ConferenceRoster } from './roster.ts'
 import type { ConferenceTransport } from './transport.ts'
 import { PING_INTERVAL_MS, PRESENCE_HEARTBEAT_MS, PRESENCE_STALE_MS } from './presence.ts'
-import { appendRemoteDebug, clearRemoteDebug, getLinkStatus, getLivePlayerLine, getTrace, subscribeChatEdits, subscribeLinkStatus, subscribeLivePlayerLine, subscribeTrace } from '../debug/trace.ts'
+import { appendRemoteDebug, clearRemoteDebug, getLinkStatus, getLivePlayerLine, getTrace, pushSystemLine, pushTrace, subscribeChatEdits, subscribeLinkStatus, subscribeLivePlayerLine, subscribeTrace } from '../debug/trace.ts'
 import { messageRingEntries } from './messageRing.ts'
 import { commentaryContext } from '../game/commentary.ts'
 import { emptyMessageRing } from './messageRing.ts'
 import { ConferenceStatePublisher } from './stateProtocol.ts'
 import { LoopbackStateReceiver } from './receivedState.ts'
 import { conversationLineFromTrace } from './traceConversation.ts'
+import { conferenceSinkCreatedText } from './conferenceAudio.ts'
 import { setPendingGuests } from '../game/commentary.ts'
 import { throttleLatest } from '../realtime/liveSpeech.ts'
 
@@ -540,6 +541,13 @@ export class MasterSession {
       const name = this.roster.get(message.clientId)?.name
       if (!clean || !name) return
       this.sendChat(name, clean)
+      return
+    }
+    if (message.type === 'audioSinkNote') {
+      const name = this.roster.get(message.clientId)?.name
+      if (!name) return
+      pushTrace('note', 'У игрока кончились заготовленные <audio>', { clientId: message.clientId, owner: message.owner })
+      pushSystemLine(conferenceSinkCreatedText(name, message.owner))
       return
     }
     if (message.type === 'debugLog') {

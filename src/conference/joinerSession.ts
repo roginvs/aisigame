@@ -211,6 +211,10 @@ export class JoinerSession {
     this.transport.send({ type: 'chat', clientId: this.clientId, authToken: this.authToken, text: clean })
   }
 
+  sendAudioSinkNote(owner: string): void {
+    this.transport.send({ type: 'audioSinkNote', clientId: this.clientId, authToken: this.authToken, owner: owner.slice(0, 100) })
+  }
+
   dispose(): void {
     this.disposed = true
     for (const pending of this.appealPending.values()) { window.clearTimeout(pending.timer); pending.finish({ accepted: false, reason: 'Нет связи с мастером' }) }

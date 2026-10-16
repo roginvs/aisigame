@@ -77,6 +77,7 @@ import { JoinConfirmScreen } from './ui/JoinConfirmScreen.tsx'
 import { StartScreen } from './ui/StartScreen.tsx'
 import type { GameVoice } from './realtime/client.ts'
 import { mutedAnswerReminderMs, mutedMicStableMs } from './options.ts'
+import { conferenceSinkCreatedText, subscribeConferenceSinkCreated } from './conference/conferenceAudio.ts'
 
 const initialLink: LinkStatus = { connection: 'idle', mic: 'idle', host: 'idle' }
 const pageParams = new URLSearchParams(window.location.search)
@@ -149,6 +150,13 @@ export default function App() {
   /** Последний разосланный мастером снимок: экран мастера рисуется из него, как у гостей. */
   const [masterSnapshot, setMasterSnapshot] = useState<ConferenceSnapshot | null>(null)
   const masterSessionRef = useRef<MasterSession | null>(null)
+  // Кончились заготовленные <audio>: мастер пишет строку в чат сам, игрок шлёт мастеру — у всех одна строка.
+  useEffect(() => subscribeConferenceSinkCreated(({ owner }) => {
+    const joiner = joinerSessionRef.current
+    if (joiner) joiner.sendAudioSinkNote(owner)
+    else if (masterSessionRef.current) pushSystemLine(conferenceSinkCreatedText(conferenceName.trim() || 'Мастер', owner))
+  }), [conferenceName])
+
   useEffect(() => {
     hearTurnOnlyRef.current = hearTurnOnly
     masterSessionRef.current?.setHearTurnOnly(hearTurnOnly)

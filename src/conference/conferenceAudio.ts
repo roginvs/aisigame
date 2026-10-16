@@ -1,5 +1,6 @@
 import { diag } from '../debug/diag.ts'
 import { pushTrace } from '../debug/trace.ts'
+import { conferenceAudioPoolSize } from '../options.ts'
 
 type AudioSessionHost = {
   audioSession?: { type: string }
@@ -15,14 +16,15 @@ export type ConferenceAudioSink = {
 }
 
 export type ConferenceAudioOutput = {
-  attach: (participantId: string, stream: MediaStream) => void
+  /** `key` — ключ дорожки; `owner` — имя владельца для служебной строки (не ключ). */
+  attach: (participantId: string, stream: MediaStream, owner?: string) => void
   remove: (participantId: string) => void
   /** Повторно включить уже привязанные дорожки после жеста или смены аудиосессии. */
   resume: () => void
   dispose: () => void
 }
 
-const poolLimit = 8
+const poolLimit = conferenceAudioPoolSize
 /**
  * Короткий тихий WAV. Его `play()` в том же клике, что вход в комнату,
  * разрешает этому элементу позже играть WebRTC. Пустой элемент жест не запоминает.
@@ -83,7 +85,8 @@ export function conferenceAudioStream(track: {
  * поток, который никто не читает элементом, а iOS глушит Web Audio беззвучным режимом.
  * Элементы заранее играет клик входа, иначе поздний `play()` снова блокируется.
  */
-export function createConferenceAudioOutput(takeSink: () => ConferenceAudioSink = takeDomSink): ConferenceAudioOutput {
+export type SinkRequest = { key: string; owner: string }
+export function createConferenceAudioOutput(takeSink: (request: SinkRequest) => ConferenceAudioSink = takeDomSink): ConferenceAudioOutput {
   const sinks = new Map<string, ConferenceAudioSink>()
 
   function drop(participantId: string): void {
@@ -97,11 +100,11 @@ export function createConferenceAudioOutput(takeSink: () => ConferenceAudioSink 
   }
 
   return {
-    attach(participantId, stream) {
+    attach(participantId, stream, owner = '') {
       if (stream.getAudioTracks().length === 0) return
       let sink = sinks.get(participantId)
       if (!sink) {
-        sink = takeSink()
+        sink = takeSink({ key: participantId, owner })
         sinks.set(participantId, sink)
       }
       sink.setStream(stream)
@@ -135,10 +138,41 @@ export function refreshConferenceSinks(): void {
   for (const sink of active) sink.refresh?.()
 }
 
-function takeDomSink(): ConferenceAudioSink {
-  const sink = pool.pop() ?? createDomSink()
+export type SinkCreatedEvent = { key: string; owner: string; poolSize: number; active: number }
+const createdListeners = new Set<(event: SinkCreatedEvent) => void>()
+/** Заготовки клика входа кончились и `<audio>` создан на лету (его поздний `play()` телефон может не пустить). */
+export function subscribeConferenceSinkCreated(listener: (event: SinkCreatedEvent) => void): () => void {
+  createdListeners.add(listener)
+  return () => createdListeners.delete(listener)
+}
+
+/** Экспорт для тестов: пул как в клике входа, без DOM. */
+export function takeConferenceSink(request: SinkRequest, create: () => ConferenceAudioSink = createDomSink): ConferenceAudioSink {
+  const pooled = pool.pop()
+  const sink = pooled ?? create()
   active.add(sink)
+  if (!pooled) {
+    const event = { key: request.key, owner: request.owner, poolSize: poolLimit, active: active.size }
+    pushTrace('note', 'Заготовленные <audio> кончились, создан новый', event)
+    for (const listener of createdListeners) listener(event)
+  }
   return sink
+}
+
+/** Только для тестов: положить заготовки в пул без DOM. */
+export function fillConferencePoolForTests(sinks: ConferenceAudioSink[]): void {
+  pool.length = 0
+  active.clear()
+  pool.push(...sinks)
+}
+
+function takeDomSink(request: SinkRequest): ConferenceAudioSink {
+  return takeConferenceSink(request)
+}
+
+/** Фиксированная служебная строка чата (не речь ведущей). */
+export function conferenceSinkCreatedText(device: string, owner: string): string {
+  return `техническое: у ${device || 'участника'} закончились заготовленные аудиоэлементы, создан новый (дорожка от ${owner || 'неизвестного участника'})`
 }
 
 function createDomSink(): ConferenceAudioSink & { prime: () => void } {

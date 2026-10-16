@@ -113,4 +113,10 @@ describe('ping/pong', () => {
     expect(isConferenceMessage({ type: 'pong', clientId: 'c', authToken: 'a', seq: 1, sentAt: 1000 })).toBe(true)
     expect(isConferenceMessage({ type: 'pong', clientId: 'c', authToken: 'a', seq: 1, sentAt: 'x' })).toBe(false)
   })
+
+  it('audioSinkNote: только с секретом и коротким именем владельца', () => {
+    expect(isConferenceMessage({ type: 'audioSinkNote', clientId: 'c', authToken: 's', owner: 'Вася' })).toBe(true)
+    expect(isConferenceMessage({ type: 'audioSinkNote', clientId: 'c', owner: 'Вася' })).toBe(false)
+    expect(isConferenceMessage({ type: 'audioSinkNote', clientId: 'c', authToken: 's', owner: 'x'.repeat(101) })).toBe(false)
+  })
 })

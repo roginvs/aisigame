@@ -1,8 +1,13 @@
 import { describe, expect, it, vi } from 'vitest'
+import { conferenceAudioPoolSize } from '../options.ts'
 import {
   conferenceAudioStream,
   createConferenceAudioOutput,
   preferConferenceSpeaker,
+  conferenceSinkCreatedText,
+  fillConferencePoolForTests,
+  subscribeConferenceSinkCreated,
+  takeConferenceSink,
   type ConferenceAudioSink,
 } from './conferenceAudio.ts'
 
@@ -105,5 +110,35 @@ describe('preferConferenceSpeaker', () => {
     preferConferenceSpeaker(host)
     expect(host.audioSession.type).toBe('playback')
     expect(() => preferConferenceSpeaker(undefined)).not.toThrow()
+  })
+})
+
+describe('пул заготовленных <audio>', () => {
+  it('из пула — тихо; на лету — одно событие на каждый новый элемент', () => {
+    expect(conferenceAudioPoolSize).toBe(12)
+    const pooled = [sink(), sink()]
+    fillConferencePoolForTests([...pooled])
+    const events: Array<{ key: string; owner: string }> = []
+    const unsubscribe = subscribeConferenceSinkCreated((event) => events.push(event))
+    const created = sink()
+    expect(takeConferenceSink({ key: 't1', owner: 'Маша' }, () => created)).toBe(pooled[1])
+    expect(takeConferenceSink({ key: 't2', owner: 'Петя' }, () => created)).toBe(pooled[0])
+    expect(events).toEqual([])
+    expect(takeConferenceSink({ key: 't3', owner: 'Вася' }, () => created)).toBe(created)
+    takeConferenceSink({ key: 't4', owner: 'Ведущая' }, () => sink())
+    expect(events.map((event) => [event.key, event.owner])).toEqual([['t3', 'Вася'], ['t4', 'Ведущая']])
+    unsubscribe()
+    fillConferencePoolForTests([])
+  })
+
+  it('attach передаёт ключ дорожки и имя владельца', () => {
+    const take = vi.fn(() => sink())
+    const output = createConferenceAudioOutput(take)
+    output.attach('t7', { getAudioTracks: () => [{}] } as unknown as MediaStream, 'Вася')
+    expect(take).toHaveBeenCalledWith({ key: 't7', owner: 'Вася' })
+  })
+
+  it('строка чата фиксированная', () => {
+    expect(conferenceSinkCreatedText('Маша', 'Вася')).toBe('техническое: у Маша закончились заготовленные аудиоэлементы, создан новый (дорожка от Вася)')
   })
 })

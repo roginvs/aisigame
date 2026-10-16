@@ -636,7 +636,7 @@ export async function connectJitsiConference(input: {
     }
     // <audio> по ключу дорожки: смена владельца не рвёт воспроизведение.
     if (isHostRemote(owner)) diag('ведущая-звук', 'дорожка «Ведущей» из комнаты → <audio>', { track: entry.key, participantId: owner })
-    conferenceAudio.attach(entry.key, stream)
+    conferenceAudio.attach(entry.key, stream, remoteNames.get(owner) ?? '')
     syncModelMixer()
   }
 

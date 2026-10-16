@@ -276,6 +276,15 @@ export type ChatMessage = {
   text: string
 }
 
+/** Игрок → мастер: на устройстве кончились заготовленные `<audio>`. Мастер пишет строку в чат всем. */
+export type AudioSinkNoteMessage = {
+  type: 'audioSinkNote'
+  clientId: string
+  authToken: string
+  /** Имя владельца дорожки, как его видит устройство игрока. */
+  owner: string
+}
+
 export type ConferenceDebugEntry = {
   at: string
   kind: 'in' | 'out' | 'state' | 'chat' | 'note'
@@ -318,6 +327,7 @@ export type ConferenceMessage =
   | PickMessage
   | SpecialPickMessage
   | ChatMessage
+  | AudioSinkNoteMessage
   | DebugLogMessage
   | SnapshotMessage
   | PartialUpdateMessage
@@ -388,6 +398,8 @@ export function isConferenceMessage(value: unknown): value is ConferenceMessage 
         (value.target === 'auction' && (value.choice === 'pass' || value.choice === 'allIn' || integer(value.choice, 1))))
     case 'chat':
       return client() && typeof value.text === 'string' && value.text.length <= 4_000
+    case 'audioSinkNote':
+      return client() && typeof value.owner === 'string' && value.owner.length <= 100
     case 'debugLog':
       return (
         client() &&

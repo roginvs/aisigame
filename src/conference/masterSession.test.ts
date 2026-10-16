@@ -1,3 +1,4 @@
+import { getTrace } from '../debug/trace.ts'
 import { gameConfig } from '../config.ts'
 import { createActor } from 'xstate'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
@@ -247,6 +248,16 @@ describe('MasterSession resume', () => {
       'new-endpoint',
     )
     expect(chat.map((line) => line.text)).toEqual(['привет', 'новый'])
+
+    // Нехватка заготовленных <audio> у игрока: строка в «Разговор» у всех с именем из roster, не из сообщения.
+    transport.receive(
+      { type: 'audioSinkNote', clientId: 'guest-client', authToken: 'guest-token', owner: 'Ведущая' },
+      'guest-endpoint',
+    )
+    transport.receive({ type: 'audioSinkNote', clientId: 'guest-client', authToken: 'guest-token', owner: 'Ведущая' }, 'new-endpoint')
+    const notes = getTrace().filter((entry) => entry.kind === 'chat' && JSON.stringify(entry.detail).includes('заготовленные аудиоэлементы'))
+    expect(notes).toHaveLength(1)
+    expect(JSON.stringify(notes[0]?.detail)).toContain('у Гость закончились заготовленные аудиоэлементы, создан новый (дорожка от Ведущая)')
 
     session.dispose()
     actor.stop()
