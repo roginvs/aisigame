@@ -168,3 +168,64 @@ export function buildIntervals(markers: readonly MeterMarker[]): MeterInterval[]
 export function laneRect(lane: number): { y: number; h: number } {
   return { y: lane * (meterLaneBarPx + meterLaneGapPx), h: meterLaneBarPx }
 }
+
+/** Короткое имя для всплывающей подсказки над конкретной полосой/чертой. */
+export const meterShortTitles: Record<MeterMarkerGroup, string> = {
+  reading: 'Фаза: чтение',
+  buzzing: 'Фаза: окно кнопки',
+  answering: 'Фаза: ответ',
+  choosing: 'Фаза: выбор',
+  special: 'Фаза: кот/аукцион/ставки',
+  appeal: 'Фаза: апелляция',
+  phase: 'Фаза: прочее',
+  hostStart: 'Речь ведущей',
+  hostEnd: 'Ведущая замолчала',
+  vadStart: 'Речь игрока (VAD)',
+  vadStop: 'VAD: речь кончилась',
+  transcript: 'Расшифровка готова',
+  mixer: 'Фокус микшера',
+  response: 'Ответ модели',
+  responseEnd: 'response.done',
+  cancel: 'Cancel / interrupt / clear',
+  buzzer: 'Нажата кнопка',
+}
+
+/** «1,8 с». */
+export function formatSeconds(ms: number): string {
+  return `${(Math.max(0, ms) / 1000).toFixed(1).replace('.', ',')} с`
+}
+
+function clock(at: number): string {
+  return new Date(at).toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit', second: '2-digit' })
+}
+
+/** Подпись полосы: тип и длительность (идёт — «идёт N с»; начало за окном — «≥ N с»). */
+export function intervalTitle(interval: MeterInterval, now: number, windowStart: number): string {
+  const name = meterShortTitles[interval.group]
+  const end = interval.end ?? now
+  const start = interval.start ?? windowStart
+  if (interval.end === null) return `${name}, идёт ${formatSeconds(end - start)}`
+  if (interval.start === null) return `${name}, ≥ ${formatSeconds(end - start)}`
+  return `${name}, ${formatSeconds(end - start)}`
+}
+
+export function markerTitle(marker: MeterMarker): string {
+  return `${meterShortTitles[marker.group]}, ${clock(marker.at)}`
+}
+
+/** Нарисованный объект для hit-test (координаты холста, x1/y1 — исключительные). */
+export type MeterHit = { x0: number; x1: number; y0: number; y1: number; title: string; kind: 'bar' | 'line' }
+
+/** Ближайший объект в пределах допуска (px холста по x и y); черты выигрывают у полос при равном расстоянии. */
+export function hitTest(hits: readonly MeterHit[], x: number, y: number, tolX: number, tolY: number): MeterHit | null {
+  let best: MeterHit | null = null
+  let bestScore = Infinity
+  for (const hit of hits) {
+    const dx = x < hit.x0 ? hit.x0 - x : x >= hit.x1 ? x - hit.x1 + 1 : 0
+    const dy = y < hit.y0 ? hit.y0 - y : y >= hit.y1 ? y - hit.y1 + 1 : 0
+    if (dx > tolX || dy > tolY) continue
+    const score = dx + dy + (hit.kind === 'line' ? 0 : tolX + 0.5)
+    if (score < bestScore) { best = hit; bestScore = score }
+  }
+  return best
+}

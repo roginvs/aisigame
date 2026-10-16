@@ -282,3 +282,5 @@ export const meterLaneGapPx = 1
 export const debugLogFlushMs = 1_000
 /** …или сразу, когда в очереди набралось столько записей. */
 export const debugLogFlushBatch = 200
+/** Допуск попадания мышью в полосу/черту индикатора модели, CSS px. */
+export const meterHitTolerancePx = 3

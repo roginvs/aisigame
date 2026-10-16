@@ -55,6 +55,23 @@ h1, h2, p { margin: 0; }
 }
 .model-meter-wrap:hover .model-meter-legend,
 .model-meter-wrap:focus .model-meter-legend { display: block; }
+.model-meter-wrap.has-hit .model-meter-legend { display: none; }
+.model-meter-tip {
+  position: absolute;
+  top: calc(100% + 4px);
+  z-index: 51;
+  transform: translateX(-50%);
+  white-space: nowrap;
+  padding: 2px 6px;
+  background: #11131c;
+  border: 1px solid rgba(255, 255, 255, 0.35);
+  border-radius: 3px;
+  font-size: 0.72rem;
+  color: #f3f4f6;
+  text-transform: none;
+  letter-spacing: normal;
+  pointer-events: none;
+}
 .model-meter-legend > span { display: block; }
 .model-meter-legend .sw { display: inline-block; width: 10px; height: 10px; margin-right: 4px; vertical-align: -1px; border: 1px solid #fff3; }
 .model-meter {

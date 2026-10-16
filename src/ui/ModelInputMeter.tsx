@@ -1,6 +1,7 @@
-import { useEffect, useRef } from 'react'
-import { getLinkStatus, getTrace, subscribeTrace } from '../debug/trace.ts'
-import { buildIntervals, createMarkerCollector, isLaneGroup, laneRect, meterLegendText, meterMarkerColors, meterMarkerLegend, type MeterMarker } from './meterMarkers.ts'
+import { useEffect, useRef, useState, type MouseEvent } from 'react'
+import { meterHitTolerancePx } from '../options.ts'
+import { getLinkStatus, getTrace, pushTrace, subscribeTrace } from '../debug/trace.ts'
+import { buildIntervals, createMarkerCollector, hitTest, intervalTitle, isLaneGroup, markerTitle, type MeterHit, laneRect, meterLegendText, meterMarkerColors, meterMarkerLegend, type MeterMarker } from './meterMarkers.ts'
 
 /** RMS уровня по time-domain байтам AnalyserNode (128 = тишина) → 0..1, с усилением для речи. */
 export function meterLevel(samples: Uint8Array): number {
@@ -40,6 +41,19 @@ const HEIGHT = 20
  */
 export function ModelInputMeter({ getAnalyser, getLevel }: { getAnalyser?: () => AnalyserNode | null; getLevel?: () => number }) {
   const canvasRef = useRef<HTMLCanvasElement | null>(null)
+  const hitsRef = useRef<MeterHit[]>([])
+  // Пока мышь над индикатором, картинка стоит (данные пишутся дальше): подпись не убегает из-под курсора.
+  const frozenRef = useRef(false)
+  const [tip, setTip] = useState<{ title: string; left: number } | null>(null)
+  const onMove = (event: MouseEvent<HTMLCanvasElement>) => {
+    const rect = event.currentTarget.getBoundingClientRect()
+    const sx = WIDTH / rect.width
+    const sy = HEIGHT / rect.height
+    const x = (event.clientX - rect.left) * sx
+    const y = (event.clientY - rect.top) * sy
+    const hit = hitTest(hitsRef.current, x, y, meterHitTolerancePx * sx, meterHitTolerancePx * sy)
+    setTip(hit ? { title: hit.title, left: event.clientX - rect.left } : null)
+  }
 
   useEffect(() => {
     let frame = 0
@@ -71,6 +85,7 @@ export function ModelInputMeter({ getAnalyser, getLevel }: { getAnalyser?: () =>
       times[head] = Date.now()
       open[head] = modelInputOpen(getLinkStatus().mic) ? 1 : 0
       head = (head + 1) % WIDTH
+      if (frozenRef.current) return
       ctx.clearRect(0, 0, WIDTH, HEIGHT)
       const live = Boolean(analyser || getLevel)
       for (let x = 0; x < WIDTH; x += 1) {
@@ -85,7 +100,7 @@ export function ModelInputMeter({ getAnalyser, getLevel }: { getAnalyser?: () =>
           ctx.fillRect(x, 0, 1, HEIGHT)
         }
       }
-      drawMarkers(ctx, markers, times, head)
+      hitsRef.current = drawMarkers(ctx, markers, times, head)
     }
     frame = requestAnimationFrame(tick)
     return () => {
@@ -96,7 +111,7 @@ export function ModelInputMeter({ getAnalyser, getLevel }: { getAnalyser?: () =>
   }, [getAnalyser, getLevel])
 
   return (
-    <span className="model-meter-wrap" tabIndex={0} aria-describedby="model-meter-legend">
+    <span className={tip ? 'model-meter-wrap has-hit' : 'model-meter-wrap'} tabIndex={0} aria-describedby="model-meter-legend">
       <canvas
         ref={canvasRef}
         className="model-meter"
@@ -104,7 +119,11 @@ export function ModelInputMeter({ getAnalyser, getLevel }: { getAnalyser?: () =>
         height={HEIGHT}
         aria-label={meterLegendText()}
         data-testid="model-meter"
+        onMouseMove={onMove}
+        onMouseEnter={() => { frozenRef.current = true }}
+        onMouseLeave={() => { frozenRef.current = false; setTip(null) }}
       />
+      {tip && <span className="model-meter-tip" role="tooltip" data-testid="model-meter-tip" style={{ left: tip.left }}>{tip.title}</span>}
       <span id="model-meter-legend" role="tooltip" className="model-meter-legend" data-testid="model-meter-legend">
         <span><b>Что слышит модель</b> (выход микшера, справа — сейчас).</span>
         <span><i className="sw" style={{ background: waveColor(true, true) }} /> волна — звук, который ушёл в модель</span>
@@ -131,7 +150,11 @@ function columnAt(at: number, times: Float64Array, head: number): number {
   return WIDTH
 }
 
-export function drawMarkers(ctx: CanvasRenderingContext2D, markers: readonly MeterMarker[], times: Float64Array, head: number): void {
+export function drawMarkers(ctx: CanvasRenderingContext2D, markers: readonly MeterMarker[], times: Float64Array, head: number): MeterHit[] {
+  const hits: MeterHit[] = []
+  const now = times[(head + WIDTH - 1) % WIDTH] || Date.now()
+  let windowStart = now
+  for (let i = 0; i < WIDTH; i += 1) { const t = times[(head + i) % WIDTH]; if (t) { windowStart = t; break } }
   // Пары «начало–конец» — горизонтальные полосы на своих дорожках сверху.
   for (const interval of buildIntervals(markers)) {
     const x0 = interval.start === null ? 0 : Math.max(0, columnAt(interval.start, times, head))
@@ -144,13 +167,24 @@ export function drawMarkers(ctx: CanvasRenderingContext2D, markers: readonly Met
     ctx.fillStyle = LANE_BACKING
     ctx.fillRect(left, Math.max(0, y - 1), right - left, h + 2)
     ctx.fillStyle = meterMarkerColors[interval.group]
-    ctx.fillRect(x0, y, Math.max(1, Math.min(WIDTH, x1) - x0), h)
+    const bx1 = x0 + Math.max(1, Math.min(WIDTH, x1) - x0)
+    ctx.fillRect(x0, y, bx1 - x0, h)
+    hits.push({ x0, x1: bx1, y0: y, y1: y + h, title: intervalTitle(interval, now, windowStart), kind: 'bar' })
   }
   for (const marker of markers) {
     if (isLaneGroup(marker.group)) continue
     const x = columnAt(marker.at, times, head)
     if (x < 0 || x >= WIDTH) continue
     ctx.fillStyle = meterMarkerColors[marker.group]
-    ctx.fillRect(x, 0, marker.group === 'buzzer' ? 3 : 1, HEIGHT)
+    const w = marker.group === 'buzzer' ? 3 : 1
+    ctx.fillRect(x, 0, w, HEIGHT)
+    hits.push({ x0: x, x1: x + w, y0: 0, y1: HEIGHT, title: markerTitle(marker), kind: 'line' })
   }
+  return hits
 }
+
+declare global {
+  interface Window { __aisigameTrace?: typeof pushTrace }
+}
+// Dev/e2e: подложить события в trace, чтобы проверить подписи на индикаторе.
+if (import.meta.env.DEV && typeof window !== 'undefined') window.__aisigameTrace = pushTrace

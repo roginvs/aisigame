@@ -78,3 +78,18 @@ describe('дорожки пар начало–конец', () => {
     expect(isLaneGroup('hostEnd')).toBe(true)
   })
 })
+
+describe('подписи при наведении', () => {
+  it('hit-test с допуском, черта выигрывает, длительность словами', async () => {
+    const { hitTest, intervalTitle, formatSeconds } = await import('./meterMarkers.ts')
+    const bar = { x0: 10, x1: 50, y0: 3, y1: 5, title: 'bar', kind: 'bar' as const }
+    const line = { x0: 30, x1: 31, y0: 0, y1: 20, title: 'line', kind: 'line' as const }
+    expect(hitTest([bar, line], 20, 4, 3, 3)?.title).toBe('bar')
+    expect(hitTest([bar, line], 32, 4, 3, 3)?.title).toBe('line')
+    expect(hitTest([bar, line], 33, 15, 3, 3)?.title).toBe('line')
+    expect(hitTest([bar, line], 80, 15, 3, 3)).toBeNull()
+    expect(formatSeconds(1800)).toBe('1,8 с')
+    expect(intervalTitle({ lane: 1, group: 'vadStart', start: 1000, end: 2800 }, 5000, 0)).toBe('Речь игрока (VAD), 1,8 с')
+    expect(intervalTitle({ lane: 0, group: 'hostStart', start: 1000, end: null }, 3000, 0)).toBe('Речь ведущей, идёт 2,0 с')
+  })
+})
