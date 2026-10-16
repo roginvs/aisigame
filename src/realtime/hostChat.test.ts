@@ -37,6 +37,7 @@ describe('чат ведущей: реплику оборвали мы — стр
   const hostLines = (cursor: number) => getTrace()
     .filter((e) => e.id > cursor && e.kind === 'chat' && e.title === 'Ведущая' && !(e.detail as { removed?: boolean }).removed)
     .map((e) => (e.detail as { text: string }).text)
+  const cutNotes = (cursor: number) => getTrace().filter((e) => e.id > cursor && e.kind === 'note' && e.title.startsWith('реплика ведущей оборвана'))
   function speak() {
     const cursor = getTrace().at(-1)?.id ?? 0
     client.requestSpeech('clarify', 1, 'Попроси выбрать ещё раз.')
@@ -58,6 +59,9 @@ describe('чат ведущей: реплику оборвали мы — стр
     expect(hostLines(cursor)).toEqual(['Вася, выбери ячейку…'])
     expect(edits).toHaveLength(1)
     expect(edits[0]?.text).toBe('Вася, выбери ячейку…')
+    const [note] = cutNotes(cursor)
+    expect(note?.title).toBe('реплика ведущей оборвана (оборвали мы: тест) на 1800 мс [audio_end_ms]; в чате: «Вася, выбери ячейку…»')
+    expect(note?.detail).toMatchObject({ full: line, playedMs: 1800, source: 'audio_end_ms', shown: 'Вася, выбери ячейку…' })
     off()
   })
 
@@ -67,6 +71,7 @@ describe('чат ведущей: реплику оборвали мы — стр
     feed({ type: 'conversation.item.truncated', item_id: 'it1', content_index: 0, audio_end_ms: 2400 })
     feed({ type: 'response.done', response: { id: 'r1', status: 'cancelled', metadata: { purpose: 'clarify', turn: '1' }, output: [{ id: 'it1', type: 'message', role: 'assistant', content: [{ type: 'output_audio', transcript: line }] }] } })
     expect(hostLines(cursor)).toEqual(['Вася, выбери ячейку ещё…'])
+    expect(cutNotes(cursor)[0]?.detail).toMatchObject({ full: line, playedMs: 2400, source: 'audio_end_ms' })
   })
 
   it('оборвали на 60 мс (дамп: «Игорь, выберите я») — строка убирается', () => {
@@ -78,6 +83,7 @@ describe('чат ведущей: реплику оборвали мы — стр
     feed({ type: 'conversation.item.truncated', item_id: 'it1', content_index: 0, audio_end_ms: 60 })
     expect(hostLines(cursor)).toEqual([])
     expect(edits.at(-1)?.text).toBeNull()
+    expect(cutNotes(cursor)[0]?.title).toMatch(/на 60 мс \[audio_end_ms\]; в чате: строка убрана$/)
     off()
   })
 
@@ -89,6 +95,7 @@ describe('чат ведущей: реплику оборвали мы — стр
     expect(hostLines(cursor)).toEqual([line])
     vi.advanceTimersByTime(2000)
     expect(hostLines(cursor)).toEqual(['Вася, выбери…'])
+    expect(cutNotes(cursor)[0]?.title).toBe('реплика ведущей оборвана (оборвали мы: тест) на 1300 мс [оценка по часам]; в чате: «Вася, выбери…»')
   })
 
   it('доиграла целиком — строка не правится', () => {

@@ -57,7 +57,7 @@ export class ConferenceStatePublisher {
 
   /**
    * Правка реплики в истории по стабильному id: новый текст или null — слот очищается.
-   * Уходит обычным partialUpdate слота: и новые, и старые гости применяют его как любую смену слота.
+   * Уходит обычным partialUpdate слота: гости применяют его как любую смену слота.
    */
   editMessage(id: string, text: string | null): PartialUpdateMessage | null {
     for (let i = 0; i < CONFERENCE_HISTORY_LIMIT; i++) {
