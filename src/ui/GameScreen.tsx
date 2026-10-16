@@ -551,7 +551,7 @@ export function GameScreen(props: {
               : null}
           />
         ) : showQuestion && question ? (
-          <article className="question">
+          <article className={question.choices?.length ? 'question has-choices' : 'question'}>
             <p className="eyebrow">
               {question.themeName} · {question.value}
             </p>

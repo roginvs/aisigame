@@ -20,7 +20,8 @@ export function fitFontSize(max: number, min: number, fits: (size: number) => bo
 
 /**
  * Подгоняет шрифт `<h2>` вопроса под место в карточке. На широком экране карточка фиксированной
- * высоты (`overflow: hidden`), и длинный текст раньше обрезался снизу. На узком (≤1100 px)
+ * высоты, и длинный текст раньше обрезался снизу. С вариантами ответа подгоняется так,
+ * чтобы влезла вся карточка; не влезает и при минимуме — карточка листается (`.question.has-choices`). На узком (≤1100 px)
  * карточка растёт по тексту, тут ничего не меняется: текст и так влезает.
  */
 export function useFitQuestionText(ref: RefObject<HTMLElement | null>, text: string): void {
@@ -32,10 +33,13 @@ export function useFitQuestionText(ref: RefObject<HTMLElement | null>, text: str
       el.style.fontSize = ''
       el.classList.remove('question-text-scroll')
       const base = Number.parseFloat(getComputedStyle(el).fontSize)
-      if (!(base > 0) || el.scrollHeight <= el.clientHeight + 1) return
+      // Влезает и сам текст, и вся карточка (варианты ответа под текстом тоже должны поместиться).
+      const card = el.parentElement
+      const fits = () => el.scrollHeight <= el.clientHeight + 1 && (!card || card.scrollHeight <= card.clientHeight + 1)
+      if (!(base > 0) || fits()) return
       const result = fitFontSize(base, questionFit.minFontPx, (size) => {
         el.style.fontSize = `${size}px`
-        return el.scrollHeight <= el.clientHeight + 1
+        return fits()
       })
       el.style.fontSize = `${result.size}px`
       if (!result.fits) el.classList.add('question-text-scroll')

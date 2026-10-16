@@ -11,7 +11,7 @@ test('мастер конференции видит индикатор того
   await page.getByRole('button', { name: 'Начать игру' }).click()
   const meter = page.getByTestId('model-meter')
   await expect(meter).toBeVisible()
-  await expect(meter).toHaveAttribute('width', '160')
+  await expect(meter).toHaveAttribute('width', '320')
   await expect(meter).toHaveAttribute('height', '20')
   if (process.env.MODEL_METER_SHOT) {
     await page.locator('header.topbar').screenshot({ path: process.env.MODEL_METER_SHOT })

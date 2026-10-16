@@ -1729,7 +1729,16 @@ button.buzzer.chooser:disabled {
 .bubble.bubble-live { opacity: 0.7; font-style: italic; border: 1px dashed rgba(255, 255, 255, 0.25); }
 .bubble.from-judge { background: #3a3224; }
 
+/* С вариантами: текст не сжимается в полоску, а карточка листается, если не влезло и при минимальном шрифте. */
+.question.has-choices {
+  overflow-y: auto;
+  scrollbar-width: thin;
+}
+.question.has-choices::-webkit-scrollbar { display: block; width: 6px; }
+.question.has-choices h2 { flex-shrink: 0; }
+
 @media (max-height: 860px) {
+  .choices li { padding: 7px 10px; font-size: clamp(0.95rem, 1.3vw, 1.2rem); }
   .host { grid-template-columns: 112px minmax(0, 1fr); }
   .host img { width: 112px; height: 128px; }
   .question h2 { font-size: clamp(1.2rem, 3vw, 2.4rem); }
@@ -2128,6 +2137,10 @@ button.buzzer.chooser:disabled {
 .special-option.ghost:not(:disabled):hover { background: rgb(92 113 136 / 25%); }
 @media (max-width: 520px) {
   .special-option { flex-basis: calc(50% - 5px); min-height: 56px; }
+}
+/* Короткий и широкий экран (ноутбук с зумом, телефон боком): кот и аукцион без огромной картинки. */
+@media (max-height: 520px) {
+  .special-art { width: min(96px, 22vh); }
 }
 .special-log {
   list-style: none;
