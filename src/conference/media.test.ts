@@ -1,40 +1,69 @@
 import { describe, expect, it } from 'vitest'
-import { HOST_JITSI_NAME, isHostJitsiParticipant, modelHearsParticipant } from './media.ts'
+import {
+  HOST_JITSI_NAME,
+  SOUNDS_JITSI_NAME,
+  isHostJitsiParticipant,
+  isSoundsJitsiParticipant,
+  modelHearsParticipant,
+  resolveServiceIds,
+} from './media.ts'
 
-describe('isHostJitsiParticipant', () => {
-  it('recognizes the bot by id even with another display name', () => {
-    expect(isHostJitsiParticipant('bot-1', 'Other', 'bot-1')).toBe(true)
+describe('служебные участники узнаются только по id', () => {
+  it('«Ведущая» — по id соединения, с любым именем', () => {
+    expect(isHostJitsiParticipant('bot-1', 'bot-1')).toBe(true)
+    expect(isHostJitsiParticipant('p1', 'bot-1')).toBe(false)
   })
 
-  it('recognizes the fixed host display name for joiners', () => {
-    expect(isHostJitsiParticipant('remote-9', HOST_JITSI_NAME, null)).toBe(true)
+  it('без известного id никто не «Ведущая» и не «Звуки игры» (до первого снимка)', () => {
+    expect(isHostJitsiParticipant('p1', null)).toBe(false)
+    expect(isSoundsJitsiParticipant('p1', null)).toBe(false)
+    expect(isHostJitsiParticipant('', null)).toBe(false)
+    expect(isSoundsJitsiParticipant('', null)).toBe(false)
   })
 
-  it('leaves ordinary players alone', () => {
-    expect(isHostJitsiParticipant('p1', 'Вася', null)).toBe(false)
-    expect(isHostJitsiParticipant('p1', 'Вася', 'bot-1')).toBe(false)
+  it('«Звуки игры» — по своему id и это не ведущая', () => {
+    expect(isSoundsJitsiParticipant('snd', 'snd')).toBe(true)
+    expect(isHostJitsiParticipant('snd', 'bot-1')).toBe(false)
   })
-})
 
-import { SOUNDS_JITSI_NAME, isSoundsJitsiParticipant, isHostJitsiParticipant as isHostForSounds } from './media.ts'
-
-describe('участник «Звуки игры»', () => {
-  it('узнаётся по id своего бота и по имени у остальных, и это не ведущая', () => {
-    expect(isSoundsJitsiParticipant('abc', 'Маша', 'abc')).toBe(true)
-    expect(isSoundsJitsiParticipant('x', SOUNDS_JITSI_NAME, null)).toBe(true)
-    expect(isSoundsJitsiParticipant('x', 'Маша', null)).toBe(false)
-    expect(isHostForSounds('x', SOUNDS_JITSI_NAME, null)).toBe(false)
+  it('имена «Ведущая»/«Звуки игры» в сигнатурах больше не участвуют', () => {
+    // Функции принимают только id: имя игрока не может сделать его служебным.
+    expect(isHostJitsiParticipant.length).toBe(2)
+    expect(isSoundsJitsiParticipant.length).toBe(2)
+    expect(modelHearsParticipant.length).toBe(2)
+    expect(HOST_JITSI_NAME).toBe('Ведущая')
+    expect(SOUNDS_JITSI_NAME).toBe('Звуки игры')
   })
 })
 
 describe('modelHearsParticipant', () => {
-  const ids = { bot: 'bot-2', sounds: 'snd' }
-  it('не кладёт в микс модели «Ведущую» прошлой сессии (другой id, то же имя)', () => {
-    expect(modelHearsParticipant('bot-1', HOST_JITSI_NAME, ids)).toBe(false)
-    expect(modelHearsParticipant('bot-2', '', ids)).toBe(false)
-    expect(modelHearsParticipant('x', SOUNDS_JITSI_NAME, ids)).toBe(false)
+  const ids = { host: 'bot-2', sounds: 'snd' }
+  it('не кладёт в микс модели «Ведущую» и «Звуки игры» по их id', () => {
+    expect(modelHearsParticipant('bot-2', ids)).toBe(false)
+    expect(modelHearsParticipant('snd', ids)).toBe(false)
   })
-  it('людей кладёт', () => {
-    expect(modelHearsParticipant('p1', 'Маша', ids)).toBe(true)
+  it('игрок с любым именем (в т.ч. «Ведущая») слышен — его id не служебный', () => {
+    expect(modelHearsParticipant('p-named-host', ids)).toBe(true)
+    expect(modelHearsParticipant('p1', { host: null, sounds: null })).toBe(true)
+  })
+  it('после переподключения «Звуков игры» старый id снова обычный, новый — служебный', () => {
+    const after = { host: 'bot-2', sounds: 'snd-2' }
+    expect(modelHearsParticipant('snd', after)).toBe(true)
+    expect(modelHearsParticipant('snd-2', after)).toBe(false)
+  })
+})
+
+describe('resolveServiceIds', () => {
+  it('у мастера свои соединения важнее снимка (снимок мог отстать)', () => {
+    expect(resolveServiceIds({ host: 'bot', sounds: 'snd-new' }, { host: 'bot', sounds: 'snd-old' }))
+      .toEqual({ host: 'bot', sounds: 'snd-new' })
+  })
+  it('у игрока своих нет — берём из снимка', () => {
+    expect(resolveServiceIds({ host: null, sounds: null }, { host: 'bot', sounds: 'snd' }))
+      .toEqual({ host: 'bot', sounds: 'snd' })
+  })
+  it('мастер без «Звуков игры» (переподключаются) — не берёт чужое из снимка, если его нет', () => {
+    expect(resolveServiceIds({ host: 'bot', sounds: null }, { host: null, sounds: null }))
+      .toEqual({ host: 'bot', sounds: null })
   })
 })

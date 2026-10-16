@@ -1,18 +1,21 @@
 import type { ConferenceTile } from '../conference/media.ts'
+import type { ConferenceJitsiPair } from '../conference/messages.ts'
+import { jitsiIdOfClient } from '../conference/jitsiIds.ts'
 
-/** Локальная плитка или remote по совпадению имени (Jitsi id ≠ clientId). */
+/**
+ * Плитка (камера, «говорит», микрофон) карточки игрока. Своё устройство — локальная плитка;
+ * чужое — удалённая плитка с id из пар `[jitsiId, clientId]` снимка. Имя не смотрим:
+ * одинаковые имена не путаются, игрок «Ведущая» — обычный игрок. Нет пары — `undefined` (пустая карточка).
+ */
 export function matchConferenceTile(
   tiles: readonly ConferenceTile[],
-  input: { selfClientId?: string; clientId?: string | null; name: string },
+  input: { selfClientId?: string; clientId?: string | null; jitsiIds?: readonly ConferenceJitsiPair[] },
 ): ConferenceTile | undefined {
-  const name = input.name.trim()
-  if (input.clientId && input.selfClientId && input.clientId === input.selfClientId) {
-    return tiles.find((tile) => tile.isLocal) ?? tiles.find((tile) => tile.name.trim() === name)
-  }
-  const byName = tiles.find((tile) => !tile.isLocal && tile.name.trim() === name)
-  if (byName) return byName
-  if (!input.clientId && input.selfClientId) {
+  if (!input.clientId) return undefined
+  if (input.selfClientId && input.clientId === input.selfClientId) {
     return tiles.find((tile) => tile.isLocal)
   }
-  return tiles.find((tile) => tile.name.trim() === name)
+  const jitsiId = jitsiIdOfClient(input.jitsiIds, input.clientId)
+  if (!jitsiId) return undefined
+  return tiles.find((tile) => !tile.isLocal && tile.id === jitsiId)
 }

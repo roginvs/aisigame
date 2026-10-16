@@ -34,6 +34,9 @@ export type ConferenceSnapshotPlayer = {
   clientId?: string
 }
 
+/** `[jitsiId, clientId]` — см. `ConferenceSnapshot.jitsiIds`. */
+export type ConferenceJitsiPair = [jitsiId: string, clientId: string]
+
 export type ConferenceSnapshotPresence = {
   clientId: string
   name: string
@@ -73,6 +76,17 @@ export type ConferenceSnapshot = AppealFields & {
   phase: string
   players: ConferenceSnapshotPlayer[]
   presence: ConferenceSnapshotPresence[]
+  /**
+   * Кто есть кто в Jitsi: пары `[jitsiId, clientId]` (сначала id соединения, потом устройство).
+   * Ведёт мастер (своё соединение + отправитель hello гостя). Имя для узнавания не используется;
+   * одно устройство = одно соединение, поэтому несколько игроков с одним clientId (multi-seat)
+   * получают одну и ту же камеру/дорожку без изменения формата.
+   */
+  jitsiIds: ConferenceJitsiPair[]
+  /** Id в Jitsi служебной «Ведущей» мастера; `null` — ещё нет (или режим без Jitsi). */
+  hostJitsiId: string | null
+  /** Id в Jitsi служебного участника «Звуки игры»; меняется при его переподключении. */
+  soundsJitsiId: string | null
   roundIndex: number
   playedIds: string[]
   missedIds: number[]
@@ -488,6 +502,9 @@ const stateValidators = {
   phase: (value: unknown) => shortString(value, 100),
   players: (value: unknown) => Array.isArray(value) && value.length <= 1_000 && value.every(validPlayer),
   presence: (value: unknown) => Array.isArray(value) && value.length <= 1_000 && value.every(validPresence),
+  jitsiIds: validJitsiPairs,
+  hostJitsiId: (value: unknown) => value === null || shortString(value, 200),
+  soundsJitsiId: (value: unknown) => value === null || shortString(value, 200),
   roundIndex: integer,
   playedIds: (value: unknown) => stringArray(value, 20_000),
   missedIds: (value: unknown) => numberArray(value, 10_000),
@@ -579,6 +596,18 @@ function validPartialState(value: unknown): boolean {
 
 function validPlayer(value: unknown): boolean {
   return isRecord(value) && integer(value.id, 1) && shortString(value.name, 100) && Number.isFinite(value.score) && optionalString(value.clientId, 200)
+}
+
+/** Пары `[jitsiId, clientId]`: ровно две непустые строки; clientId не повторяется (одно устройство — одно соединение). */
+export function validJitsiPairs(value: unknown): boolean {
+  if (!Array.isArray(value) || value.length > 1_000) return false
+  const clients = new Set<string>()
+  for (const pair of value) {
+    if (!Array.isArray(pair) || pair.length !== 2 || !shortString(pair[0], 200) || !shortString(pair[1], 200)) return false
+    if (clients.has(pair[1])) return false
+    clients.add(pair[1])
+  }
+  return true
 }
 
 function validPresence(value: unknown): boolean {

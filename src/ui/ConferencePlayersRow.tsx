@@ -14,12 +14,15 @@ import { buzzKeyLabel, isKeyboardPlayer } from './buzzKeys.ts'
 import { canBuzzPlayer } from './conferenceTurn.ts'
 import { conferencePlayerLabel } from './conferencePlayerLabel.ts'
 import { matchConferenceTile } from './conferenceTileMatch.ts'
+import { jitsiIdOfClient } from '../conference/jitsiIds.ts'
+import type { ConferenceJitsiPair } from '../conference/messages.ts'
 import { ConferenceVideoTile } from './ConferenceVideoStrip.tsx'
 
 type BindVideo = (participantId: string, element: HTMLVideoElement | null) => void
 
-const emptyTile = (name: string, isLocal: boolean): ConferenceTile => ({
-  id: isLocal ? 'local-pending' : `pending:${name}`,
+/** Пустая карточка, пока нет пары `[jitsiId, clientId]`; id по устройству/игроку, не по имени (одинаковые имена). */
+const emptyTile = (key: string, name: string, isLocal: boolean): ConferenceTile => ({
+  id: isLocal ? 'local-pending' : `pending:${key}`,
   name,
   isLocal,
   micLive: false,
@@ -32,6 +35,8 @@ export function ConferencePlayersRow(props: {
   tiles: ConferenceTile[]
   bindVideo: BindVideo
   selfClientId?: string
+  /** Пары `[jitsiId, clientId]` из полученного снимка — по ним карточка находит камеру. */
+  jitsiIds?: readonly ConferenceJitsiPair[]
   roster: RosterEntry[]
   players: Player[]
   hasMatchData: boolean
@@ -60,6 +65,7 @@ export function ConferencePlayersRow(props: {
     tiles,
     bindVideo,
     selfClientId,
+    jitsiIds,
     roster,
     players,
     hasMatchData,
@@ -87,8 +93,8 @@ export function ConferencePlayersRow(props: {
             matchConferenceTile(tiles, {
               selfClientId,
               clientId: entry.clientId,
-              name: entry.name,
-            }) ?? emptyTile(entry.name, isSelf)
+              jitsiIds,
+            }) ?? emptyTile(entry.clientId, entry.name, isSelf)
           return (
             <div
               key={entry.clientId}
@@ -96,6 +102,7 @@ export function ConferencePlayersRow(props: {
                 .filter(Boolean)
                 .join(' ')}
               role="group"
+              data-jitsi-id={jitsiIdOfClient(jitsiIds, entry.clientId) ?? undefined}
               aria-label={entry.name}
             >
               <ConferenceVideoTile tile={tile} bindVideo={bindVideo} masterBadge={entry.isMaster} pingMs={entry.pingMs} />
@@ -149,8 +156,8 @@ export function ConferencePlayersRow(props: {
           matchConferenceTile(tiles, {
             selfClientId,
             clientId: player.clientId,
-            name: player.name,
-          }) ?? emptyTile(label, Boolean(isSelf))
+            jitsiIds,
+          }) ?? emptyTile(String(playerId), label, Boolean(isSelf))
 
         return (
           <div
@@ -166,6 +173,7 @@ export function ConferencePlayersRow(props: {
               .filter(Boolean)
               .join(' ')}
             role="group"
+            data-jitsi-id={jitsiIdOfClient(jitsiIds, player.clientId) ?? undefined}
             aria-label={`${label}: ${hasMatchData ? player.score : '—'}${stale ? ', нет связи' : ''}`}
           >
             <ConferenceVideoTile tile={tile} bindVideo={bindVideo} hideName pingMs={presence?.pingMs} />
@@ -214,12 +222,13 @@ export function ConferencePlayersRow(props: {
       {pendingGuests(roster, players).map((entry) => {
         const isSelf = Boolean(selfClientId && entry.clientId === selfClientId)
         const tile =
-          matchConferenceTile(tiles, { selfClientId, clientId: entry.clientId, name: entry.name }) ?? emptyTile(entry.name, isSelf)
+          matchConferenceTile(tiles, { selfClientId, clientId: entry.clientId, jitsiIds }) ?? emptyTile(entry.clientId, entry.name, isSelf)
         return (
           <div
             key={`pending-${entry.clientId}`}
             className={['player', 'conference-player', 'pending-guest', isSelf ? 'self' : '', entry.stale ? 'stale' : ''].filter(Boolean).join(' ')}
             role="group"
+            data-jitsi-id={jitsiIdOfClient(jitsiIds, entry.clientId) ?? undefined}
             aria-label={`${entry.name}, ещё не играет`}
             data-pending="true"
           >

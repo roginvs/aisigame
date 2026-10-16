@@ -78,6 +78,7 @@ import { StartScreen } from './ui/StartScreen.tsx'
 import type { GameVoice } from './realtime/client.ts'
 import { mutedAnswerReminderMs, mutedMicStableMs } from './options.ts'
 import { conferenceSinkCreatedText, subscribeConferenceSinkCreated } from './conference/conferenceAudio.ts'
+import { jitsiIdOfClient } from './conference/jitsiIds.ts'
 
 const initialLink: LinkStatus = { connection: 'idle', mic: 'idle', host: 'idle' }
 const pageParams = new URLSearchParams(window.location.search)
@@ -163,7 +164,6 @@ export default function App() {
   }, [hearTurnOnly])
   const [masterRoster, setMasterRoster] = useState<RosterEntry[]>([])
   const [masterRosterAll, setMasterRosterAll] = useState<RosterEntry[]>([])
-  const [masterParticipantIds, setMasterParticipantIds] = useState<Record<string, string>>({})
   const [masterHistory, setMasterHistory] = useState<ConferenceMessageRing>(() => readMessageRing(readSavedGame()) ?? emptyMessageRing())
   const masterHistoryRef = useRef(masterHistory)
   const [joinerSnapshot, setJoinerSnapshot] = useState<ConferenceSnapshot | null>(null)
@@ -339,7 +339,7 @@ export default function App() {
   )
   const answererParticipantId =
     conferenceRole === 'master' && answerer?.clientId
-      ? masterParticipantIds[answerer.clientId] ?? null
+      ? jitsiIdOfClient(masterSnapshot?.jitsiIds, answerer.clientId)
       : null
   // Финальная ставка, а в коте/аукционе — тот, чьё слово сейчас решает.
   const specialListener = specialListenerId(path, snapshot.context)
@@ -348,7 +348,7 @@ export default function App() {
   )
   const bettorParticipantId =
     conferenceRole === 'master' && bettor?.clientId
-      ? masterParticipantIds[bettor.clientId] ?? null
+      ? jitsiIdOfClient(masterSnapshot?.jitsiIds, bettor.clientId)
       : null
   const answererTile = answererParticipantId
     ? conferenceTiles.find((tile) => tile.id === answererParticipantId)
@@ -359,7 +359,7 @@ export default function App() {
   const chooser = snapshot.context.players.find((player) => player.id === snapshot.context.chooserId)
   const chooserParticipantId =
     conferenceRole === 'master' && chooser?.clientId
-      ? masterParticipantIds[chooser.clientId] ?? null
+      ? jitsiIdOfClient(masterSnapshot?.jitsiIds, chooser.clientId)
       : null
   const chooserTile = chooserParticipantId
     ? conferenceTiles.find((tile) => tile.id === chooserParticipantId)
@@ -664,7 +664,6 @@ export default function App() {
       setConferenceHostSpeaking(false)
       setMasterRoster([])
       setMasterRosterAll([])
-      setMasterParticipantIds({})
       setMediaBusy(false)
       setJoiningStatus(null)
       setConferenceRole(null)
@@ -872,16 +871,6 @@ export default function App() {
           const roster = active.rosterList()
           setMasterRoster(roster)
           setMasterRosterAll(active.rosterAll())
-          setMasterParticipantIds(
-            Object.fromEntries(
-              roster.flatMap((entry) => {
-                const participantId = entry.isMaster
-                  ? handle.localParticipantId()
-                  : active.endpointIdForClient(entry.clientId)
-                return participantId ? [[entry.clientId, participantId]] : []
-              }),
-            ),
-          )
         },
         messageRing: history,
         onHistory: (next) => {
@@ -894,13 +883,15 @@ export default function App() {
         resumePlayers: restoringGame ? resume?.saved.players : undefined,
         usePackPipe: !useBroadcast,
         onSnapshot: setMasterSnapshot,
+        // Кто есть кто в Jitsi — в снимок всем (пары и служебные id), не по именам.
+        conferenceIds: () => ({ self: handle.localParticipantId(), ...handle.serviceIds() }),
       })
+      handle.subscribeServiceIds(() => masterSessionRef.current?.refreshConferenceIds())
       masterSessionRef.current = session
       session.setHearTurnOnly(hearTurnOnlyRef.current)
       const initialRoster = session.rosterList()
       setMasterRoster(initialRoster)
       setMasterRosterAll(session.rosterAll())
-      setMasterParticipantIds({ [masterClientId]: handle.localParticipantId() })
       if (restoringGame && resume) {
         session.resumeGame(() => send({ type: 'CONTINUE_GAME', pack, saved: resume.saved }))
       } else {
@@ -1002,6 +993,8 @@ export default function App() {
         usePackPipe: !useBroadcast,
         callbacks: {
           onSnapshot: (snap) => {
+            // «Ведущую»/«Звуки игры» игрок узнаёт по id из снимка мастера (не по имени).
+            handle.setServiceIds({ host: snap.hostJitsiId, sounds: snap.soundsJitsiId })
             setJoinerSnapshot(snap)
             if (snap.phase !== 'lobby') setConferenceLobby(false)
           },
@@ -1273,6 +1266,9 @@ export default function App() {
               pack: null,
               players: [{ id: 1, name: conferenceName || 'Игрок', score: 0, clientId: masterClientId }],
               presence: [],
+              jitsiIds: [],
+              hostJitsiId: null,
+              soundsJitsiId: null,
               roundIndex: joinerPack.rounds[0]?.index ?? 0,
               playedIds: [],
               missedIds: [],

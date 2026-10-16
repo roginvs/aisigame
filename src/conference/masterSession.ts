@@ -9,7 +9,7 @@ import type { GameVoice } from '../realtime/client.ts'
 import { gameMachine } from '../game/machine.ts'
 import { pickOpen, statePath } from '../game/machine.ts'
 import type { GameContext, Player, QuestionPack } from '../game/types.ts'
-import { buildConferenceSnapshot, timerRemainingMs } from './buildSnapshot.ts'
+import { buildConferenceSnapshot, jitsiPairs, timerRemainingMs, type ConferenceJitsiIds } from './buildSnapshot.ts'
 import { createPackPipeHub, type PackPipeLinkState } from './packPipe.ts'
 import { CHUNK_BYTES, createPackTransferMaster, type PackTransferMaster } from './packTransfer.ts'
 import type { PackPhase } from './packProgress.ts'
@@ -28,7 +28,7 @@ import {
   type ConferenceSnapshot,
 } from './messages.ts'
 import { paceAfterAck, type TransferPace } from './packProgress.ts'
-import { ConferenceRoster } from './roster.ts'
+import { ConferenceRoster, type RosterEntry } from './roster.ts'
 import type { ConferenceTransport } from './transport.ts'
 import { PING_INTERVAL_MS, PRESENCE_HEARTBEAT_MS, PRESENCE_STALE_MS } from './presence.ts'
 import { appendRemoteDebug, clearRemoteDebug, getLinkStatus, getLivePlayerLine, getTrace, pushSystemLine, pushTrace, subscribeChatEdits, subscribeLinkStatus, subscribeLivePlayerLine, subscribeTrace } from '../debug/trace.ts'
@@ -71,7 +71,14 @@ export type MasterSessionOptions = {
   usePackPipe?: boolean
   /** Каждый разосланный снимок: мастер рисует экран из него же, как гости. */
   onSnapshot?: (snapshot: ConferenceSnapshot) => void
+  /**
+   * Id соединений мастера в Jitsi: своё, «Ведущей», «Звуков игры». Читается при каждой сборке снимка;
+   * при смене вызвать `refreshConferenceIds()`. Нет (BroadcastChannel) — все `null`.
+   */
+  conferenceIds?: () => MasterJitsiIds
 }
+
+export type MasterJitsiIds = { self: string | null; host: string | null; sounds: string | null }
 
 export class MasterSession {
   private appealReplies = new Map<string, Extract<ConferenceMessage, { type: 'appealReply' }>>()
@@ -88,6 +95,7 @@ export class MasterSession {
   private gameStarted = false
   private hearTurnOnly = false
   private onSnapshotCb?: (snapshot: ConferenceSnapshot) => void
+  private conferenceIdsOf: () => MasterJitsiIds
   private loopback: LoopbackStateReceiver | null = null
   private gameStartedAt = 0
   private lobbyOpenedSpeech = false
@@ -133,6 +141,7 @@ export class MasterSession {
   constructor(options: MasterSessionOptions) {
     clearRemoteDebug()
     this.onSnapshotCb = options.onSnapshot
+    this.conferenceIdsOf = options.conferenceIds ?? (() => ({ self: null, host: null, sounds: null }))
     if (this.onSnapshotCb) {
       const show = this.onSnapshotCb
       this.loopback = new LoopbackStateReceiver(show, () => this.broadcastFullStatus())
@@ -306,6 +315,20 @@ export class MasterSession {
 
   endpointIdForClient(clientId: string): string | null {
     return this.clientSender.get(clientId) ?? null
+  }
+
+  /** Id в Jitsi сменились (переподключились «Звуки игры» и т.п.) — разослать снимок заново (уходит только разница). */
+  refreshConferenceIds(): void {
+    if (this.statePublisher) this.broadcastCurrentSnapshot()
+  }
+
+  private jitsiIds(roster: readonly RosterEntry[]): ConferenceJitsiIds {
+    const ids = this.conferenceIdsOf()
+    return {
+      pairs: jitsiPairs(roster, { self: ids.self, endpointOf: (clientId) => this.endpointIdForClient(clientId) }),
+      host: ids.host,
+      sounds: ids.sounds,
+    }
   }
 
   masterOfflineBanner(now = Date.now()): boolean {
@@ -620,11 +643,13 @@ export class MasterSession {
       ? this.actor.getSnapshot().context
       : lobbyContext(this.pack, this.roster.get(this.masterClientId)?.name ?? 'Мастер')
     const now = Date.now()
+    const roster = this.roster.allIncludingHidden(now)
     return buildConferenceSnapshot({
       phase,
       pack: { hash: this.packHash, size: this.packBytes.byteLength, name: this.pack.name, summary: packLobbySummary(this.pack) },
       context,
-      roster: this.roster.allIncludingHidden(now),
+      roster,
+      jitsi: this.jitsiIds(roster),
       messageRing: this.statePublisher?.history() ?? this.initialHistory,
       liveSpeech: liveSpeechOf(getLivePlayerLine()),
       hostEar: this.publicEar(phase),

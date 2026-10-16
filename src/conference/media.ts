@@ -24,23 +24,28 @@ export const gameSoundsErrorText = 'Ошибка: звук игры не про�
 
 export { gameSoundsRestoredText } from './gameSoundsRetry.ts'
 
-export function isSoundsJitsiParticipant(id: string, name: string, soundsParticipantId: string | null): boolean {
-  if (soundsParticipantId && id === soundsParticipantId) return true
-  return name === SOUNDS_JITSI_NAME
+/** Id служебных участников мастера в Jitsi. Узнаём их только по id, имя — лишь подпись. */
+export type ServiceJitsiIds = { host: string | null; sounds: string | null }
+
+export function isSoundsJitsiParticipant(id: string, soundsParticipantId: string | null): boolean {
+  return Boolean(soundsParticipantId) && id === soundsParticipantId
+}
+
+export function isHostJitsiParticipant(id: string, botParticipantId: string | null): boolean {
+  return Boolean(botParticipantId) && id === botParticipantId
+}
+
+/**
+ * Итоговые id служебных участников: свои соединения мастера важнее снимка
+ * (снимок мог ещё не догнать переподключение «Звуков игры»); у игрока своих нет — берём снимок.
+ */
+export function resolveServiceIds(own: ServiceJitsiIds, fromSnapshot: ServiceJitsiIds): ServiceJitsiIds {
+  return { host: own.host ?? fromSnapshot.host, sounds: own.sounds ?? fromSnapshot.sounds }
 }
 
 /** Кого кладём в микс, который слышит модель: только людей — не «Ведущую» (её же голос = ложное перебивание чтения) и не эффекты. */
-export function modelHearsParticipant(
-  id: string,
-  name: string,
-  ids: { bot: string | null; sounds: string | null },
-): boolean {
-  return !isHostJitsiParticipant(id, name, ids.bot) && !isSoundsJitsiParticipant(id, name, ids.sounds)
-}
-
-export function isHostJitsiParticipant(id: string, name: string, botParticipantId: string | null): boolean {
-  if (botParticipantId && id === botParticipantId) return true
-  return name === HOST_JITSI_NAME
+export function modelHearsParticipant(id: string, ids: ServiceJitsiIds): boolean {
+  return !isHostJitsiParticipant(id, ids.host) && !isSoundsJitsiParticipant(id, ids.sounds)
 }
 
 export type ConferenceMedia = {
@@ -65,6 +70,15 @@ export type ConferenceMedia = {
   /** Есть ли речь людей в комнате (без дорожки «Ведущей»). */
   anyoneSpeaking: () => boolean
   localParticipantId: () => string
+  /**
+   * Id «Ведущей» и «Звуков игры» в Jitsi. У мастера — его собственные соединения;
+   * у игрока — из полученного снимка (`setServiceIds`).
+   */
+  serviceIds: () => ServiceJitsiIds
+  /** Игрок: id служебных участников из снимка мастера. У мастера свои соединения важнее. */
+  setServiceIds: (ids: ServiceJitsiIds) => void
+  /** Мастер: id «Ведущей»/«Звуков игры» сменились (подключились или переподключились). */
+  subscribeServiceIds: (handler: (ids: ServiceJitsiIds) => void) => () => void
   subscribeTiles: (handler: (tiles: ConferenceTile[]) => void) => () => void
   /** Уровень речи бота «Ведущая» в Jitsi — для пульсации портрета, не плитки. */
   subscribeHostSpeaking: (handler: (speaking: boolean) => void) => () => void
@@ -136,6 +150,9 @@ export function createBroadcastMedia(displayName: string): ConferenceMedia & { d
     setModelHearOnly() {},
     anyoneSpeaking: () => false,
     localParticipantId: () => 'local',
+    serviceIds: () => ({ host: null, sounds: null }),
+    setServiceIds() {},
+    subscribeServiceIds: () => () => {},
     subscribeTiles(handler) {
       listeners.add(handler)
       handler([

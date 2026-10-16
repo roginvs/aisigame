@@ -681,6 +681,7 @@ export function GameScreen(props: {
           tiles={conference.tiles ?? []}
           bindVideo={conference.bindVideo ?? ignoreConferenceVideoBinding}
           selfClientId={conference.selfClientId}
+          jitsiIds={conference.remoteSnapshot?.jitsiIds}
           roster={conference.roster}
           players={visiblePlayers}
           hasMatchData={hasMatchData}

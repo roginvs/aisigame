@@ -4,8 +4,9 @@ import { gameSoundsRetryDelayMs } from './gameSoundsRetry.ts'
 import {
   HOST_JITSI_NAME,
   SOUNDS_JITSI_NAME,
-  isSoundsJitsiParticipant,
   isHostJitsiParticipant,
+  type ServiceJitsiIds,
+  resolveServiceIds,
   modelHearsParticipant,
   type ConferenceHandle,
   type ConferenceTile,
@@ -532,36 +533,49 @@ export async function connectJitsiConference(input: {
   let soundsConnecting = false
   const speakerActivity = createSpeakerActivity(() => emitTiles())
 
+  /** Игрок: id служебных участников из снимка мастера (`setServiceIds`). */
+  let snapshotServiceIds: ServiceJitsiIds = { host: null, sounds: null }
+  const serviceIdListeners = new Set<(ids: ServiceJitsiIds) => void>()
+  let lastServiceIds = ''
+
   function botParticipantId(): string | null {
     return botHandle?.localParticipantId() ?? null
   }
 
-  function isHostRemote(id: string, name?: string): boolean {
-    return isHostJitsiParticipant(id, name ?? remoteNames.get(id) ?? '', botParticipantId())
+  /** Свои соединения мастера важнее снимка; у игрока своих нет — только снимок. Имя не смотрим. */
+  function serviceIds(): ServiceJitsiIds {
+    return resolveServiceIds(
+      { host: botParticipantId(), sounds: soundsHandle?.localParticipantId() ?? null },
+      snapshotServiceIds,
+    )
   }
 
-  function isSoundsRemote(id: string, name?: string): boolean {
-    return isSoundsJitsiParticipant(id, name ?? remoteNames.get(id) ?? '', soundsHandle?.localParticipantId() ?? null)
+  function notifyServiceIds(): void {
+    const ids = serviceIds()
+    const key = `${ids.host ?? ''}|${ids.sounds ?? ''}`
+    if (key === lastServiceIds) return
+    lastServiceIds = key
+    for (const listener of serviceIdListeners) listener(ids)
+  }
+
+  function isHostRemote(id: string): boolean {
+    return isHostJitsiParticipant(id, serviceIds().host)
   }
 
   /** Служебные участники: не плитки, не «кто-то говорит». */
-  function isServiceRemote(id: string, name?: string): boolean {
-    return isHostRemote(id, name) || isSoundsRemote(id, name)
+  function isServiceRemote(id: string): boolean {
+    return !modelHearsParticipant(id, serviceIds())
   }
 
   function hostSpeakingNow(): boolean {
-    const botId = botParticipantId()
-    if (botId && speakerActivity.has(botId)) return true
-    for (const [id, name] of remoteNames) {
-      if (isHostJitsiParticipant(id, name, botId) && speakerActivity.has(id)) return true
-    }
-    return false
+    const hostId = serviceIds().host
+    return Boolean(hostId) && speakerActivity.has(hostId!)
   }
 
   function anyoneSpeaking(): boolean {
     if (speakerActivity.has(localId())) return true
-    for (const [id, name] of remoteNames) {
-      if (isServiceRemote(id, name)) continue
+    for (const id of remoteNames.keys()) {
+      if (isServiceRemote(id)) continue
       if (speakerActivity.has(id)) return true
     }
     return false
@@ -588,7 +602,7 @@ export async function connectJitsiConference(input: {
     ]
     for (const [id, name] of remoteNames) {
       if (id === localId()) continue
-      if (isServiceRemote(id, name)) continue
+      if (isServiceRemote(id)) continue
       tiles.push({
         id,
         name,
@@ -684,7 +698,7 @@ export async function connectJitsiConference(input: {
 
   function syncModelMixer(): void {
     if (!modelMixer) return
-    const botId = botParticipantId()
+    const ids = serviceIds()
     // В микс — только включённый микрофон: muted remotes не кладём, иначе clone()
     // с enabled=false после unmute остаётся мёртвым, а <audio> уже играет.
     // Выбор/ответ сужают микс до одного участника; HTML playback людей не трогаем.
@@ -693,10 +707,10 @@ export async function connectJitsiConference(input: {
     const remotes: MixerRemote[] = []
     for (const [track, entry] of remoteAudioTracks) {
       const owner = trackOwner(track)
-      if (!owner || (botId && owner === botId)) continue
-      // Ни «Ведущую» (в т.ч. призрак прошлой сессии / по имени), ни эффекты модель не слышит:
+      if (!owner) continue
+      // Ни «Ведущую», ни эффекты модель не слышит (узнаём только по id, имя — подпись):
       // иначе она слышит своё же чтение и controller считает это перебиванием (TALKED_OVER).
-      if (!modelHearsParticipant(owner, remoteNames.get(owner) ?? '', { bot: botId, sounds: soundsHandle?.localParticipantId() ?? null })) continue
+      if (!modelHearsParticipant(owner, ids)) continue
       const stream = conferenceAudioStream(track)
       if (!stream) continue
       const muted = Boolean(track.isMuted?.())
@@ -991,6 +1005,19 @@ export async function connectJitsiConference(input: {
     },
     anyoneSpeaking,
     localParticipantId: localId,
+    serviceIds,
+    setServiceIds(ids) {
+      if (ids.host === snapshotServiceIds.host && ids.sounds === snapshotServiceIds.sounds) return
+      snapshotServiceIds = { host: ids.host, sounds: ids.sounds }
+      pushTrace('note', 'Служебные участники из снимка', { host: ids.host ?? '', sounds: ids.sounds ?? '' })
+      syncModelMixer()
+      emitTiles()
+      notifyServiceIds()
+    },
+    subscribeServiceIds(handler) {
+      serviceIdListeners.add(handler)
+      return () => serviceIdListeners.delete(handler)
+    },
     async setCameraOn(on: boolean) {
       if (on) {
         if (!localVideo) {
@@ -1141,6 +1168,7 @@ export async function connectJitsiConference(input: {
       conferenceAudio.dispose()
       tileListeners.clear()
       hostSpeakingListeners.clear()
+      serviceIdListeners.clear()
       for (const [id, track] of remoteVideo) {
         const el = videoBindings.get(id)
         if (el) track.detach(el)
@@ -1175,6 +1203,7 @@ export async function connectJitsiConference(input: {
         onError: input.onError,
       })
       emitTiles()
+      notifyServiceIds()
     } catch (error) {
       handle.dispose()
       throw error
@@ -1205,6 +1234,7 @@ export async function connectJitsiConference(input: {
         return true
       }
       soundsHandle = next
+      notifyServiceIds()
       soundsRetryAttempt = 0
       if (soundsRetryTimer) {
         window.clearTimeout(soundsRetryTimer)
@@ -1233,6 +1263,7 @@ export async function connectJitsiConference(input: {
     if (disposed) return
     soundsHandle?.dispose()
     soundsHandle = null
+    notifyServiceIds()
     input.onSoundsLost?.(reason)
     // Повторяем, пока жива конференция.
     scheduleSoundsRetry(reason)

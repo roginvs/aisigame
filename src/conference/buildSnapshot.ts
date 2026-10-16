@@ -4,11 +4,38 @@ import type { GameContext } from '../game/types.ts'
 import {
   type ConferenceMessageRing,
   type ConferencePackManifest,
+  type ConferenceJitsiPair,
   type ConferenceSnapshot,
   type ConferenceSnapshotPresence,
 } from './messages.ts'
 import type { RosterEntry } from './roster.ts'
 import { emptyMessageRing } from './messageRing.ts'
+
+export type ConferenceJitsiIds = {
+  pairs: ConferenceJitsiPair[]
+  host: string | null
+  sounds: string | null
+}
+
+/**
+ * Пары `[jitsiId, clientId]` по составу: мастер — своё соединение, гость — от кого пришёл его hello.
+ * Нет id (BroadcastChannel без Jitsi или hello ещё не было) — пары нет.
+ */
+export function jitsiPairs(
+  roster: readonly { clientId: string; isMaster: boolean }[],
+  ids: { self: string | null; endpointOf: (clientId: string) => string | null },
+): ConferenceJitsiPair[] {
+  const pairs: ConferenceJitsiPair[] = []
+  const seen = new Set<string>()
+  for (const entry of roster) {
+    if (seen.has(entry.clientId)) continue
+    const jitsiId = entry.isMaster ? ids.self : ids.endpointOf(entry.clientId)
+    if (!jitsiId) continue
+    seen.add(entry.clientId)
+    pairs.push([jitsiId, entry.clientId])
+  }
+  return pairs
+}
 
 export function buildConferenceSnapshot(input: {
   phase: string
@@ -22,6 +49,8 @@ export function buildConferenceSnapshot(input: {
   hostEar?: HostEar
   hostLink?: ConferenceSnapshot['hostLink']
   hearTurnOnly?: boolean
+  /** Кто есть кто в Jitsi (ведёт мастер, см. `masterSession.conferenceIds`). */
+  jitsi?: ConferenceJitsiIds
 }): ConferenceSnapshot {
   const bets: Record<string, number> = {}
   for (const bet of input.context.bets) bets[String(bet.playerId)] = bet.amount
@@ -57,6 +86,9 @@ export function buildConferenceSnapshot(input: {
       clientId: player.clientId,
     })),
     presence,
+    jitsiIds: input.jitsi?.pairs ?? [],
+    hostJitsiId: input.jitsi?.host ?? null,
+    soundsJitsiId: input.jitsi?.sounds ?? null,
     roundIndex: input.context.roundIndex,
     playedIds: [...input.context.playedIds],
     missedIds: [...input.context.missedIds],
