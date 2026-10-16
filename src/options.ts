@@ -264,3 +264,11 @@ export const verbatimOverrunExtraWords = 2
  * несколько реплик (choiceClarifyAfterMs, answerSilenceDecideMs), долгое ожидание VAD только добавляло задержку.
  */
 export const openAiVadEagerness: 'low' | 'medium' | 'high' | 'auto' = 'auto'
+
+/**
+ * Подпись оборванной нами реплики ведущей: средний темп речи (мс звука на символ текста), пока в сессии
+ * нет своих замеров (живой дамп 15.10: 69–103 мс/символ, медиана ≈ 90; конец `stopped` включает хвост тишины).
+ */
+export const hostMsPerCharDefault = 90
+/** Сколько ждать `conversation.item.truncated` (точную позицию обрыва), прежде чем взять время от начала звука. */
+export const hostCutCaptionWaitMs = 1500
