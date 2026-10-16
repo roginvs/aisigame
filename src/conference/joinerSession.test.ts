@@ -453,3 +453,27 @@ describe('JoinerSession pack cache and transfer', () => {
     expect(onReady).not.toHaveBeenCalled()
   })
 })
+
+describe('новая сборка мастера', () => {
+  it('мастер перезагрузился на новом commit, пока игрок подключён — игрока отключают', async () => {
+    vi.stubGlobal('window', globalThis)
+    const cache: JoinerPackCache = { get: vi.fn(async () => null), put: vi.fn(async () => undefined), delete: vi.fn(async () => undefined) }
+    const { transport, fatals, onSnapshot, session } = makeSession({ cache })
+    transport.emit(snapshot('lobby'))
+    await eventually(() => expect(onSnapshot).toHaveBeenCalled())
+    expect(fatals).toEqual([])
+    // Перезагрузка: тот же токен мастера, новый endpoint, ревизия с нуля, другой commit.
+    transport.emit({ ...snapshot('lobby', 'new-deploy'), revision: 0 }, 'master-reloaded')
+    await eventually(() => expect(fatals[0]).toContain('new-deploy'))
+    session.dispose()
+  })
+
+  it('игроки подключились раньше мастера: первый же снимок мастера на другой сборке отключает', async () => {
+    vi.stubGlobal('window', globalThis)
+    const cache: JoinerPackCache = { get: vi.fn(async () => null), put: vi.fn(async () => undefined), delete: vi.fn(async () => undefined) }
+    const { transport, fatals, onSnapshot } = makeSession({ cache })
+    transport.emit({ ...snapshot('lobby', 'new-deploy'), revision: 5 }, 'master-late')
+    await eventually(() => expect(fatals[0]).toMatch(/Версия не совпадает/))
+    expect(onSnapshot).not.toHaveBeenCalled()
+  })
+})

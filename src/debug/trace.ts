@@ -331,9 +331,63 @@ export async function formatFullDebugDump(extra: { path: string; context: unknow
   return formatDebugDump(extra, stored, debugLogStore.lastError())
 }
 
-/** Новая игра или выход: стереть полный лог (тот же цикл жизни, что у снимка партии). */
+/** Ключ рядом с логом: какой игре принадлежит полный лог в IndexedDB. */
+const debugLogGameKey = 'aisigame.debugLogGame'
+
+export function debugLogGame(storage: Pick<Storage, 'getItem'> | null = safeLocalStorage()): string {
+  try {
+    return storage?.getItem(debugLogGameKey) ?? ''
+  } catch {
+    return ''
+  }
+}
+
+function setDebugLogGame(gameId: string, storage: Pick<Storage, 'setItem' | 'removeItem'> | null = safeLocalStorage()): void {
+  try {
+    if (gameId) storage?.setItem(debugLogGameKey, gameId)
+    else storage?.removeItem(debugLogGameKey)
+  } catch {
+    // нет localStorage — лог просто не помнит свою игру
+  }
+}
+
+function safeLocalStorage(): Storage | null {
+  try {
+    return typeof localStorage === 'undefined' ? null : localStorage
+  } catch {
+    return null
+  }
+}
+
+/** Выход: стереть полный лог (тот же цикл жизни, что у снимка партии). */
 export function wipeDebugLog(): Promise<void> {
+  setDebugLogGame('')
   return debugLogStore.wipe()
+}
+
+/** Мастер начинает новую игру: лог всегда с чистого листа и принадлежит ей. */
+export function startDebugLogFor(gameId: string): Promise<void> {
+  setDebugLogGame(gameId)
+  return debugLogStore.wipe()
+}
+
+/**
+ * Игрок входит в игру: лог стирается, только если он от другой игры.
+ * Повторный вход в ту же комнату (перезагрузка) лог сохраняет. true — стёрт.
+ */
+export function joinDebugLogFor(gameId: string, wipe: () => Promise<void> = () => debugLogStore.wipe()): boolean {
+  if (debugLogGame() === gameId) return false
+  setDebugLogGame(gameId)
+  void wipe()
+  return true
+}
+
+export type SessionRole = 'мастер' | 'игрок' | 'стол'
+
+/** Запись о входе/старте: роль, игра, имя и сборка — у мастера, игрока и общего стола. */
+export function noteSession(info: { role: SessionRole; gameId: string; name: string; resumed?: boolean }): void {
+  const commit = buildCommit()
+  pushTrace('note', `[сессия] ${info.role}${info.resumed ? ' (продолжение)' : ''}: игра ${info.gameId || '—'}, имя ${info.name || '—'}, сборка ${commit}`, { ...info, commit })
 }
 
 export type DownloadDebugResult = { ok: boolean; bytes: number; fileName: string }

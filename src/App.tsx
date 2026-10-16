@@ -3,7 +3,7 @@ import { setIdleScale } from './game/idle.ts'
 import { setAppealScale } from './game/appeals.ts'
 import { useMachine } from '@xstate/react'
 import { gameSoundRoute, gameSoundStream, markGameSoundsBroken, playAuctionDing, playCatMeow, playTimeoutBeep, setGameSoundRoute, unlockAudio } from './audio/beep.ts'
-import { pushErrorLine, pushSystemLine, pushTrace, wipeDebugLog } from './debug/trace.ts'
+import { debugLogGame, joinDebugLogFor, noteSession, pushErrorLine, pushSystemLine, pushTrace, startDebugLogFor, wipeDebugLog } from './debug/trace.ts'
 import { gameSoundsErrorText, gameSoundsRestoredText } from './conference/media.ts'
 import { buildInviteUrl, parseInvite } from './conference/invite.ts'
 import { JoinerSession } from './conference/joinerSession.ts'
@@ -844,6 +844,7 @@ export default function App() {
       conferenceLobbyRef.current = !restoringGame
       setConferenceRole('master')
       setConferenceRoomId(roomId)
+      noteSession({ role: 'мастер', gameId: roomId, name: roomMasterName, resumed: Boolean(resume) })
       setConferenceLobby(!restoringGame)
       writeMasterRoomId(roomId)
       const history = resume ? readMessageRing(resume.saved) ?? emptyMessageRing() : emptyMessageRing()
@@ -923,12 +924,13 @@ export default function App() {
     if (!pack || pack.questions.length === 0) return
     if (matchMode === 'conference' && joiningStatus) return
     if (!confirmNewGame(readSavedGame(), (message) => window.confirm(message))) return
-    void wipeDebugLog()
+    const gameId = crypto.randomUUID()
+    void startDebugLogFor(gameId)
     if (matchMode === 'conference') {
-      const roomId = crypto.randomUUID()
-      await enterMasterLobby(roomId)
+      await enterMasterLobby(gameId)
       return
     }
+    noteSession({ role: 'стол', gameId, name: playerNames })
     unlockAudio()
     send({ type: 'START_GAME', pack, players: playersFromNames(playerNames) })
   }
@@ -984,6 +986,8 @@ export default function App() {
       if (!useBroadcast) setGameSoundRoute('remote')
       setConferenceRole('joiner')
       setConferenceRoomId(roomId)
+      const wiped = joinDebugLogFor(roomId)
+      noteSession({ role: 'игрок', gameId: roomId, name, resumed: !wiped })
       const joiner = new JoinerSession({
         transport: handle.transport,
         clientId: readJoinClientId(),
@@ -1073,6 +1077,7 @@ export default function App() {
     const catalogIds = packCatalog.map((item) => item.id)
     if (!saved || !packCanResume(saved, catalogIds, ownPackId)) return
     unlockAudio()
+    if (readMatchMode(saved) !== 'conference') noteSession({ role: 'стол', gameId: debugLogGame(), name: saved.players.map((player) => player.name).join(', '), resumed: true })
     void continueSavedGame(saved)
   }
 

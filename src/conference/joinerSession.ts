@@ -11,7 +11,8 @@ import { derivePackPhase, type PackPhase } from './packProgress.ts'
 import { CHUNK_BYTES, createPackReceiver } from './packTransfer.ts'
 import type { ConferenceTransport } from './transport.ts'
 import { PRESENCE_HEARTBEAT_MS, PRESENCE_STALE_MS } from './presence.ts'
-import { sharedDebugBacklogCursor, sharedDebugBatch } from '../debug/trace.ts'
+import { pushTrace, sharedDebugBacklogCursor, sharedDebugBatch } from '../debug/trace.ts'
+import { buildCommit } from '../buildInfo.ts'
 
 export type JoinerSessionCallbacks = {
   onSnapshot: (snapshot: ConferenceSnapshot) => void
@@ -600,6 +601,7 @@ export class JoinerSession {
     const mismatch = masterBuildMismatchMessage(masterCommit)
     if (!mismatch) return true
     this.buildRejected = true
+    pushTrace('note', `[версия] мастер на другой сборке — игрок отключён: у игрока ${buildCommit()}, у мастера ${masterCommit?.trim() || 'неизвестна'}`)
     this.callbacks.onFatalError(mismatch)
     this.dispose()
     return false
