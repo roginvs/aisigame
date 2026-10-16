@@ -2866,9 +2866,14 @@ export function announceInstructions(context: GameContext, extra: { guessing?: b
   }
   if (kind === 'incorrect') {
     // Неверно + эталон: вердикт и имя → эталон → коротко что неверно и очки.
+    // Неверно + эталон: одно правило начала — «Неверно, Вася», сразу эталон («Неверно, Вася, Земля»), потом остальное.
     const rest = [minus, finalNote].filter(Boolean).join(' ')
-    const reveal = withCloseGuess(cue, context)
-    return `${verdictOpener('incorrect', playerNameLine)} ${reveal} Только после эталона коротко скажи, что неверно.${guessNote ? ` ${guessNote}` : ''}${rest ? ` ${rest}` : ''}`
+    const opener = playerNameLine
+      ? `Самые первые слова реплики — «Неверно» и сразу имя игрока в именительном падеже: ${playerNameLine}.`
+      : 'Самое первое слово реплики — «Неверно».'
+    const reveal = spokenAnswerCue(question?.answers ?? [], question?.choices ?? [], opener)
+    const close = closeGuessApplies(context) ? ` Только после эталона: ${closeGuessPreface(context.wrongHeard)}` : ''
+    return `${reveal}${close}${guessNote ? ` ${guessNote}` : ''}${rest ? ` ${rest}` : ''}`
   }
   if (kind === 'silence' && !publish) {
     // Не «неверно»: реплики не было / не расслышали. Неверный ответ идёт через incorrect.

@@ -1,3 +1,4 @@
+import { revealedAnswer, saysAnswer } from '../realtime/speechMatch.ts'
 import { describe, expect, it } from 'vitest'
 import { gameConfig, hostInstructions } from '../config.ts'
 import {
@@ -93,17 +94,23 @@ describe('announceInstructions', () => {
     expect(line).not.toContain('никто не нажал')
   })
 
-  it('когда ошиблись все: сначала вердикт и имя, потом эталон, потом что неверно', () => {
+  it('когда ошиблись все: одно правило начала — «Неверно, Вася», сразу эталон дословно, потом очки', () => {
     const line = announceInstructions(context({ announceKind: 'incorrect', activePlayerId: 1, players: [{ id: 1, name: 'Вася', score: 0 }] }))
-    expect(line).toContain('Самые первые слова реплики — короткий вердикт')
-    expect(line).toContain('имя игрока в именительном падеже: Вася')
-    expect(line).toContain('Начни с правильного ответа дословно: «Боевой Буратино»')
+    expect(line).toContain('Самые первые слова реплики — «Неверно» и сразу имя игрока в именительном падеже: Вася.')
+    expect(line).toContain('Сразу за этим — правильный ответ дословно: «Боевой Буратино»')
+    expect(line).toContain('слова «правильный ответ» перед ним можно не говорить')
     expect(line).toContain('свой ответ не придумывай')
-    expect(line).toContain('что неверно')
     expect(line).toContain('минус 100')
-    expect(line.indexOf('вердикт')).toBeLessThan(line.indexOf('«Боевой Буратино»'))
-    expect(line.indexOf('«Боевой Буратино»')).toBeLessThan(line.indexOf('неверно'))
+    // Второго, спорящего правила начала больше нет.
+    expect(line).not.toContain('Начни с правильного ответа')
+    expect(line).not.toContain('короткий вердикт')
+    expect(line).not.toContain('Нет, Вася')
+    expect(line.indexOf('«Неверно»')).toBeLessThan(line.indexOf('«Боевой Буратино»'))
+    expect(line.indexOf('«Боевой Буратино»')).toBeLessThan(line.indexOf('минус 100'))
     expect(line).not.toContain('без тем и номиналов')
+    // Проверка эталона в реплике (mustSay) по-прежнему находит его за вступлением.
+    expect(revealedAnswer(line)).toBe('Боевой Буратино')
+    expect(saysAnswer('Неверно, Вася, Боевой Буратино! Минус сто.', 'Боевой Буратино')).toBe(true)
   })
 
   it('уверенный верный: первые слова — вердикт и имя', () => {
@@ -330,7 +337,7 @@ describe('announceInstructions', () => {
     expect(line).not.toContain('близко')
   })
 
-  it('когда ошиблись все, близость стоит перед эталоном и перед «неверно»', () => {
+  it('когда ошиблись все, про близость — только после «Неверно, имя» и эталона', () => {
     const base = context()
     const line = announceInstructions(
       context({
@@ -340,9 +347,9 @@ describe('announceInstructions', () => {
         questions: [{ ...base.questions[0]!, answers: ['Властелин колец'] }],
       }),
     )
-    expect(line.indexOf('вердикт')).toBeLessThan(line.indexOf('«Братство кольца»'))
-    expect(line.indexOf('«Братство кольца»')).toBeLessThan(line.indexOf('«Властелин колец»'))
-    expect(line.indexOf('«Властелин колец»')).toBeLessThan(line.indexOf('что неверно'))
+    expect(line.indexOf('«Неверно»')).toBeLessThan(line.indexOf('«Властелин колец»'))
+    expect(line.indexOf('«Властелин колец»')).toBeLessThan(line.indexOf('Только после эталона'))
+    expect(line.indexOf('Только после эталона')).toBeLessThan(line.indexOf('«Братство кольца»'))
     expect(line).toContain('минус 100')
     expect(line).not.toContain('нажимать кнопку')
   })

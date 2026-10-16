@@ -536,8 +536,9 @@ describe('game machine', () => {
     expect(playerScore(actor, 3)).toBe(-100)
     const line = announceInstructions(actor.getSnapshot().context)
     expect(line).toContain('самой близкой')
-    expect(line.indexOf('вердикт')).toBeLessThan(line.indexOf('Братство кольца'))
-    expect(line.indexOf('Братство кольца')).toBeLessThan(line.indexOf('что неверно'))
+    // Одно правило начала: «Неверно, имя» → эталон → только потом про близость.
+    expect(line.indexOf('«Неверно»')).toBeLessThan(line.indexOf('дословно: «'))
+    expect(line.indexOf('дословно: «')).toBeLessThan(line.indexOf('Братство кольца'))
   })
 
   it('молчание последнего смотрит уже сказанные ошибки', () => {
