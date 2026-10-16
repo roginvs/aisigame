@@ -1883,6 +1883,13 @@ export function attachController(options: {
       actor.send({ type: 'ANSWER_SETTLED' })
       return
     }
+    if (force && path === 'answering.hearing') {
+      // Реплика так и не кончилась (VAD завис): речь была — это не молчание, а «оценка не получилась».
+      answerDecision = { failed: true }
+      pushTrace('note', `ответ: реплика не закончилась и раньше ответа не было — без штрафа молчания: ${answerTurnLog()}`)
+      actor.send({ type: 'ANSWER_SETTLED' })
+      return
+    }
     pushTrace('note', `ответ: разборчивого ответа нет ни в одной реплике — как молчание: ${answerTurnLog()}`)
     actor.send({ type: 'ANSWER_NONE' })
   }

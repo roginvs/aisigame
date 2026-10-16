@@ -1,3 +1,4 @@
+import { gameConfig } from '../config.ts'
 import { createActor } from 'xstate'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { buildCommit } from '../buildInfo.ts'
@@ -940,7 +941,7 @@ describe('MasterSession resume', () => {
     expect(statePath(actor.getSnapshot().value)).toBe('answering.waiting')
     const send = vi.spyOn(actor, 'send')
 
-    vi.advanceTimersByTime(PRESENCE_STALE_MS)
+    vi.advanceTimersByTime(Math.max(PRESENCE_STALE_MS, gameConfig.answerMs))
     expect(statePath(actor.getSnapshot().value)).toBe('announcing.speaking')
     expect(actor.getSnapshot().context.chooserId).toBe(2)
     expect(send.mock.calls.some(([event]) => event.type === 'CHOOSER_OFFLINE')).toBe(false)

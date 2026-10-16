@@ -2,7 +2,7 @@ import { createActor } from 'xstate'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { getTrace } from '../debug/trace.ts'
 import { MockRealtimeClient } from '../realtime/mockClient.ts'
-import { answerMs, answerSilenceDecideMs } from '../options.ts'
+import { answerMs, answerOverrunSafetyMs, answerSilenceDecideMs } from '../options.ts'
 import { attachController, judgmentInstructions } from './controller.ts'
 import { gameMachine, statePath } from './machine.ts'
 import type { QuestionPack } from './types.ts'
@@ -201,5 +201,30 @@ describe('шум после кнопки и эхо ведущей', () => {
     expect(text).toContain('Последняя реплика ведущей')
     expect(text).toContain('эхо этих слов ведущей')
     actor.stop()
+  })
+})
+
+describe('длинная реплика', () => {
+  it('реплика 25 с — не молчание: её оценивают, прежние реплики тоже учитываются', async () => {
+    const client = new MockRealtimeClient()
+    const { score, path } = await boot(client)
+    client.hear('эээ', 500); await vi.advanceTimersByTimeAsync(800)
+    client.onSpeechStarted({ itemId: 'long' })
+    await vi.advanceTimersByTimeAsync(25_000)
+    expect(path()).toBe('answering.hearing')
+    expect(score()).toBe(0)
+    client.deliverTranscript('long', 'пылесосел')
+    client.emitSpeechStopped('long', 25_000)
+    await vi.advanceTimersByTimeAsync(300)
+    expect(score()).toBe(100)
+  })
+
+  it('бесконечная реплика (VAD завис): по страховке без штрафа молчания', async () => {
+    const client = new MockRealtimeClient()
+    const { score, path } = await boot(client)
+    client.onSpeechStarted({ itemId: 'stuck' })
+    await vi.advanceTimersByTimeAsync(answerMs + answerOverrunSafetyMs + 500)
+    expect(path().startsWith('answering')).toBe(false)
+    expect(score()).toBe(0)
   })
 })

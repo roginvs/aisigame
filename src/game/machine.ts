@@ -1851,7 +1851,8 @@ export const gameMachine = setup({
           },
         },
         hearing: {
-          after: { judgeMs: { target: '#game.announcing', actions: 'silencePenalty' } },
+          // Длинная реплика — не молчание: её конец и оценку ждёт контроллер. Это только страховка от зависшего VAD.
+          after: { answerSettleSafetyMs: { target: '#game.announcing', actions: 'judgeTimeout' } },
           on: {
             // Конец фразы — не вердикт: слушаем дальше, решает контроллер (тишина answerSilenceDecideMs).
             PLAYER_SPEECH_FINISHED: 'settling',
