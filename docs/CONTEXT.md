@@ -87,7 +87,7 @@
 - WebRTC, data channel строго с именем `oai-events`
 - сессия `type: "realtime"`, модель `gpt-realtime-2.1-mini`
 - голос в `session.audio.output.voice` (`marin`, запасной ориентир `cedar`)
-- VAD: `semantic_vad`, `eagerness: "low"`, `create_response: false`, `interrupt_response: false`
+- VAD: `semantic_vad`, `eagerness` из `openAiVadEagerness` в `options.ts` (с 16.10.2026 `"auto"` = medium, предел 4 с; было `"low"`, 8 с — выбор и ответ сами склеивают реплики), `create_response: false`, `interrupt_response: false`
 - инструменты в `session.tools`, вызов с клиента через `response.create`
 
 Официальная документация предлагает обычный ключ держать на сервере, а браузеру отдавать эфемерный `ek_`. Прямой `sk-` из браузера не описан как поддерживаемый сценарий, но и явного отказа сервера в справочнике нет. CORS для `/v1/realtime/calls` по публичному живому preflight пропускает заголовки `authorization` и `content-type`. Свой preflight из среды разработки выполнить не удалось. Первый запуск и есть проверка.

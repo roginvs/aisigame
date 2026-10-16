@@ -257,3 +257,10 @@ export const questionFit = {
  * доигрывает до конца — хвост вопроса не обрезается, конец чтения — только после реального конца звука.
  */
 export const verbatimOverrunExtraWords = 2
+
+/**
+ * OpenAI semantic_vad: насколько быстро модель решает, что реплика кончилась.
+ * `auto` (= `medium`, предел ожидания 4 с) вместо прежнего `low` (8 с): выбор и ответ сами склеивают
+ * несколько реплик (choiceClarifyAfterMs, answerSilenceDecideMs), долгое ожидание VAD только добавляло задержку.
+ */
+export const openAiVadEagerness: 'low' | 'medium' | 'high' | 'auto' = 'auto'

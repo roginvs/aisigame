@@ -6,7 +6,7 @@ import { livePlayerChatVisible } from './liveSpeech.ts'
 import { clearLivePlayerLine, logTrace, pushHostLine, pushPlayerLine, pushTrace, setLivePlayerLine } from '../debug/trace.ts'
 import { outputCut, outputFlushWaitMs, timersAfterPlaybackStarted, timersAfterResponseDone } from './playback.ts'
 import type { HostAudioTimers, OutputCutState } from './playback.ts'
-import { freeReplyMaxOutputTokens } from '../options.ts'
+import { openAiVadEagerness, freeReplyMaxOutputTokens } from '../options.ts'
 import { speechDurationMs } from './utterance.ts'
 import { isolatedCue, isolatedToolResponse, revealedAnswer, saysAnswer, speechMatches, speechReport, speechOverruns, verbatimResponse } from './speechMatch.ts'
 import { AudioItems, type AudioReference, type AudioItemReady } from './audioItems.ts'
@@ -70,7 +70,7 @@ function sessionBody(model: string) {
         transcription: { ...transcriptionConfig },
         turn_detection: {
           type: 'semantic_vad',
-          eagerness: 'low',
+          eagerness: openAiVadEagerness,
           create_response: false,
           interrupt_response: false,
         },
