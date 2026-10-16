@@ -53,3 +53,28 @@ describe('закрытый вход модели', () => {
     expect(m.CLOSED_OVERLAY).toMatch(/rgba\(.*0\.\d+\)/)
   })
 })
+
+describe('дорожки пар начало–конец', () => {
+  it('пары складываются в отрезки, у каждого типа своя непересекающаяся строка', async () => {
+    const { buildIntervals, laneRect, meterLanes, isLaneGroup } = await import('./meterMarkers.ts')
+    const m = (group: Parameters<typeof isLaneGroup>[0], at: number) => ({ group, at })
+    const intervals = buildIntervals([
+      m('vadStop', 50), // конец без начала — от левого края
+      m('hostStart', 100), m('vadStart', 150), m('hostStart', 160), m('hostEnd', 300),
+      m('response', 120), m('vadStop', 200), m('reading', 210), m('vadStart', 400),
+    ])
+    expect(intervals).toEqual(expect.arrayContaining([
+      { lane: 0, group: 'hostStart', start: 100, end: 300 },
+      { lane: 1, group: 'vadStart', start: null, end: 50 },
+      { lane: 1, group: 'vadStart', start: 150, end: 200 },
+      { lane: 1, group: 'vadStart', start: 400, end: null },
+      { lane: 2, group: 'response', start: 120, end: null },
+    ]))
+    expect(intervals).toHaveLength(5)
+    const rows = meterLanes.map((_, i) => laneRect(i))
+    for (let i = 1; i < rows.length; i += 1) expect(rows[i]!.y).toBeGreaterThanOrEqual(rows[i - 1]!.y + rows[i - 1]!.h)
+    expect(rows.at(-1)!.y + rows.at(-1)!.h).toBeLessThanOrEqual(10)
+    expect(isLaneGroup('reading')).toBe(false)
+    expect(isLaneGroup('hostEnd')).toBe(true)
+  })
+})

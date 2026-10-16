@@ -1,4 +1,5 @@
 import type { TraceEntry } from '../debug/trace.ts'
+import { meterLaneBarPx, meterLaneGapPx } from '../options.ts'
 
 /**
  * Метки событий на шкале «что слышит модель» (только мастер). Источник — trace контроллера
@@ -7,7 +8,7 @@ import type { TraceEntry } from '../debug/trace.ts'
 export type MeterMarkerGroup =
   | 'reading' | 'buzzing' | 'answering' | 'choosing' | 'special' | 'appeal' | 'phase'
   | 'hostStart' | 'hostEnd' | 'vadStart' | 'vadStop' | 'transcript' | 'mixer'
-  | 'response' | 'cancel' | 'buzzer'
+  | 'response' | 'responseEnd' | 'cancel' | 'buzzer'
 
 export const meterMarkerColors: Record<MeterMarkerGroup, string> = {
   reading: '#60a5fa',
@@ -24,6 +25,7 @@ export const meterMarkerColors: Record<MeterMarkerGroup, string> = {
   transcript: '#a3e635',
   mixer: '#e879f9',
   response: '#34d399',
+  responseEnd: '#047857',
   cancel: '#ef4444',
   buzzer: '#fde047',
 }
@@ -37,18 +39,19 @@ export const meterMarkerLegend: Array<[MeterMarkerGroup, string]> = [
   ['appeal', 'фаза: апелляция'],
   ['phase', 'фаза: прочее'],
   ['buzzer', 'нажата кнопка (толстая)'],
-  ['hostStart', 'ведущая начала говорить'],
-  ['hostEnd', 'ведущая замолчала'],
-  ['vadStart', 'VAD: речь началась'],
-  ['vadStop', 'VAD: речь кончилась'],
+  ['hostStart', 'полоса 1: ведущая говорит (звук играет)'],
+  ['hostEnd', 'ведущая замолчала (конец полосы 1)'],
+  ['vadStart', 'полоса 2: VAD слышит речь'],
+  ['vadStop', 'VAD: речь кончилась (конец полосы 2)'],
   ['transcript', 'расшифровка готова'],
   ['mixer', 'фокус микшера'],
-  ['response', 'response.create'],
+  ['response', 'полоса 3: ответ модели (response.create → response.done)'],
+  ['responseEnd', 'response.done (конец полосы 3)'],
   ['cancel', 'cancel / interrupt / clear'],
 ]
 
 export function meterLegendText(): string {
-  return ['Что слышит модель (выход микшера). Серый отрезок — вход модели закрыт, в модель не ушло. Метки:', ...meterMarkerLegend.map(([g, label]) => `${colorName(g)} — ${label}`)].join('\n')
+  return ['Что слышит модель (выход микшера). Серый отрезок — вход модели закрыт, в модель не ушло. Сверху горизонтальные полосы «от начала до конца», у каждого типа своя строка; остальное — вертикальные метки:', ...meterMarkerLegend.map(([g, label]) => `${colorName(g)} — ${label}`)].join('\n')
 }
 
 function colorName(group: MeterMarkerGroup): string {
@@ -81,6 +84,7 @@ export function classifyTraceEntry(entry: Pick<TraceEntry, 'kind' | 'title'>, pr
     if (title === 'input_audio_buffer.speech_started') return ['vadStart']
     if (title === 'input_audio_buffer.speech_stopped') return ['vadStop']
     if (title === 'conversation.item.input_audio_transcription.completed') return ['transcript']
+    if (title === 'response.done') return ['responseEnd']
     return []
   }
   if (kind === 'out') {
@@ -117,4 +121,50 @@ export function createMarkerCollector(maxAgeMs = 20_000) {
       return markers
     },
   }
+}
+
+
+/** Пары «начало–конец»: рисуются горизонтальной полосой на своей дорожке (сверху вниз по порядку). */
+export const meterLanes: ReadonlyArray<{ start: MeterMarkerGroup; ends: readonly MeterMarkerGroup[] }> = [
+  { start: 'hostStart', ends: ['hostEnd'] },
+  { start: 'vadStart', ends: ['vadStop'] },
+  { start: 'response', ends: ['responseEnd'] },
+]
+
+const laneGroups = new Set<MeterMarkerGroup>(meterLanes.flatMap((lane) => [lane.start, ...lane.ends]))
+
+/** Метка — часть пары (не рисуется вертикальной чертой). */
+export function isLaneGroup(group: MeterMarkerGroup): boolean {
+  return laneGroups.has(group)
+}
+
+/** Отрезок на дорожке; end = null — ещё идёт (до правого края). start = null — начался до окна. */
+export type MeterInterval = { lane: number; group: MeterMarkerGroup; start: number | null; end: number | null }
+
+/**
+ * Склейка меток в отрезки по дорожкам. Повторное «начало» без конца не рвёт отрезок;
+ * конец без начала — отрезок от левого края.
+ */
+export function buildIntervals(markers: readonly MeterMarker[]): MeterInterval[] {
+  const out: MeterInterval[] = []
+  const sorted = [...markers].sort((a, b) => a.at - b.at)
+  meterLanes.forEach((lane, index) => {
+    let open: MeterInterval | null = null
+    let any = false
+    for (const marker of sorted) {
+      if (marker.group === lane.start) {
+        if (!open) { open = { lane: index, group: lane.start, start: marker.at, end: null }; out.push(open) }
+        any = true
+      } else if (lane.ends.includes(marker.group)) {
+        if (open) { open.end = marker.at; open = null } else if (!any) out.push({ lane: index, group: lane.start, start: null, end: marker.at })
+        any = true
+      }
+    }
+  })
+  return out
+}
+
+/** Вертикальное место дорожки на холсте: строки не пересекаются. */
+export function laneRect(lane: number): { y: number; h: number } {
+  return { y: lane * (meterLaneBarPx + meterLaneGapPx), h: meterLaneBarPx }
 }

@@ -274,3 +274,6 @@ export const openAiVadEagerness: 'low' | 'medium' | 'high' | 'auto' = 'auto'
 export const hostMsPerCharDefault = 90
 /** Сколько ждать `conversation.item.truncated` (точную позицию обрыва), прежде чем взять время от начала звука. */
 export const hostCutCaptionWaitMs = 1500
+/** Индикатор модели у мастера: высота полосы пары «начало–конец» (px холста) и зазор между дорожками. */
+export const meterLaneBarPx = 2
+export const meterLaneGapPx = 1

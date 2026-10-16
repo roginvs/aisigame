@@ -1,6 +1,6 @@
 import { useEffect, useRef } from 'react'
 import { getLinkStatus, getTrace, subscribeTrace } from '../debug/trace.ts'
-import { createMarkerCollector, meterLegendText, meterMarkerColors, type MeterMarker } from './meterMarkers.ts'
+import { buildIntervals, createMarkerCollector, isLaneGroup, laneRect, meterLegendText, meterMarkerColors, type MeterMarker } from './meterMarkers.ts'
 
 /** RMS уровня по time-domain байтам AnalyserNode (128 = тишина) → 0..1, с усилением для речи. */
 export function meterLevel(samples: Uint8Array): number {
@@ -107,19 +107,33 @@ export function ModelInputMeter({ getAnalyser, getLevel }: { getAnalyser?: () =>
 }
 
 /** Вертикальные метки событий: столбец — первый, чьё время ≥ времени события. */
-function drawMarkers(ctx: CanvasRenderingContext2D, markers: readonly MeterMarker[], times: Float64Array, head: number): void {
+/** Столбец события: первый, чьё время ≥ at; -1 — левее окна, WIDTH — ещё не наступило. */
+function columnAt(at: number, times: Float64Array, head: number): number {
+  let seenSample = false
+  for (let i = 0; i < WIDTH; i += 1) {
+    const time = times[(head + i) % WIDTH] ?? 0
+    if (!time) continue
+    if (!seenSample && at < time) return -1
+    seenSample = true
+    if (time >= at) return i
+  }
+  return WIDTH
+}
+
+export function drawMarkers(ctx: CanvasRenderingContext2D, markers: readonly MeterMarker[], times: Float64Array, head: number): void {
+  // Пары «начало–конец» — горизонтальные полосы на своих дорожках сверху.
+  for (const interval of buildIntervals(markers)) {
+    const x0 = interval.start === null ? 0 : Math.max(0, columnAt(interval.start, times, head))
+    const x1 = interval.end === null ? WIDTH : columnAt(interval.end, times, head)
+    if (x1 < 0 || x0 >= WIDTH) continue
+    const { y, h } = laneRect(interval.lane)
+    ctx.fillStyle = meterMarkerColors[interval.group]
+    ctx.fillRect(x0, y, Math.max(1, Math.min(WIDTH, x1) - x0), h)
+  }
   for (const marker of markers) {
-    let x = -1
-    let seenSample = false
-    for (let i = 0; i < WIDTH; i += 1) {
-      const time = times[(head + i) % WIDTH] ?? 0
-      if (!time) continue
-      // Событие старше самого старого столбца — за левым краем.
-      if (!seenSample && marker.at < time) break
-      seenSample = true
-      if (time >= marker.at) { x = i; break }
-    }
-    if (x < 0) continue
+    if (isLaneGroup(marker.group)) continue
+    const x = columnAt(marker.at, times, head)
+    if (x < 0 || x >= WIDTH) continue
     ctx.fillStyle = meterMarkerColors[marker.group]
     ctx.fillRect(x, 0, marker.group === 'buzzer' ? 3 : 1, HEIGHT)
   }
