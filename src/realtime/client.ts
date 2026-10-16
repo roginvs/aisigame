@@ -43,6 +43,8 @@ type SpeechTurn = {
   mustSay?: string
   /** Накопленная расшифровка дословной фразы — чтобы оборвать «довесок» (ответ после вопроса). */
   liveTranscript?: string
+  /** Вопрос уже сгенерирован целиком, пошёл довесок: генерацию остановили, звук доигрывает до `stopped`. */
+  overran?: boolean
 }
 
 export type ToolCall = {
@@ -1009,12 +1011,12 @@ export class RealtimeClient {
       if (!responseId || !this.skipsResponse(responseId)) {
         const delta = typeof event.delta === 'string' ? event.delta : ''
         this.speech.liveTranscript = (this.speech.liveTranscript ?? '') + delta
-        if (speechOverruns(this.speech.liveTranscript, this.speech.expect)) {
-          // Фраза уже сказана; продолжение (часто — ответ на вопрос) игрокам не играем.
-          pushTrace('note', `ведущая продолжила после дословной фразы — обрываем: ${speechReport(this.speech.liveTranscript, this.speech.expect)}`, { said: this.speech.liveTranscript })
+        if (!this.speech.overran && speechOverruns(this.speech.liveTranscript, this.speech.expect)) {
+          // Текст обгоняет звук: хвост вопроса ещё может быть в буфере. Буфер не сбрасываем и конец
+          // чтения не шлём — только останавливаем генерацию довеска; конец — по реальному `stopped`.
+          pushTrace('note', `ведущая продолжила после дословной фразы — останавливаю генерацию, звук доигрывает: ${speechReport(this.speech.liveTranscript, this.speech.expect)}`, { said: this.speech.liveTranscript })
+          this.speech.overran = true
           this.cancelActiveResponse()
-          this.sendOutputClear()
-          this.finishSpeech('overrun')
           return
         }
       }
@@ -1118,7 +1120,7 @@ export class RealtimeClient {
         .join(' ')
         .trim()
       if (!said) return
-      if (!speechMatches(said, this.speech.expect)) {
+      if (!this.speech.overran && !speechMatches(said, this.speech.expect)) {
         this.rejectSpokenLine(responseId, said)
         return
       }
@@ -1160,7 +1162,7 @@ export class RealtimeClient {
     pushTrace('note', `ведущая сказала: ${line}`)
     if (!speech) return
     if (speech.expect) {
-      if (!speechMatches(line, speech.expect)) {
+      if (!speech.overran && !speechMatches(line, speech.expect)) {
         this.rejectSpokenLine(responseId, line)
         return
       }
@@ -1200,6 +1202,7 @@ export class RealtimeClient {
     pushTrace('note', `в реплике раскрытия нет эталона, говорю его дословно: ${said}`)
     speech.expect = answer
     speech.liveTranscript = ''
+    speech.overran = false
     speech.started = false
     speech.done = false
     speech.ended = false
@@ -1222,6 +1225,7 @@ export class RealtimeClient {
     if (heardId && speech.dropResponseId === heardId) return
     speech.dropResponseId = heardId
     speech.liveTranscript = ''
+    speech.overran = false
     if (!speech.ignoreResponseId) speech.ignoreResponseId = heardId || speech.liveResponseId
     speech.started = false
     speech.done = false

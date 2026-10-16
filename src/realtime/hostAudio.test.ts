@@ -130,7 +130,7 @@ describe('host audio completion', () => {
     expect(finished).toEqual(['read'])
   })
 
-  it('cuts the host off when she keeps talking after the verbatim question (answer leak)', () => {
+  it('довесок после дословного вопроса: генерация остановлена, буфер НЕ сброшен, конец чтения — только по stopped', () => {
     const { finished, sent, ask, feed } = open()
     const question = 'Кто написал роман «Евгений Онегин»?'
     ask(question)
@@ -140,8 +140,33 @@ describe('host audio completion', () => {
     expect(finished).toEqual([])
     const before = sent.length
     feed({ type: 'response.output_audio_transcript.delta', response_id: 'leak-1', delta: ' Конечно, это Александр Сергеевич Пушкин.' })
+    expect(sent.slice(before)).toContain('response.cancel')
+    expect(sent.slice(before)).not.toContain('output_audio_buffer.clear')
+    // Хвост вопроса ещё играет из буфера — конца чтения нет.
+    expect(finished).toEqual([])
+    const said = `${question} Конечно, это Александр Сергеевич Пушкин.`
+    feed({ type: 'response.output_audio_transcript.done', response_id: 'leak-1', transcript: said })
+    feed({ type: 'response.done', response: { id: 'leak-1', status: 'cancelled', metadata: { purpose: 'read', turn: '1' }, output: [{ type: 'message', role: 'assistant', content: [{ type: 'output_audio', transcript: said }] }] } })
+    // Обрезанный довесок не считается «не той фразой»: повтора чтения нет.
+    expect(sent.filter((type) => type === 'response.create')).toHaveLength(1)
+    expect(finished).toEqual([])
+    feed({ type: 'output_audio_buffer.stopped', response_id: 'leak-1' })
     expect(finished).toEqual(['read'])
-    expect(sent.slice(before)).toEqual(expect.arrayContaining(['response.cancel', 'output_audio_buffer.clear']))
+  })
+
+  it('вступление перед вопросом и пословная генерация: до последнего слова вопроса ничего не режется', () => {
+    const { finished, sent, ask, feed } = open()
+    const question = 'Старейший сохранившийся глобус сделали в Нюрнберге в 1492 году, и автор назвал его «земным яблоком». Ценен экспонат не тем, что на нём есть, а тем, чего на нём нет. Чего же?'
+    ask(question)
+    feed({ type: 'response.created', response: { id: 'intro-1' } })
+    feed({ type: 'output_audio_buffer.started', response_id: 'intro-1' })
+    const spoken = `Итак, внимание, слушаем вопрос. ${question.replace('1492', 'тысяча четыреста девяносто втором')}`
+    for (const word of spoken.split(' ')) {
+      feed({ type: 'response.output_audio_transcript.delta', response_id: 'intro-1', delta: `${word} ` })
+      expect(sent).not.toContain('response.cancel')
+      expect(sent).not.toContain('output_audio_buffer.clear')
+    }
+    expect(finished).toEqual([])
   })
 
   it('a silent exact reading reaches completion without browser speech', () => {

@@ -1,5 +1,5 @@
 import { withHostRules } from '../config.ts'
-import { freeReplyMaxOutputTokens } from '../options.ts'
+import { freeReplyMaxOutputTokens, verbatimOverrunExtraWords } from '../options.ts'
 import { revealAuthorization } from '../game/spokenAnswer.ts'
 /**
  * Дословное чтение: регистр, ё/е, знаки, кавычки и тире не важны; слова короче 3 букв
@@ -46,15 +46,47 @@ function foldWords(value: string): string[] {
 /**
  * Дословная фраза уже произнесена целиком, а модель продолжает говорить
  * (типично: дочитала вопрос и сама на него отвечает). По накопленной расшифровке.
+ *
+ * Строго по порядку: слова эталона ищутся в расшифровке по очереди (пропуск слова или
+ * перестановка соседних допустимы), и обязательно должно прозвучать последнее слово эталона
+ * (не число — числа расшифровка пишет как угодно). Довесок — только слова ПОСЛЕ этого
+ * последнего слова; вступление перед вопросом («Итак, внимание…») довеском не считается.
+ * Это сверка с нашим же дословным текстом, а не разбор речи игрока.
  */
-export function speechOverruns(said: string, expected: string): boolean {
-  const want = words(expected)
-  const heard = words(said)
-  if (!want.length) return false
-  if (heard.length <= want.length + 2) return false
-  const heardSet = new Set(heard)
-  const hits = want.filter((word) => heardSet.has(word)).length
-  return hits / want.length >= 0.75
+export function speechOverruns(said: string, expected: string, extraWords = verbatimOverrunExtraWords): boolean {
+  const end = verbatimTailEnd(said, expected)
+  if (end === null) return false
+  return allWords(said).length - end >= extraWords
+}
+
+/** Индекс (в allWords(said)) сразу после последнего слова эталона, если весь эталон уже прозвучал по порядку. */
+export function verbatimTailEnd(said: string, expected: string): number | null {
+  const want = words(expected).filter((word) => !isNumber(word))
+  if (!want.length) return null
+  const heard = allWords(said)
+  let next = 0
+  let hits = 0
+  let lastAt = -1
+  for (let i = 0; i < heard.length && next < want.length; i += 1) {
+    const word = heard[i]!
+    const ahead = want.slice(next, next + overrunLookahead).indexOf(word)
+    if (ahead < 0) continue
+    next += ahead + 1
+    hits += 1
+    if (next === want.length) lastAt = i
+  }
+  if (lastAt < 0 || hits / want.length < 0.75) return null
+  // Хвост эталона после последнего слова-якоря («Чего же?», «…в 1492») — часть вопроса, не довесок.
+  const full = allWords(expected)
+  const anchor = full.lastIndexOf(want[want.length - 1]!)
+  return Math.min(heard.length, lastAt + 1 + (full.length - anchor - 1))
+}
+
+/** Сколько слов эталона можно «пропустить» при поиске следующего (оговорка, перестановка). */
+const overrunLookahead = 3
+
+function allWords(value: string): string[] {
+  return value.toLowerCase().replaceAll('ё', 'е').replace(/[^a-zа-я0-9]+/gi, ' ').trim().split(/\s+/).filter(Boolean)
 }
 
 export function verbatimSpeech(text: string): string {

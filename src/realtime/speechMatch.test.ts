@@ -96,6 +96,29 @@ describe('speechOverruns', () => {
     expect(speechOverruns(newton, newton)).toBe(false)
     expect(speechOverruns('Кто сформулировал', newton)).toBe(false)
   })
+  it('вступление перед вопросом довеском не считается — только слова после последнего слова вопроса', () => {
+    expect(speechOverruns(`Итак, внимание, вопрос. ${newton}`, newton)).toBe(false)
+    expect(speechOverruns(`Итак, внимание, вопрос. Кто сформулировал`, newton)).toBe(false)
+    expect(speechOverruns(`Итак, внимание, вопрос. ${newton} Это Ньютон.`, newton)).toBe(true)
+  })
+  it('75% слов без хвоста вопроса — не довесок (раньше резал по множеству слов)', () => {
+    const q = 'Ценен экспонат не тем, что на нём есть, а тем, чего на нём нет. Чего же?'
+    expect(speechOverruns('Ценен экспонат не тем, что на нём есть, а тем, чего на нём нет, и ещё три слова', q)).toBe(false)
+    expect(speechOverruns(q, q)).toBe(false)
+    expect(speechOverruns(`${q} Ответ — Америка.`, q)).toBe(true)
+  })
+  it('короткие слова в конце вопроса («Чего же?») — часть вопроса', () => {
+    const q = 'Чего на нём нет. Чего же?'
+    expect(speechOverruns('Чего на нём нет. Чего же?', q)).toBe(false)
+    expect(speechOverruns('Чего на нём нет. Чего же? Да', q)).toBe(false)
+  })
+  it('числа словами и оговорка в одном слове не мешают', () => {
+    const q = 'В 1492 году Колумб доплыл до острова Сан-Сальвадор. Как он его назвал?'
+    const said = 'В тысяча четыреста девяносто втором году Колумб доплыл до острова Сан Сальвадор. Как он его назвал?'
+    expect(speechOverruns(said, q)).toBe(false)
+    expect(speechOverruns(`${said} Он назвал его`, q)).toBe(true)
+    expect(speechOverruns('В тысяча четыреста девяносто втором году Колумп доплыл до острова Сан Сальвадор. Как он его назвал? Конечно же', q)).toBe(true)
+  })
   it('не считает чужую длинную речь «довеском»', () => {
     expect(speechOverruns('Сейчас я расскажу вам совсем другую длинную историю про котов', newton)).toBe(false)
   })
