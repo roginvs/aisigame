@@ -151,6 +151,7 @@ export default function App() {
   /** Последний разосланный мастером снимок: экран мастера рисуется из него, как у гостей. */
   const [masterSnapshot, setMasterSnapshot] = useState<ConferenceSnapshot | null>(null)
   const masterSessionRef = useRef<MasterSession | null>(null)
+  const joinerSessionRef = useRef<JoinerSession | null>(null)
   // Кончились заготовленные <audio>: мастер пишет строку в чат сам, игрок шлёт мастеру — у всех одна строка.
   useEffect(() => subscribeConferenceSinkCreated(({ owner }) => {
     const joiner = joinerSessionRef.current
@@ -199,7 +200,6 @@ export default function App() {
   const controllerActionsRef = useRef<GameControllerActions | null>(null)
   const voiceConnectedRef = useRef(false)
   const conferenceLobbyRef = useRef(false)
-  const joinerSessionRef = useRef<JoinerSession | null>(null)
   const transportDisposeRef = useRef<(() => void) | null>(null)
   const conferenceHandleRef = useRef<ConferenceHandle | null>(null)
   const tilesUnsubRef = useRef<(() => void) | null>(null)
