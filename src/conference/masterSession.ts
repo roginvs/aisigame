@@ -31,7 +31,7 @@ import { paceAfterAck, type TransferPace } from './packProgress.ts'
 import { ConferenceRoster } from './roster.ts'
 import type { ConferenceTransport } from './transport.ts'
 import { PING_INTERVAL_MS, PRESENCE_HEARTBEAT_MS, PRESENCE_STALE_MS } from './presence.ts'
-import { appendRemoteDebug, clearRemoteDebug, getLinkStatus, getLivePlayerLine, getTrace, subscribeLinkStatus, subscribeLivePlayerLine, subscribeTrace } from '../debug/trace.ts'
+import { appendRemoteDebug, clearRemoteDebug, getLinkStatus, getLivePlayerLine, getTrace, subscribeChatEdits, subscribeLinkStatus, subscribeLivePlayerLine, subscribeTrace } from '../debug/trace.ts'
 import { messageRingEntries } from './messageRing.ts'
 import { commentaryContext } from '../game/commentary.ts'
 import { emptyMessageRing } from './messageRing.ts'
@@ -121,6 +121,7 @@ export class MasterSession {
   private statePublisher: ConferenceStatePublisher | null = null
   private traceCursor = 0
   private traceUnsub: () => void
+  private editUnsub: () => void = () => {}
   private liveUnsub: () => void = () => {}
   private earUnsub: () => void = () => {}
   private linkUnsub: () => void = () => {}
@@ -242,6 +243,12 @@ export class MasterSession {
         if (line && this.statePublisher) this.broadcastMessage({ kind: 'conversation', ...line })
       }
     })
+    this.editUnsub = subscribeChatEdits(({ id, text }) => {
+      const update = this.statePublisher?.editMessage(id, text)
+      if (!update) return
+      this.sendState(update, 'чат: правка')
+      this.onHistory(this.statePublisher!.history())
+    })
   }
 
   attachMachine(): void {
@@ -320,6 +327,7 @@ export class MasterSession {
     this.clearLobbySpeechTimer()
     this.machineSub?.unsubscribe()
     this.traceUnsub()
+    this.editUnsub()
     this.liveUnsub()
     this.earUnsub()
     this.linkUnsub()

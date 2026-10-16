@@ -1,12 +1,13 @@
-import type { ChatRole, TraceEntry } from '../debug/trace.ts'
+import { chatLineId, type ChatRole, type TraceEntry } from '../debug/trace.ts'
 import type { ConferenceConversationLine } from './messages.ts'
 
 export function conversationLineFromTrace(entry: TraceEntry): ConferenceConversationLine | null {
   if (entry.kind !== 'chat') return null
+  if (entry.detail && typeof entry.detail === 'object' && 'removed' in entry.detail && entry.detail.removed === true) return null
   const text = chatText(entry.detail)
   const note = entry.detail && typeof entry.detail === 'object' && 'note' in entry.detail && typeof entry.detail.note === 'string'
     ? entry.detail.note : undefined
-  return text ? { role: chatRole(entry.detail), text, at: entry.at, ...(note ? { note } : {}) } : null
+  return text ? { id: chatLineId(entry.id), role: chatRole(entry.detail), text, at: entry.at, ...(note ? { note } : {}) } : null
 }
 
 function chatRole(detail: unknown): ChatRole {

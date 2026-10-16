@@ -3,7 +3,7 @@ import { onAudioOutputsReopen, recreateStreamElement, reopenAudioOutputs, unlock
 import { gameConfig, hostInstructions, withHostRules } from '../config.ts'
 import { recordResponseUsage, resetUsage } from './usage.ts'
 import { livePlayerChatVisible } from './liveSpeech.ts'
-import { clearLivePlayerLine, logTrace, pushHostLine, pushPlayerLine, pushTrace, setLivePlayerLine } from '../debug/trace.ts'
+import { clearLivePlayerLine, editChatLine, logTrace, pushHostLine, pushPlayerLine, pushTrace, setLivePlayerLine } from '../debug/trace.ts'
 import { outputCut, outputFlushWaitMs, timersAfterPlaybackStarted, timersAfterResponseDone } from './playback.ts'
 import type { HostAudioTimers, OutputCutState } from './playback.ts'
 import { openAiVadEagerness, freeReplyMaxOutputTokens, hostCutCaptionWaitMs } from '../options.ts'
@@ -157,8 +157,8 @@ export class RealtimeClient {
   private transcripts = new Map<string, StoredTranscript>()
   /** Реплики ведущей (item_id), уже отданные в чат по готовой расшифровке: response.done их не повторяет. */
   private hostItemsInChat = new Set<string>()
-  /** Подпись свободной реплики ждёт конца звука: доиграла — целиком, мы оборвали — до места обрыва и «…». */
-  private heldCaption: { itemId: string | null; text: string; caption: string } | null = null
+  /** Подпись свободной реплики уже в чате: при нашем обрыве её правим (до места обрыва и «…» или убираем). */
+  private shownCaptions = new Map<string, { entryId: number; text: string; startedAt?: number }>()
   /** Реплики, оборванные нами: itemId → сыгранные мс (null — ждём truncated), время обрыва по часам. */
   private cutItems = new Map<string, { playedMs: number | null; fallbackMs: number; waiters: Array<() => void> }>()
   private hostPace = new HostPace()
@@ -673,7 +673,6 @@ export class RealtimeClient {
     const flushFirst = this.playbackResponseId !== null || this.outputFlush === 'inflight'
     // Новая реплика поверх ещё звучащей: прежнюю обрываем мы — подпись до места обрыва.
     if (this.speech && this.speech.started && !this.speech.ended && flushFirst) this.markCut(this.speech)
-    else this.flushHeldCaption()
     this.clearFlushTimer()
     this.clearSpeechTimers()
     this.pendingSpeak = null
@@ -762,7 +761,7 @@ export class RealtimeClient {
     this.itemPrompts.reset()
     this.transcripts.clear()
     this.hostItemsInChat.clear()
-    this.heldCaption = null
+    this.shownCaptions.clear()
     this.cutItems.clear()
     this.truncatedMs.clear()
     this.transcriptWaiters.clear()
@@ -1210,54 +1209,47 @@ export class RealtimeClient {
     if (ownAnnounce && speech) speech.chatNote = undefined
     const cut = itemId ? this.cutItems.get(itemId) : undefined
     if (cut) {
-      this.emitCutCaption(line, caption, cut)
+      // Текст пришёл уже после нашего обрыва: сразу только прозвучавшее.
+      this.whenCutKnown(cut, (played) => {
+        const shown = cutCaption(line, played, this.hostPace.msPerChar)
+        pushTrace('note', `реплика ведущей оборвана на ${played} мс: в чат «${shown || '—'}»`, { full: line })
+        if (shown) pushHostLine(shown, caption)
+      })
       return
     }
-    // Своя реплика ещё звучит: подпись — когда станет ясно, доиграла ли она целиком.
-    if (speech && purpose === speech.purpose && !speech.ended && !speech.expect) {
-      if (this.heldCaption) pushHostLine(this.heldCaption.text, this.heldCaption.caption)
-      this.heldCaption = { itemId: itemId ?? speech.itemId, text: line, caption }
-      return
+    const entryId = pushHostLine(line, caption)
+    const liveItem = itemId ?? (speech && purpose === speech.purpose ? speech.itemId : null)
+    if (entryId && liveItem) {
+      this.shownCaptions.set(liveItem, { entryId, text: line })
+      if (this.shownCaptions.size > 50) this.shownCaptions.delete(this.shownCaptions.keys().next().value!)
     }
-    pushHostLine(line, caption)
   }
 
-  /** Мы обрываем реплику: запомнить, сколько её звука сыграно (точно — из truncated, иначе по часам). */
+  /** Мы обрываем реплику: запомнить, сколько её звука сыграно (точно — из truncated, иначе по часам), и поправить подпись. */
   private markCut(speech: SpeechTurn | null): void {
     const itemId = speech?.itemId
-    if (!speech || !itemId || speech.expect) {
-      this.flushHeldCaption()
-      return
-    }
+    if (!speech || !itemId || speech.expect || this.cutItems.has(itemId)) return
     const fallbackMs = speech.started && speech.playStartedAt ? Date.now() - speech.playStartedAt : 0
-    this.cutItems.set(itemId, { playedMs: this.truncatedMs.get(itemId) ?? (speech.started ? null : 0), fallbackMs, waiters: [] })
+    const cut = { playedMs: this.truncatedMs.get(itemId) ?? (speech.started ? null : 0), fallbackMs, waiters: [] as Array<() => void> }
+    this.cutItems.set(itemId, cut)
     if (this.cutItems.size > 50) this.cutItems.delete(this.cutItems.keys().next().value!)
-    const held = this.heldCaption
-    this.heldCaption = null
-    if (held) this.emitCutCaption(held.text, held.caption, this.cutItems.get(itemId)!)
+    const shown = this.shownCaptions.get(itemId)
+    if (!shown) return
+    this.shownCaptions.delete(itemId)
+    this.whenCutKnown(cut, (played) => {
+      const next = cutCaption(shown.text, played, this.hostPace.msPerChar)
+      if (next === shown.text) return
+      pushTrace('note', `реплика ведущей оборвана на ${played} мс: строка чата → «${next || 'убрана'}»`, { full: shown.text })
+      editChatLine(shown.entryId, next || null)
+    })
   }
 
-  private emitCutCaption(line: string, caption: string, cut: { playedMs: number | null; fallbackMs: number; waiters: Array<() => void> }): void {
-    const emit = () => {
-      const played = cut.playedMs ?? cut.fallbackMs
-      const shown = cutCaption(line, played, this.hostPace.msPerChar)
-      pushTrace('note', `реплика ведущей оборвана на ${played} мс${cut.playedMs === null ? ' (по часам)' : ''}: в чат «${shown || '—'}»`, { full: line })
-      if (shown) pushHostLine(shown, caption)
-    }
-    if (cut.playedMs !== null) return emit()
+  private whenCutKnown(cut: { playedMs: number | null; fallbackMs: number; waiters: Array<() => void> }, run: (playedMs: number) => void): void {
+    if (cut.playedMs !== null) return run(cut.playedMs)
     let done = false
-    const once = () => { if (!done) { done = true; emit() } }
+    const once = () => { if (!done) { done = true; run(cut.playedMs ?? cut.fallbackMs) } }
     cut.waiters.push(once)
     window.setTimeout(once, hostCutCaptionWaitMs)
-  }
-
-  /** Реплика доиграла не по нашему обрыву: подпись целиком (и замер темпа). */
-  private flushHeldCaption(durationMs?: number): void {
-    const held = this.heldCaption
-    if (!held) return
-    this.heldCaption = null
-    if (durationMs !== undefined) this.hostPace.note(durationMs, held.text)
-    pushHostLine(held.text, held.caption)
   }
 
   /** Реплика раскрытия без самого эталона (часто — пересказ указания): в чат не идёт, эталон — дословно. */
@@ -1354,7 +1346,10 @@ export class RealtimeClient {
     if (!speech) return
     const hung = reason === 'hard' && speech.started && !speech.ended
     if (reason === 'cleared' || reason === 'truncated') this.markCut(speech)
-    else this.flushHeldCaption(reason === 'stopped' && speech.playStartedAt ? Date.now() - speech.playStartedAt : undefined)
+    else if (reason === 'stopped' && speech.playStartedAt && speech.itemId) {
+      const shown = this.shownCaptions.get(speech.itemId)
+      if (shown) this.hostPace.note(Date.now() - speech.playStartedAt, shown.text)
+    }
     this.speech = null
     this.pendingSpeak = null
     this.clearFlushTimer()

@@ -55,6 +55,22 @@ export class ConferenceStatePublisher {
     return this.apply(changes)
   }
 
+  /**
+   * Правка реплики в истории по стабильному id: новый текст или null — слот очищается.
+   * Уходит обычным partialUpdate слота: и новые, и старые гости применяют его как любую смену слота.
+   */
+  editMessage(id: string, text: string | null): PartialUpdateMessage | null {
+    for (let i = 0; i < CONFERENCE_HISTORY_LIMIT; i++) {
+      const slot = `message${i}` as ConferenceMessageSlot
+      const line = this.state[slot]
+      if (!line || line.kind !== 'conversation' || line.id !== id) continue
+      const changes: Partial<ConferenceState> = {}
+      changes[slot] = text ? { ...line, text } : null
+      return this.apply(changes)
+    }
+    return null
+  }
+
   full(): SnapshotMessage {
     return { ...this.state, type: 'snapshot', authorityToken: this.authorityToken, revision: this.revision }
   }

@@ -316,3 +316,41 @@ it('ping: гость отвечает pong сразу, даже если оче�
     joiner.dispose(); master.dispose(); actor.stop()
   }
 })
+
+it('правка строки ведущей (наш обрыв) доходит до гостя по id и попадает в сохраняемую историю', async () => {
+  const { editChatLine, pushHostLine } = await import('../debug/trace.ts')
+  const room = new Room()
+  const guestTransport = room.connect('guest')
+  const guest = new JoinerSession({
+    transport: guestTransport, clientId: 'guest', authToken: 'guest-token', name: 'Гость',
+    callbacks: { onSnapshot: vi.fn(), onLobby: vi.fn(), onPackReady: vi.fn(), onError: vi.fn(), onFatalError: vi.fn() },
+    packCache: { get: async () => null, put: async () => {}, delete: async () => {} },
+  })
+  const transport = room.connect('master')
+  const actor = createActor(gameMachine).start()
+  const bytes = new Uint8Array([4, 5, 6])
+  const saved: string[][] = []
+  const master = new MasterSession({
+    transport, actor, client: { requestSpeech: vi.fn() } as unknown as GameVoice,
+    masterClientId: 'master', masterName: 'Мастер', pack: demoPack, packBytes: bytes,
+    packHash: await sha256Hex(bytes), authorityToken: 'master-token', onRoster: () => {},
+    onHistory: (ring) => saved.push(messageRingEntries(ring).map(({ message }) => message.text)),
+  })
+  await vi.advanceTimersByTimeAsync(PRESENCE_HEARTBEAT_MS)
+  const hostTexts = () => messageRingEntries(guest.snapshot()!).filter(({ message }) => message.kind === 'conversation' && message.role === 'host').map(({ message }) => message.text)
+  const cutId = pushHostLine('Игорь, выберите вопрос на табло, пожалуйста.')
+  const goneId = pushHostLine('Вася, вам слово.')
+  pushHostLine('Следующая реплика.')
+  await vi.advanceTimersByTimeAsync(0)
+  expect(hostTexts()).toEqual(['Игорь, выберите вопрос на табло, пожалуйста.', 'Вася, вам слово.', 'Следующая реплика.'])
+  editChatLine(cutId, 'Игорь, выберите…')
+  editChatLine(goneId, null)
+  await vi.advanceTimersByTimeAsync(0)
+  expect(hostTexts()).toEqual(['Игорь, выберите…', 'Следующая реплика.'])
+  expect(saved.at(-1)).toEqual(expect.arrayContaining(['Игорь, выберите…', 'Следующая реплика.']))
+  expect(saved.at(-1)).not.toContain('Вася, вам слово.')
+  // Правка — обычный partialUpdate слота: старый гость применяет его без знания о правках.
+  const edits = transport.sent.filter((message) => message.type === 'partialUpdate').slice(-2)
+  expect(edits.every((message) => message.type === 'partialUpdate' && Object.keys(message.changes).every((key) => /^message\d+$/.test(key)))).toBe(true)
+  master.dispose()
+})

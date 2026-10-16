@@ -81,9 +81,10 @@ export function pushTrace(kind: TraceKind, title: string, detail?: unknown): voi
   for (const listener of listeners) listener()
 }
 
-export function pushHostLine(text: string, note = ''): boolean {
+/** Ставит реплику ведущей в чат; номер записи (для правки) или 0, если строка не добавлена (пусто/повтор). */
+export function pushHostLine(text: string, note = ''): number {
   const clean = text.trim()
-  if (!clean || clean === lastHostLine) return false
+  if (!clean || clean === lastHostLine) return 0
   lastHostLine = clean
   const caption = note.trim()
   const stage = stageWordsIn(clean)
@@ -95,7 +96,38 @@ export function pushHostLine(text: string, note = ''): boolean {
       ? { role: 'host' satisfies ChatRole, text: clean, note: caption }
       : { role: 'host' satisfies ChatRole, text: clean },
   )
-  return true
+  return sequence
+}
+
+/** Стабильный id строки чата для истории конференции: уникален между перезагрузками вкладки мастера. */
+const chatSession = Math.random().toString(36).slice(2, 10)
+export function chatLineId(entryId: number): string {
+  return `${chatSession}-${entryId}`
+}
+
+export type ChatLineEdit = { id: string; text: string | null }
+const chatEditListeners = new Set<(edit: ChatLineEdit) => void>()
+export function subscribeChatEdits(listener: (edit: ChatLineEdit) => void): () => void {
+  chatEditListeners.add(listener)
+  return () => chatEditListeners.delete(listener)
+}
+
+/**
+ * Правка уже показанной строки чата (реплику ведущей оборвали мы): новый текст или null — убрать.
+ * Запись меняется на месте (у мастера), конференция получает правку по стабильному id.
+ */
+export function editChatLine(entryId: number, text: string | null): void {
+  const index = snapshot.findIndex((entry) => entry.id === entryId)
+  if (index < 0) return
+  const entry = snapshot[index]!
+  if (entry.kind !== 'chat' || !entry.detail || typeof entry.detail !== 'object') return
+  const clean = text?.trim() || null
+  const detail = clean ? { ...(entry.detail as object), text: clean } : { ...(entry.detail as object), removed: true }
+  const next = snapshot.slice()
+  next[index] = { ...entry, detail }
+  snapshot = next
+  for (const listener of listeners) listener()
+  for (const listener of chatEditListeners) listener({ id: chatLineId(entryId), text: clean })
 }
 
 export function pushPlayerLine(text: string): void {

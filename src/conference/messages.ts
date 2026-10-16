@@ -8,6 +8,8 @@ import type { AppealFields, AppealRequest, AnnounceKind, JudgmentStatus, Special
 export const CONFERENCE_HISTORY_LIMIT = 200
 
 export type ConferenceConversationLine = {
+  /** Стабильный id строки (мастер правит её по id: оборванная реплика ведущей). Старые мастера не шлют. */
+  id?: string
   role: 'host' | 'player' | 'judge' | 'error' | 'system'
   text: string
   note?: string
@@ -579,7 +581,8 @@ function validConversationLine(value: unknown): boolean {
   return isRecord(value) && (value.role === 'host' || value.role === 'player' || value.role === 'judge' || value.role === 'error' || value.role === 'system') &&
     typeof value.text === 'string' && value.text.length <= 20_000 &&
     (value.note === undefined || (typeof value.note === 'string' && value.note.length <= 20_000)) &&
-    (value.at === undefined || shortString(value.at, 40))
+    (value.at === undefined || shortString(value.at, 40)) &&
+    (value.id === undefined || shortString(value.id, 80))
 }
 
 function validChatLine(value: unknown): boolean {

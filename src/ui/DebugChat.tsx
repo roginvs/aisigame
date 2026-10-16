@@ -18,7 +18,7 @@ export function ConversationChat(props?: {
   const localLive = useSyncExternalStore(subscribeLivePlayerLine, getLivePlayerLine, getLivePlayerLine)
   const live = props?.liveSpeech !== undefined ? props.liveSpeech : localLive
   const voiceLines: VoiceStreamLine[] = entries
-    .filter((entry) => entry.kind === 'chat')
+    .filter((entry) => entry.kind === 'chat' && !(entry.detail && typeof entry.detail === 'object' && 'removed' in entry.detail && entry.detail.removed === true))
     .map((entry) => ({
       role: chatRole(entry.detail),
       text: chatText(entry.detail) || entry.title,
