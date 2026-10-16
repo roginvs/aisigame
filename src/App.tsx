@@ -3,7 +3,7 @@ import { setIdleScale } from './game/idle.ts'
 import { setAppealScale } from './game/appeals.ts'
 import { useMachine } from '@xstate/react'
 import { gameSoundRoute, gameSoundStream, markGameSoundsBroken, playAuctionDing, playCatMeow, playTimeoutBeep, setGameSoundRoute, unlockAudio } from './audio/beep.ts'
-import { pushErrorLine, pushSystemLine, pushTrace } from './debug/trace.ts'
+import { pushErrorLine, pushSystemLine, pushTrace, wipeDebugLog } from './debug/trace.ts'
 import { gameSoundsErrorText, gameSoundsRestoredText } from './conference/media.ts'
 import { buildInviteUrl, parseInvite } from './conference/invite.ts'
 import { JoinerSession } from './conference/joinerSession.ts'
@@ -923,6 +923,7 @@ export default function App() {
     if (!pack || pack.questions.length === 0) return
     if (matchMode === 'conference' && joiningStatus) return
     if (!confirmNewGame(readSavedGame(), (message) => window.confirm(message))) return
+    void wipeDebugLog()
     if (matchMode === 'conference') {
       const roomId = crypto.randomUUID()
       await enterMasterLobby(roomId)
@@ -1128,6 +1129,7 @@ export default function App() {
   function exitToMenu() {
     suppressSave.current = true
     clearSavedGame()
+    void wipeDebugLog()
     setSavedGame(null)
     setHearTurnOnly(false)
     teardownConference()

@@ -277,3 +277,8 @@ export const hostCutCaptionWaitMs = 1500
 /** Индикатор модели у мастера: высота полосы пары «начало–конец» (px холста) и зазор между дорожками. */
 export const meterLaneBarPx = 2
 export const meterLaneGapPx = 1
+
+/** Отладочный лог в IndexedDB: пачка пишется не чаще, чем раз в столько мс. */
+export const debugLogFlushMs = 1_000
+/** …или сразу, когда в очереди набралось столько записей. */
+export const debugLogFlushBatch = 200

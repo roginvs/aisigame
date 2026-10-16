@@ -242,8 +242,8 @@ export function GameScreen(props: {
   const confirmYes = () => { if (confirmingId === null) return; setConfirmAppeal(null); sendAppeal(confirmingId) }
   const confirmNo = () => setConfirmAppeal(null)
 
-  function copyDebug() {
-    const result = downloadDebugDump({ path, context })
+  async function copyDebug() {
+    const result = await downloadDebugDump({ path, context })
     setCopyFeedback(result.ok ? `Скачано ${formatDebugSize(result.bytes)}` : 'Не скачалось')
     window.clearTimeout(copyResetRef.current)
     copyResetRef.current = window.setTimeout(() => setCopyFeedback(null), 2_000)
@@ -498,7 +498,7 @@ export function GameScreen(props: {
             className="ghost debug-copy"
             aria-label={copyFeedback ?? 'Скачать дебаг'}
             title={copyFeedback ?? 'Скачать дебаг'}
-            onClick={copyDebug}
+            onClick={() => void copyDebug()}
           >
             <span aria-hidden="true">🔧</span>
             <span className="debug-copy-label btn-label" aria-hidden="true">

@@ -1,3 +1,4 @@
+import { pushTrace } from '../debug/trace.ts'
 import type { ConferenceMessageRing } from '../conference/messages.ts'
 import { messageRingFromLegacyChat, readMessageRing } from '../conference/messageRing.ts'
 import { appealMsLeft, readAppeal, readOutcomes } from './appeals.ts'
@@ -102,7 +103,7 @@ export function persistConferenceLobby(
     phase: 'welcoming',
   })
   if (!game) return readSavedGame(storage)
-  storage.setItem(gameStorageKey, JSON.stringify(game))
+  safeSetGame(storage, game)
   return game
 }
 
@@ -195,6 +196,17 @@ const questionPhases = new Set([
   'specialAway',
 ])
 
+/** Запись снимка не должна ронять игру: квота/приватный режим — только строка в отладочном логе. */
+function safeSetGame(storage: Storage, game: unknown): boolean {
+  try {
+    storage.setItem(gameStorageKey, JSON.stringify(game))
+    return true
+  } catch (error: unknown) {
+    pushTrace('note', 'сохранение игры в localStorage не удалось', { error: error instanceof Error ? `${error.name}: ${error.message}` : String(error) })
+    return false
+  }
+}
+
 export function readSavedGame(storage: Storage = localStorage): SavedGame | null {
   try {
     const raw = storage.getItem(gameStorageKey)
@@ -208,11 +220,15 @@ export function readSavedGame(storage: Storage = localStorage): SavedGame | null
 export function writeSavedGame(game: SavedGame, storage: Storage = localStorage): void {
   const clean = sanitize(game)
   if (!clean) return
-  storage.setItem(gameStorageKey, JSON.stringify(clean))
+  safeSetGame(storage, clean)
 }
 
 export function clearSavedGame(storage: Storage = localStorage): void {
-  storage.removeItem(gameStorageKey)
+  try {
+    storage.removeItem(gameStorageKey)
+  } catch (error: unknown) {
+    pushTrace('note', 'удаление сохранённой игры не удалось', { error: String(error) })
+  }
 }
 
 /** Id своего файла. Совпадает с `ownPackId`: в снимке имя и sha256, самих байтов нет. */
@@ -317,7 +333,7 @@ export function persistMatch(
     ...(typeof hearTurnOnly === 'boolean' ? { hearTurnOnly } : {}),
   })
   if (!game) return readSavedGame(storage)
-  storage.setItem(gameStorageKey, JSON.stringify(game))
+  safeSetGame(storage, game)
   return game
 }
 
@@ -423,7 +439,7 @@ export function persistConferenceHistory(roomId: string, history: ConferenceMess
   if (!clean) return previous
   const game = sanitize({ ...previous, ...clean })
   if (!game) return previous
-  storage.setItem(gameStorageKey, JSON.stringify(game))
+  safeSetGame(storage, game)
   return game
 }
 
@@ -444,7 +460,7 @@ function patchHearTurnOnly(input: boolean | undefined, storage: Storage): SavedG
   const raw = { ...previous, hearTurnOnly: input } as SavedGame
   const game = sanitize(raw)
   if (!game) return previous
-  storage.setItem(gameStorageKey, JSON.stringify(game))
+  safeSetGame(storage, game)
   return game
 }
 

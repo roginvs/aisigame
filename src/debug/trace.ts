@@ -21,6 +21,8 @@ export type SharedDebugEntry = {
   detail?: string
 }
 
+import { debugLogStore, type StoredLogEntry } from './logDb.ts'
+
 const limit = 1500
 const remoteClientLimit = 32
 const remoteEntryLimit = 160
@@ -77,6 +79,13 @@ export function pushTrace(kind: TraceKind, title: string, detail?: unknown): voi
   const next = snapshot.length >= limit ? snapshot.slice(snapshot.length - limit + 1) : snapshot.slice()
   next.push(entry)
   snapshot = next
+  debugLogStore.push({
+    source: 'local',
+    at: entry.at,
+    kind,
+    title: entry.title,
+    ...(entry.detail === undefined ? {} : { detail: safeJson(entry.detail) ?? '"[не сериализуется]"' }),
+  })
   console.log(`[aisigame ${entry.at}] ${kind} ${entry.title}`, entry.detail ?? '')
   for (const listener of listeners) listener()
 }
@@ -249,8 +258,10 @@ export function appendRemoteDebug(
     title: clip(redact(entry.title), 500),
     ...(entry.detail ? { detail: clip(redact(entry.detail), 4_000) } : {}),
   }))
+  const safeName = clip(redact(name), 100) || 'Игрок'
+  for (const entry of safeEntries) debugLogStore.push({ source: 'remote', clientId: safeClientId, name: safeName, ...entry })
   remoteSnapshot.set(safeClientId, {
-    name: clip(redact(name), 100) || 'Игрок',
+    name: safeName,
     entries: [...previous, ...safeEntries].slice(-remoteEntryLimit),
   })
 }
@@ -261,28 +272,43 @@ export function clearRemoteDebug(): void {
 
 export const clearRemoteDebugForTests = clearRemoteDebug
 
-export function formatDebugDump(extra: { path: string; context: unknown }): string {
+/** Дамп из памяти (кольцо 1500 записей) — запасной путь, если IndexedDB нет. */
+export function formatDebugDump(extra: { path: string; context: unknown }, stored?: readonly StoredLogEntry[] | null, storeNote = ''): string {
   const lines = [
     '# AI SI Game debug',
     `exported: ${new Date().toISOString()}`,
     `state: ${extra.path}`,
     `link: connection=${linkStatus.connection} mic=${linkStatus.mic} host=${linkStatus.host}`,
+    `log: ${stored ? `IndexedDB, ${stored.length} записей` : 'только память (последние записи)'}${storeNote ? ` · ${storeNote}` : ''}`,
     '',
     '## machine context',
     JSON.stringify(sanitize(extra.context), null, 2),
     '',
     '## trace',
   ]
-  for (const entry of snapshot) {
+  const local = stored ? stored.filter((entry) => entry.source === 'local') : snapshot.map((entry) => ({ ...entry, detail: entry.detail === undefined ? undefined : JSON.stringify(entry.detail) }))
+  for (const entry of local) {
     lines.push(`${entry.at} ${entry.kind} ${entry.title}`)
-    if (entry.detail !== undefined) lines.push(JSON.stringify(entry.detail))
+    if (entry.detail !== undefined) lines.push(entry.detail)
     lines.push('')
   }
-  if (remoteSnapshot.size > 0) {
+  const remote = new Map<string, { name: string; entries: { at: string; kind: string; title: string; detail?: string }[] }>()
+  if (stored) {
+    for (const entry of stored) {
+      if (entry.source !== 'remote' || !entry.clientId) continue
+      const bucket = remote.get(entry.clientId) ?? { name: entry.name ?? 'Игрок', entries: [] }
+      bucket.name = entry.name ?? bucket.name
+      bucket.entries.push(entry)
+      remote.set(entry.clientId, bucket)
+    }
+  } else {
+    for (const [clientId, value] of remoteSnapshot) remote.set(clientId, value)
+  }
+  if (remote.size > 0) {
     lines.push('## remote player trace', '')
-    for (const [clientId, remote] of remoteSnapshot) {
-      lines.push(`### ${remote.name} (${clientId})`)
-      for (const entry of remote.entries) {
+    for (const [clientId, value] of remote) {
+      lines.push(`### ${value.name} (${clientId})`)
+      for (const entry of value.entries) {
         lines.push(`${entry.at} ${entry.kind} ${entry.title}`)
         if (entry.detail !== undefined) lines.push(entry.detail)
         lines.push('')
@@ -292,6 +318,22 @@ export function formatDebugDump(extra: { path: string; context: unknown }): stri
   lines.push(`origin: ${pageOrigin() || '—'}`)
   lines.push(`commit: ${buildCommit()}`)
   return lines.join('\n')
+}
+
+/** Полный дамп: весь лог партии из IndexedDB (переживает перезагрузку), иначе память. */
+export async function formatFullDebugDump(extra: { path: string; context: unknown }): Promise<string> {
+  let stored: StoredLogEntry[] | null = null
+  try {
+    stored = await debugLogStore.readAll()
+  } catch {
+    stored = null
+  }
+  return formatDebugDump(extra, stored, debugLogStore.lastError())
+}
+
+/** Новая игра или выход: стереть полный лог (тот же цикл жизни, что у снимка партии). */
+export function wipeDebugLog(): Promise<void> {
+  return debugLogStore.wipe()
 }
 
 export type DownloadDebugResult = { ok: boolean; bytes: number; fileName: string }
@@ -308,8 +350,8 @@ export function debugFileName(date = new Date()): string {
  * Скачивает дамп файлом: Blob + `<a download>` (работает и в Chrome на Android,
  * в отличие от буфера обмена с большим текстом).
  */
-export function downloadDebugDump(extra: { path: string; context: unknown }, now = new Date()): DownloadDebugResult {
-  const text = formatDebugDump(extra)
+export async function downloadDebugDump(extra: { path: string; context: unknown }, now = new Date()): Promise<DownloadDebugResult> {
+  const text = await formatFullDebugDump(extra)
   const blob = new Blob([text], { type: 'text/plain;charset=utf-8' })
   const fileName = debugFileName(now)
   try {
