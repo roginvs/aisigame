@@ -1,3 +1,4 @@
+import { pingLabel } from './pingLabel.ts'
 import { useEffect, useRef, useState, type ReactNode } from 'react'
 import type { ConferenceTile } from '../conference/media.ts'
 import { getModelLevels, subscribeModelLevels } from '../conference/modelLevels.ts'
@@ -82,10 +83,6 @@ export function ConferenceVideoTile(props: {
   )
 }
 
-/** «42 ms»; без замера — пусто. */
-export function pingLabel(pingMs: number | null | undefined): string {
-  return typeof pingMs === 'number' && Number.isFinite(pingMs) && pingMs >= 0 ? `${Math.round(pingMs)} ms` : ''
-}
 
 /** Локальные mic / cam / следующая камера — ряд над полем чата. */
 export function ConferenceMediaControls(props: {

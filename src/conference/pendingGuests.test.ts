@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { pendingGuests } from '../ui/ConferencePlayersRow.tsx'
+import { pendingGuests } from '../ui/pendingGuests.ts'
 import { commentaryContext, setPendingGuests } from '../game/commentary.ts'
 import type { GameContext } from '../game/types.ts'
 

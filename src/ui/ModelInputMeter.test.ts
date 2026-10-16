@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { meterLevel } from './ModelInputMeter.tsx'
+import { meterLevel } from './meterDraw.ts'
 
 describe('meterLevel', () => {
   it('тишина — 0, громкий сигнал — до 1', () => {

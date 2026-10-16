@@ -139,9 +139,10 @@ describe('createMicMixer', () => {
   beforeEach(() => {
     vi.stubGlobal(
       'AudioContext',
-      vi.fn(function AudioContext(this: FakeAudioContext) {
-        Object.assign(this, new FakeAudioContext())
-        ctx = this
+      // Конструктор возвращает объект: `new AudioContext()` отдаёт именно этот фейк.
+      vi.fn(function AudioContext() {
+        ctx = new FakeAudioContext()
+        return ctx
       }),
     )
     vi.stubGlobal('MediaStream', FakeMediaStream)

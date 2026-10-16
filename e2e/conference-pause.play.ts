@@ -53,13 +53,6 @@ test('карточка ведущей одинакова; пауза на объ
   await context.close()
 })
 
-async function hear(page: Page, text: string): Promise<void> {
-  await page.evaluate((line) => {
-    const controls = (window as unknown as { __aisigame?: { hear: (text: string, durationMs?: number) => void } }).__aisigame
-    if (!controls) throw new Error('нет заглушки ведущей')
-    controls.hear(line, 1400)
-  }, text)
-}
 
 async function setSpeechMs(page: Page, ms: number): Promise<void> {
   await page.evaluate((value) => {

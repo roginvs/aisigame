@@ -148,6 +148,7 @@ export default function App() {
   const hearTurnOnlyRef = useRef(hearTurnOnly)
   /** Последний разосланный мастером снимок: экран мастера рисуется из него, как у гостей. */
   const [masterSnapshot, setMasterSnapshot] = useState<ConferenceSnapshot | null>(null)
+  const masterSessionRef = useRef<MasterSession | null>(null)
   useEffect(() => {
     hearTurnOnlyRef.current = hearTurnOnly
     masterSessionRef.current?.setHearTurnOnly(hearTurnOnly)
@@ -190,7 +191,6 @@ export default function App() {
   const controllerActionsRef = useRef<GameControllerActions | null>(null)
   const voiceConnectedRef = useRef(false)
   const conferenceLobbyRef = useRef(false)
-  const masterSessionRef = useRef<MasterSession | null>(null)
   const joinerSessionRef = useRef<JoinerSession | null>(null)
   const transportDisposeRef = useRef<(() => void) | null>(null)
   const conferenceHandleRef = useRef<ConferenceHandle | null>(null)
@@ -201,7 +201,6 @@ export default function App() {
   const [conferenceHostSpeaking, setConferenceHostSpeaking] = useState(false)
   const conferenceTilesRef = useRef<ConferenceTile[]>([])
   const warnedMicAttemptRef = useRef('')
-  const hostSpeakingRef = useRef(link.host)
   const modelMeter = useCallback(() => conferenceHandleRef.current?.modelMeter?.() ?? null, [])
   const localMicStream = useCallback(() => conferenceHandleRef.current?.localMicStream() ?? null, [])
   const bindConferenceVideo = useCallback((participantId: string, element: HTMLVideoElement | null) => {
@@ -359,7 +358,6 @@ export default function App() {
     : undefined
   const chooserMicLive = chooserTile?.micLive
   const chooserId = chooser?.id ?? null
-  hostSpeakingRef.current = link.host
   const answerAttemptKey = answerer
     ? `${snapshot.context.activeQuestionId ?? ''}:${snapshot.context.attemptId}:${answerer.id}`
     : ''

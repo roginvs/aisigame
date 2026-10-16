@@ -10,10 +10,10 @@ import { analyserRms, nudgeIdle, nudgeLevelOverride, stepNudge, type NudgeState 
 export function useBuzzNudge(getStream: (() => MediaStream | null) | undefined, active: boolean): number {
   const [flashAt, setFlashAt] = useState(0)
   const state = useRef<NudgeState>(nudgeIdle)
+  const clearTimer = useRef(0)
   useEffect(() => {
     if (!active) {
       state.current = { ...nudgeIdle, firedAt: state.current.firedAt }
-      setFlashAt(0)
       return
     }
     let stream: MediaStream | null = null
@@ -21,7 +21,6 @@ export function useBuzzNudge(getStream: (() => MediaStream | null) | undefined, 
     let source: MediaStreamAudioSourceNode | null = null
     let analyser: AnalyserNode | null = null
     let samples: Float32Array<ArrayBuffer> | null = null
-    let clearTimer = 0
     const release = () => {
       source?.disconnect()
       void ctx?.close().catch(() => undefined)
@@ -54,14 +53,16 @@ export function useBuzzNudge(getStream: (() => MediaStream | null) | undefined, 
       state.current = step.state
       if (!step.fire) return
       setFlashAt(now)
-      window.clearTimeout(clearTimer)
-      clearTimer = window.setTimeout(() => setFlashAt(0), buzzNudge.flashMs * buzzNudge.flashes)
+      window.clearTimeout(clearTimer.current)
+      clearTimer.current = window.setTimeout(() => setFlashAt(0), buzzNudge.flashMs * buzzNudge.flashes)
     }, buzzNudge.sampleMs)
     return () => {
       window.clearInterval(timer)
-      window.clearTimeout(clearTimer)
       release()
     }
   }, [active, getStream])
-  return flashAt
+  // Гашение вспышки: таймер переживает перезапуск эффекта (смену потока) и снимается только при размонтировании.
+  useEffect(() => () => window.clearTimeout(clearTimer.current), [])
+  // Вне окна подсказки вспышки нет: значение выводится при рендере, а не сбрасывается в эффекте.
+  return active ? flashAt : 0
 }

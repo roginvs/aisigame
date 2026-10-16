@@ -36,7 +36,7 @@ import { canBuzzPlayer, canPickCell, conferenceSoloListenHint, conferenceTurnTit
 import { PackAwaitPanel, type PackAwaitProgress } from './PackAwaitPanel.tsx'
 import { HostPresence } from './HostPresence.tsx'
 import { getHostEar, subscribeHostEar } from '../game/hostEar.ts'
-import { tapPressProps } from './tapPress.ts'
+import { tapClick, tapPointerDown } from './tapPress.ts'
 import { InviteDialog } from './InviteDialog.tsx'
 import { QuestionClip, QuestionMedia } from './QuestionMedia.tsx'
 import { questionClipPlaying } from './questionClip.ts'
@@ -740,7 +740,8 @@ export function GameScreen(props: {
                       : undefined
                   }
                   disabled={appealState ? !appealState.enabled : cooling || ((missed || !buttonsOpen) && !canFalseStart)}
-                  {...tapPressProps(() => onPlayerAction(playerId))}
+                  onPointerDown={(event) => tapPointerDown(event, () => onPlayerAction(playerId))}
+                    onClick={(event) => tapClick(event, () => onPlayerAction(playerId))}
                 >
                   {buzzerLabel({ appealLabel: appealState?.label, cooling, normal: chooses ? 'выбирайте вопрос' : missed ? 'Уже отвечал' : player.name })}
                   {earlyLive ? <span className="visually-hidden">, вопрос ещё читается</span> : null}

@@ -44,7 +44,7 @@ describe('метки индикатора модели', () => {
 
 describe('закрытый вход модели', () => {
   it('серый цвет и вуаль, только mic=live открыт', async () => {
-    const m = await import('./ModelInputMeter.tsx')
+    const m = await import('./meterDraw.ts')
     expect(m.modelInputOpen('live')).toBe(true)
     expect(m.modelInputOpen('muted')).toBe(false)
     expect(m.modelInputOpen('idle')).toBe(false)

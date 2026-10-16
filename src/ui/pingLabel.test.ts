@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { pingLabel } from './ConferenceVideoStrip.tsx'
+import { pingLabel } from './pingLabel.ts'
 
 describe('pingLabel', () => {
   it('«42 ms», пусто без замера', () => {
