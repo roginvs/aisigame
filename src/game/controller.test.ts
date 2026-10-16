@@ -768,7 +768,7 @@ describe('specialListening — ранний слух', () => {
 })
 
 import { selectionInstructions } from './controller.ts'
-import { answerSilenceDecideMs, choiceClarifyAfterMs, choiceResolveTimeoutMs, transcriptWaitMs } from '../options.ts'
+import { answerSilenceDecideMs, choiceClarifyAfterMs, choiceLateTranscriptMs, choiceResolveTimeoutMs, transcriptWaitMs } from '../options.ts'
 
 async function toChoosing(actor: { getSnapshot: () => { value: unknown } }) {
   for (let i = 0; i < 40 && statePath(actor.getSnapshot().value as never) !== 'choosing.listening'; i += 1) await vi.advanceTimersByTimeAsync(250)
@@ -830,6 +830,58 @@ describe('выбор ячейки голосом: тема в любой фор�
     expect(tools.mock.calls.some((call) => call[2] === 'selectQuestion' && call[6] === item)).toBe(true)
     expect(statePath(actor.getSnapshot().value)).toBe('choosing.listening')
     stop(); actor.stop()
+  })
+
+  describe('выбор по звуку без расшифровки: ячейка ждёт позднюю расшифровку', () => {
+    class AudioPick extends MockRealtimeClient {
+      calls = 0
+      override requestTool(purpose: string, turn: number, name: string, instructions: string, isolated = false, tool?: { name: string }, audioItemId?: string): void {
+        if (name !== 'selectQuestion') { super.requestTool(purpose, turn, name, instructions, isolated, tool, audioItemId); return }
+        this.calls += 1
+        window.setTimeout(() => this.onToolCall({ name, callId: `a${this.calls}`, arguments: { themeId: 'v', value: 200, confident: true, speech: 'choice', heard: 'Волга 200' } }, purpose, turn), 10)
+      }
+    }
+    async function pickByAudio() {
+      const client = new AudioPick()
+      const prompts = vi.spyOn(client, 'setTranscriptionPrompt')
+      const booted = await boot(client)
+      await toChoosing(booted.actor)
+      const item = client.hearDeferred(1500)
+      // Ждём, пока выйдет ожидание расшифровки и модель ответит по звуку.
+      await vi.advanceTimersByTimeAsync(transcriptWaitMs(1500) + 100)
+      expect(client.calls).toBe(1)
+      return { client, item, prompts, ...booted }
+    }
+
+    it('эхо каталога через 58 мс после уверенного выбора — ячейка не открыта (дамп 19:28:00.119Z)', async () => {
+      const { client, item, prompts, actor, stop } = await pickByAudio()
+      expect(actor.getSnapshot().context.activeQuestionId).toBeNull()
+      const catalog = String(prompts.mock.calls.at(-1)?.[0] ?? '').replace(/^\{|\}$/g, '')
+      expect(catalog.length).toBeGreaterThan(0)
+      await vi.advanceTimersByTimeAsync(58)
+      client.deliverTranscript(item, catalog)
+      await vi.advanceTimersByTimeAsync(choiceLateTranscriptMs + choiceClarifyAfterMs)
+      expect(actor.getSnapshot().context.activeQuestionId).toBeNull()
+      expect(statePath(actor.getSnapshot().value)).toMatch(/^choosing/)
+      stop(); actor.stop()
+    })
+
+    it('поздняя расшифровка — обычная речь: ячейка открывается сразу после неё', async () => {
+      const { client, item, actor, stop } = await pickByAudio()
+      client.deliverTranscript(item, 'Волга за двести')
+      await vi.advanceTimersByTimeAsync(50)
+      expect(actor.getSnapshot().context.activeQuestionId).toBe('v-200')
+      stop(); actor.stop()
+    })
+
+    it('расшифровка так и не пришла — после choiceLateTranscriptMs верим модели', async () => {
+      const { actor, stop } = await pickByAudio()
+      await vi.advanceTimersByTimeAsync(choiceLateTranscriptMs - 200)
+      expect(actor.getSnapshot().context.activeQuestionId).toBeNull()
+      await vi.advanceTimersByTimeAsync(400)
+      expect(actor.getSnapshot().context.activeQuestionId).toBe('v-200')
+      stop(); actor.stop()
+    })
   })
 
   it('шум на переспросе не обрывает ведущую; подтверждённая речь — обрывает', async () => {

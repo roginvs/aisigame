@@ -3,7 +3,7 @@ import { auctionBidToolFor, finalBetToolFor, selectQuestionToolFor } from '../re
 import type { Actor, SnapshotFrom } from 'xstate'
 import { clearHostEar, getHostEar, subscribeHostEar, hostEarHearing, hostEarHostSpoke, hostEarMicClosed, hostEarProcessing, hostEarShown, hostEarSurvives, settleHostEar } from './hostEar.ts'
 import { playTimeoutBeep } from '../audio/beep.ts'
-import { answerOverrunSafetyMs, answerSilenceDecideMs, answerUtteranceJudgeMs, bargeInSustainMs, choiceClarifyAfterMs, choiceResolveTimeoutMs, mutedChooserMaxReminders, auctionDingMs, audioJudgmentTimings, catMeowMs, transcriptWaitMs } from '../options.ts'
+import { answerOverrunSafetyMs, answerSilenceDecideMs, answerUtteranceJudgeMs, bargeInSustainMs, choiceClarifyAfterMs, choiceLateTranscriptMs, choiceResolveTimeoutMs, mutedChooserMaxReminders, auctionDingMs, audioJudgmentTimings, catMeowMs, transcriptWaitMs } from '../options.ts'
 import { matchAuctionSpeech, optionLabel } from './auction.ts'
 import { matchCatStake, nextInCircle } from './cat.ts'
 import { idleThresholds } from './idle.ts'
@@ -1622,8 +1622,32 @@ export function attachController(options: {
       if (call) client.sendToolOutput(call.callId, { accepted: false, reason })
       return finishUtterance(u, "none", undefined, reason)
     }
-    client.sendToolOutput(call.callId, { accepted: true, theme: picked.themeName, value: picked.value })
-    finishUtterance(u, 'cell', { themeId: picked.themeId, value: picked.value, label: cellLabel })
+    const cell = { themeId: picked.themeId, value: picked.value, label: cellLabel }
+    if (transcript || !u.itemId) {
+      client.sendToolOutput(call.callId, { accepted: true, theme: picked.themeName, value: picked.value })
+      return finishUtterance(u, 'cell', cell)
+    }
+    // Ячейка по одному звуку: реплика остаётся в разборе (решение не принимается), пока не придёт расшифровка.
+    const epoch = choiceEpoch
+    const itemId = u.itemId
+    pushTrace('note', `выбор: модель назвала ${cellLabel} по звуку, жду расшифровку до ${choiceLateTranscriptMs} мс (эхо отменит)`)
+    // Модель свободна для следующих реплик; эта остаётся pending, settleChoice без неё не решает.
+    choiceInModel = null
+    window.clearTimeout(choiceModelTimer)
+    runNextSelection()
+    void client.waitForTranscript(itemId, choiceLateTranscriptMs).then((late) => {
+      if (epoch !== choiceEpoch || !choiceTurn.includes(u) || u.state !== 'pending') return
+      u.text = late.text
+      if (late.arrived && (echoesChoicePrompt(late.text, listeningPrompt(actor.getSnapshot().context)) || echoesHost(late.text))) {
+        pushTrace('note', `выбор: поздняя расшифровка — эхо подсказки/ведущей, ячейку ${cellLabel} не открываю`)
+        choiceCaption(itemId, '')
+        client.sendToolOutput(call.callId, { accepted: false, reason: 'Эхо, не выбор' })
+        return finishUtterance(u, 'noise')
+      }
+      if (late.text) choiceCaption(itemId, late.text)
+      client.sendToolOutput(call.callId, { accepted: true, theme: picked.themeName, value: picked.value })
+      finishUtterance(u, 'cell', cell)
+    })
   }
 
   function handleJudgment(call: ToolCall | null, turn: number): void {
