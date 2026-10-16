@@ -693,3 +693,11 @@ function isPlayerId(value: unknown): value is PlayerId {
   return typeof value === 'number' && Number.isInteger(value) && value >= 1
 }
 
+
+export const newGameOverwriteQuestion = 'Есть сохранённая игра. Если начать новую, сохранённая пропадёт. Начать новую игру?'
+
+/** Новая игра поверх сохранённой — только после подтверждения мастера. */
+export function confirmNewGame(saved: SavedGame | null, ask: (message: string) => boolean): boolean {
+  if (!saved) return true
+  return ask(newGameOverwriteQuestion)
+}

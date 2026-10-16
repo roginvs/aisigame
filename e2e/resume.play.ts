@@ -200,3 +200,28 @@ async function hear(page: Page, text: string): Promise<void> {
     controls.hear(line, 1400)
   }, text)
 }
+
+test('новая игра поверх сохранённой — только после подтверждения', async ({ page }) => {
+  await page.goto('/?mock=1')
+  await page.evaluate(() => localStorage.removeItem('aisigame.game'))
+  await page.reload()
+  await page.getByRole('button', { name: 'Начать игру' }).click()
+  await expect(page.locator('.talk .host .host-line')).toHaveText('назовите тему и стоимость')
+  await page.reload()
+  const before = await page.evaluate(() => localStorage.getItem('aisigame.game'))
+  expect(before).not.toBeNull()
+
+  page.once('dialog', async (dialog) => {
+    expect(dialog.type()).toBe('confirm')
+    expect(dialog.message()).toContain('сохранённая пропадёт')
+    await dialog.dismiss()
+  })
+  await page.getByRole('button', { name: 'Начать игру' }).click()
+  await expect(page.getByRole('button', { name: 'Начать игру' })).toBeVisible()
+  await expect(page.getByRole('button', { name: 'Пауза' })).toHaveCount(0)
+  expect(await page.evaluate(() => localStorage.getItem('aisigame.game'))).toBe(before)
+
+  page.once('dialog', (dialog) => dialog.accept())
+  await page.getByRole('button', { name: 'Начать игру' }).click()
+  await expect(page.getByRole('button', { name: 'Пауза' })).toBeVisible()
+})

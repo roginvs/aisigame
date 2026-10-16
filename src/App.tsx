@@ -37,6 +37,7 @@ import { appealRequestError } from './game/appeals.ts'
 import { gameMachine, statePath } from './game/machine.ts'
 import {
   clearSavedGame,
+  confirmNewGame,
   decideResumeFile,
   packCanResume,
   persistConferenceLobby,
@@ -920,8 +921,9 @@ export default function App() {
 
   async function start() {
     if (!pack || pack.questions.length === 0) return
+    if (matchMode === 'conference' && joiningStatus) return
+    if (!confirmNewGame(readSavedGame(), (message) => window.confirm(message))) return
     if (matchMode === 'conference') {
-      if (joiningStatus) return
       const roomId = crypto.randomUUID()
       await enterMasterLobby(roomId)
       return
