@@ -13,6 +13,16 @@ test('мастер конференции видит индикатор того
   await expect(meter).toBeVisible()
   await expect(meter).toHaveAttribute('width', '320')
   await expect(meter).toHaveAttribute('height', '20')
+  const legend = page.getByTestId('model-meter-legend')
+  await expect(legend).toBeHidden()
+  await meter.hover()
+  await expect(legend).toBeVisible()
+  await expect(legend).toContainText('ушёл в модель')
+  await expect(legend).toContainText('вход модели закрыт')
+  for (const group of ['hostStart', 'vadStart', 'response', 'reading', 'buzzing', 'answering', 'choosing', 'special', 'appeal', 'phase', 'buzzer', 'hostEnd', 'vadStop', 'responseEnd', 'transcript', 'mixer', 'cancel']) {
+    await expect(legend.locator(`[data-group="${group}"] .sw`)).toHaveCount(1)
+  }
+  if (process.env.MODEL_METER_HOVER_SHOT) await page.screenshot({ path: process.env.MODEL_METER_HOVER_SHOT, clip: { x: 0, y: 0, width: 900, height: 420 } })
   if (process.env.MODEL_METER_SHOT) {
     await page.locator('header.topbar').screenshot({ path: process.env.MODEL_METER_SHOT })
   }

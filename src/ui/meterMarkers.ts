@@ -24,8 +24,8 @@ export const meterMarkerColors: Record<MeterMarkerGroup, string> = {
   vadStop: '#0e7490',
   transcript: '#a3e635',
   mixer: '#e879f9',
-  response: '#34d399',
-  responseEnd: '#047857',
+  response: '#166534',
+  responseEnd: '#052e16',
   cancel: '#ef4444',
   buzzer: '#fde047',
 }

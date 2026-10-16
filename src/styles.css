@@ -34,6 +34,29 @@ h1, h2, p { margin: 0; }
   text-transform: uppercase;
 }
 
+.model-meter-wrap { position: relative; display: inline-block; vertical-align: middle; outline: none; }
+.model-meter-legend {
+  display: none;
+  position: absolute;
+  top: calc(100% + 4px);
+  left: 0;
+  z-index: 50;
+  width: max-content;
+  max-width: min(340px, 90vw);
+  padding: 6px 8px;
+  background: #11131c;
+  border: 1px solid rgba(255, 255, 255, 0.25);
+  border-radius: 4px;
+  font-size: 0.72rem;
+  line-height: 1.35;
+  color: #e5e7eb;
+  text-transform: none;
+  letter-spacing: normal;
+}
+.model-meter-wrap:hover .model-meter-legend,
+.model-meter-wrap:focus .model-meter-legend { display: block; }
+.model-meter-legend > span { display: block; }
+.model-meter-legend .sw { display: inline-block; width: 10px; height: 10px; margin-right: 4px; vertical-align: -1px; border: 1px solid #fff3; }
 .model-meter {
   display: inline-block;
   width: 320px;

@@ -1,6 +1,6 @@
 import { useEffect, useRef } from 'react'
 import { getLinkStatus, getTrace, subscribeTrace } from '../debug/trace.ts'
-import { buildIntervals, createMarkerCollector, isLaneGroup, laneRect, meterLegendText, meterMarkerColors, type MeterMarker } from './meterMarkers.ts'
+import { buildIntervals, createMarkerCollector, isLaneGroup, laneRect, meterLegendText, meterMarkerColors, meterMarkerLegend, type MeterMarker } from './meterMarkers.ts'
 
 /** RMS уровня по time-domain байтам AnalyserNode (128 = тишина) → 0..1, с усилением для речи. */
 export function meterLevel(samples: Uint8Array): number {
@@ -28,6 +28,8 @@ export function waveColor(live: boolean, open: boolean): string {
   if (!live) return '#888'
   return open ? '#4ade80' : '#6b7280'
 }
+/** Подложка под полосами дорожек. */
+export const LANE_BACKING = 'rgba(10, 12, 20, 0.85)'
 const WIDTH = METER_WIDTH
 const HEIGHT = 20
 
@@ -94,19 +96,28 @@ export function ModelInputMeter({ getAnalyser, getLevel }: { getAnalyser?: () =>
   }, [getAnalyser, getLevel])
 
   return (
-    <canvas
-      ref={canvasRef}
-      className="model-meter"
-      width={WIDTH}
-      height={HEIGHT}
-      title={meterLegendText()}
-      aria-label="Уровень звука, который слышит модель"
-      data-testid="model-meter"
-    />
+    <span className="model-meter-wrap" tabIndex={0} aria-describedby="model-meter-legend">
+      <canvas
+        ref={canvasRef}
+        className="model-meter"
+        width={WIDTH}
+        height={HEIGHT}
+        aria-label={meterLegendText()}
+        data-testid="model-meter"
+      />
+      <span id="model-meter-legend" role="tooltip" className="model-meter-legend" data-testid="model-meter-legend">
+        <span><b>Что слышит модель</b> (выход микшера, справа — сейчас).</span>
+        <span><i className="sw" style={{ background: waveColor(true, true) }} /> волна — звук, который ушёл в модель</span>
+        <span><i className="sw" style={{ background: CLOSED_OVERLAY }} /> серая вуаль — вход модели закрыт, в модель не ушло</span>
+        <span><b>Полосы сверху</b> — от начала до конца, у каждого типа своя строка; <b>черты</b> — события:</span>
+        {meterMarkerLegend.map(([group, label]) => (
+          <span key={group} data-group={group}><i className="sw" style={{ background: meterMarkerColors[group] }} /> {label}</span>
+        ))}
+      </span>
+    </span>
   )
 }
 
-/** Вертикальные метки событий: столбец — первый, чьё время ≥ времени события. */
 /** Столбец события: первый, чьё время ≥ at; -1 — левее окна, WIDTH — ещё не наступило. */
 function columnAt(at: number, times: Float64Array, head: number): number {
   let seenSample = false
@@ -127,6 +138,11 @@ export function drawMarkers(ctx: CanvasRenderingContext2D, markers: readonly Met
     const x1 = interval.end === null ? WIDTH : columnAt(interval.end, times, head)
     if (x1 < 0 || x0 >= WIDTH) continue
     const { y, h } = laneRect(interval.lane)
+    const left = Math.max(0, x0 - 1)
+    const right = Math.min(WIDTH, Math.max(x0 + 1, x1) + 1)
+    // Тёмная подложка: полоса не сливается с зелёной волной.
+    ctx.fillStyle = LANE_BACKING
+    ctx.fillRect(left, Math.max(0, y - 1), right - left, h + 2)
     ctx.fillStyle = meterMarkerColors[interval.group]
     ctx.fillRect(x0, y, Math.max(1, Math.min(WIDTH, x1) - x0), h)
   }
