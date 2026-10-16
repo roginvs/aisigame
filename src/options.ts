@@ -247,6 +247,8 @@ export const displayMetricsLog = {
  */
 export const questionFit = {
   minFontPx: 18,
+  /** Если текст не влез при размере из CSS, подогнанный шрифт не крупнее этого (вместо 28–30 px на ноутбуке с зумом). */
+  fittedMaxFontPx: 24,
   /** Шаги двоичного поиска размера шрифта (точность ~0.1 px). */
   steps: 8,
 }

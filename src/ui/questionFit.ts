@@ -37,7 +37,8 @@ export function useFitQuestionText(ref: RefObject<HTMLElement | null>, text: str
       const card = el.parentElement
       const fits = () => el.scrollHeight <= el.clientHeight + 1 && (!card || card.scrollHeight <= card.clientHeight + 1)
       if (!(base > 0) || fits()) return
-      const result = fitFontSize(base, questionFit.minFontPx, (size) => {
+      // Пришлось подгонять (места мало) — не крупнее `fittedMaxFontPx`: на тесном экране спокойнее читать.
+      const result = fitFontSize(Math.min(base, questionFit.fittedMaxFontPx), questionFit.minFontPx, (size) => {
         el.style.fontSize = `${size}px`
         return fits()
       })

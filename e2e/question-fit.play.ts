@@ -131,8 +131,8 @@ test('огромный текст вопроса: минимальный шри�
   }
 })
 
-test('гость в конференции: длинный вопрос виден целиком (1536x864 зум 125 %)', async ({ browser }) => {
-  const context = await browser.newContext({ viewport: { width: 1229, height: 600 }, deviceScaleFactor: 1.25 })
+for (const [name, width, height, dpr] of [['1536x864-zoom125', 1229, 600, 1.25], ['1280x720', 1280, 609, 1]] as const) test(`гость в конференции: длинный вопрос виден целиком, камеры — превью (${name})`, async ({ browser }) => {
+  const context = await browser.newContext({ viewport: { width, height }, deviceScaleFactor: dpr })
   try {
     const master = await context.newPage(), guest = await context.newPage()
     await master.goto('/?mock=1&transport=broadcast')
@@ -155,10 +155,16 @@ test('гость в конференции: длинный вопрос виде
     await master.getByRole('button', { name: 'Начать игру' }).click()
     await guest.getByRole('button', { name: 'Текст, 200', exact: true }).click()
     await expect(guest.locator('.question h2')).toContainText('несколько секунд', { timeout: 15_000 })
-    const m = await expectQuestionReadable(guest, 'guest-1536x864-zoom125')
+    const m = await expectQuestionReadable(guest, `guest-${name}`)
     expect(m.overflow).toBeLessThanOrEqual(1)
+    // Подогнанный шрифт не крупнее questionFit.fittedMaxFontPx (24), кадр камеры — превью ≤ 15 % высоты.
+    expect(m.font).toBeLessThanOrEqual(24)
+    const frame = await guest.locator('.conference-player .video-frame').first().boundingBox()
+    expect(frame?.height ?? 0).toBeGreaterThan(40)
+    expect(frame?.height ?? 999).toBeLessThanOrEqual(height * 0.15 + 8) // + рамка и поля карточки
+    if (process.env.CAMS_FINAL_DIR) await guest.screenshot({ path: `${process.env.CAMS_FINAL_DIR}/cams-final-${name}.png` })
     await expect(master.locator('.question h2')).toContainText('несколько секунд')
-    await expectQuestionReadable(master, 'conference-master-1536x864-zoom125')
+    await expectQuestionReadable(master, `conference-master-${name}`)
   } finally {
     await context.close()
   }
