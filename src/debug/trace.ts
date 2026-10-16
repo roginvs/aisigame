@@ -114,7 +114,36 @@ export function chatLineId(entryId: number): string {
   return `${chatSession}-${entryId}`
 }
 
-export type ChatLineEdit = { id: string; text: string | null }
+/**
+ * Пометка реплики игрока в чате: как модель её поняла. Структурное поле, текст не разбирается.
+ * Ответ: stall (заминка), noise (шум), counted (засчитано как ответ), guessing (перебор, не засчитано).
+ * Выбор: noise, other (не выбор), cell (дала ячейку), picked (по ней выбрана ячейка); cell — подпись ячейки.
+ */
+export type ChatMark = { kind: 'stall' | 'noise' | 'counted' | 'guessing' | 'other' | 'cell' | 'picked'; cell?: string }
+
+export function readChatMark(value: unknown): ChatMark | undefined {
+  if (!value || typeof value !== 'object') return undefined
+  const kind = (value as { kind?: unknown }).kind
+  const cell = (value as { cell?: unknown }).cell
+  if (kind !== 'stall' && kind !== 'noise' && kind !== 'counted' && kind !== 'guessing' && kind !== 'other' && kind !== 'cell' && kind !== 'picked') return undefined
+  if (cell !== undefined && (typeof cell !== 'string' || cell.length > 120)) return undefined
+  return cell ? { kind, cell } : { kind }
+}
+
+/** Короткая подпись пометки для бейджа. */
+export function chatMarkLabel(mark: ChatMark): string {
+  switch (mark.kind) {
+    case 'stall': return 'заминка'
+    case 'noise': return 'шум'
+    case 'counted': return '✓ засчитано'
+    case 'guessing': return '✗ перебор'
+    case 'other': return 'не выбор'
+    case 'cell': return mark.cell ? `→ ${mark.cell}` : 'ячейка'
+    case 'picked': return mark.cell ? `✓ выбрано: ${mark.cell}` : '✓ выбрано'
+  }
+}
+
+export type ChatLineEdit = { id: string; text: string | null; mark?: ChatMark }
 const chatEditListeners = new Set<(edit: ChatLineEdit) => void>()
 export function subscribeChatEdits(listener: (edit: ChatLineEdit) => void): () => void {
   chatEditListeners.add(listener)
@@ -139,10 +168,41 @@ export function editChatLine(entryId: number, text: string | null): void {
   for (const listener of chatEditListeners) listener({ id: chatLineId(entryId), text: clean })
 }
 
-export function pushPlayerLine(text: string): void {
+export function pushPlayerLine(text: string, itemId?: string | null): void {
   const clean = text.trim()
   if (!clean) return
-  pushTrace('chat', 'Игрок', { role: 'player' satisfies ChatRole, text: clean })
+  const mark = itemId ? pendingMarks.get(itemId) : undefined
+  if (itemId) pendingMarks.delete(itemId)
+  pushTrace('chat', 'Игрок', { role: 'player' satisfies ChatRole, text: clean, ...(itemId ? { itemId } : {}), ...(mark ? { mark } : {}) })
+}
+
+/** Пометки, пришедшие раньше самой строки (подпись публикуется после оценки). */
+const pendingMarks = new Map<string, ChatMark>()
+
+/**
+ * Пометить реплику игрока по item_id реплики: у мастера запись меняется на месте,
+ * конференция получает правку строки по стабильному id (гости и история).
+ */
+export function markPlayerLine(itemId: string | null | undefined, mark: ChatMark): void {
+  if (!itemId) return
+  let index = -1
+  for (let i = snapshot.length - 1; i >= 0; i -= 1) {
+    const detail = snapshot[i]!.detail
+    if (snapshot[i]!.kind === 'chat' && detail && typeof detail === 'object' && (detail as { itemId?: unknown }).itemId === itemId) { index = i; break }
+  }
+  if (index < 0) {
+    pendingMarks.set(itemId, mark)
+    if (pendingMarks.size > 50) pendingMarks.delete(pendingMarks.keys().next().value!)
+    return
+  }
+  const entry = snapshot[index]!
+  const detail = { ...(entry.detail as object), mark }
+  const next = snapshot.slice()
+  next[index] = { ...entry, detail }
+  snapshot = next
+  for (const listener of listeners) listener()
+  const text = (detail as { text?: unknown }).text
+  for (const listener of chatEditListeners) listener({ id: chatLineId(entry.id), text: typeof text === 'string' ? text : null, mark })
 }
 
 export type LivePlayerLine = { itemId: string; text: string; at: string }

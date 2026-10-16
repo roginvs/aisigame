@@ -354,3 +354,38 @@ it('правка строки ведущей (наш обрыв) доходит 
   expect(edits.every((message) => message.type === 'partialUpdate' && Object.keys(message.changes).every((key) => /^message\d+$/.test(key)))).toBe(true)
   master.dispose()
 })
+
+it('пометка реплики игрока (заминка, засчитано, ячейка) доходит до гостя по id и попадает в историю', async () => {
+  const { markPlayerLine, pushPlayerLine } = await import('../debug/trace.ts')
+  const room = new Room()
+  const guestTransport = room.connect('guest')
+  const guest = new JoinerSession({
+    transport: guestTransport, clientId: 'guest', authToken: 'guest-token', name: 'Гость',
+    callbacks: { onSnapshot: vi.fn(), onLobby: vi.fn(), onPackReady: vi.fn(), onError: vi.fn(), onFatalError: vi.fn() },
+    packCache: { get: async () => null, put: async () => {}, delete: async () => {} },
+  })
+  const transport = room.connect('master')
+  const actor = createActor(gameMachine).start()
+  const bytes = new Uint8Array([7, 8, 9])
+  const saved: Array<Array<string | undefined>> = []
+  const master = new MasterSession({
+    transport, actor, client: { requestSpeech: vi.fn() } as unknown as GameVoice,
+    masterClientId: 'master', masterName: 'Мастер', pack: demoPack, packBytes: bytes,
+    packHash: await sha256Hex(bytes), authorityToken: 'master-token', onRoster: () => {},
+    onHistory: (ring) => saved.push(messageRingEntries(ring).map(({ message }) => message.kind === 'conversation' ? message.mark?.kind : undefined)),
+  })
+  await vi.advanceTimersByTimeAsync(PRESENCE_HEARTBEAT_MS)
+  const marks = () => messageRingEntries(guest.snapshot()!).filter(({ message }) => message.kind === 'conversation' && message.role === 'player')
+    .map(({ message }) => message.kind === 'conversation' ? `${message.text}:${message.mark?.kind ?? ''}${message.mark?.cell ? `:${message.mark.cell}` : ''}` : '')
+  pushPlayerLine('хе-хе', 'i1')
+  pushPlayerLine('Пушкин', 'i2')
+  markPlayerLine('i3', { kind: 'cell', cell: 'Волга 200' }) // строка ещё не показана — пометка ждёт её
+  pushPlayerLine('Волга двести', 'i3')
+  await vi.advanceTimersByTimeAsync(0)
+  markPlayerLine('i1', { kind: 'stall' })
+  markPlayerLine('i2', { kind: 'counted' })
+  await vi.advanceTimersByTimeAsync(0)
+  expect(marks()).toEqual(['хе-хе:stall', 'Пушкин:counted', 'Волга двести:cell:Волга 200'])
+  expect(saved.at(-1)).toEqual(expect.arrayContaining(['stall', 'counted']))
+  master.dispose(); guest.dispose(); actor.stop()
+})

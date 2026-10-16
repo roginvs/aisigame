@@ -1081,3 +1081,21 @@ describe('выбор из нескольких реплик хода', () => {
     expect(text).toContain('2. «наверное»')
   })
 })
+
+describe('пометки реплик выбора в чате', () => {
+  afterEach(() => { vi.useRealTimers(); vi.unstubAllGlobals() })
+  it('реплика без ячейки — «не выбор», реплика, по которой выбрана ячейка, — «выбрано: …»', async () => {
+    const client = new MockRealtimeClient()
+    const { actor, stop } = await boot(client)
+    await toChoosing(actor)
+    client.hear('ну давайте посмотрим что там', 1500)
+    await vi.advanceTimersByTimeAsync(300)
+    client.hear('Волга 200', 900)
+    await vi.advanceTimersByTimeAsync(300)
+    expect(actor.getSnapshot().context.activeQuestionId).toBe('v-200')
+    const marks = getTrace().filter((e) => e.kind === 'chat' && (e.detail as { role?: string }).role === 'player')
+      .map((e) => (e.detail as { mark?: { kind: string; cell?: string } }).mark)
+    expect(marks.slice(-2)).toEqual([{ kind: 'other' }, { kind: 'picked', cell: 'ВОЛГА 200' }])
+    stop(); actor.stop()
+  })
+})

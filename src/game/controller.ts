@@ -11,7 +11,7 @@ import { matchSpokenPlayer, spokenPlayers } from './nameMatch.ts'
 import type { JudgmentInputMode, JudgmentSource, JudgeRequestContext } from '../realtime/judgmentRequest.ts'
 import { JudgmentClock } from './judgmentClock.ts'
 import { gameConfig } from '../config.ts'
-import { noteLink, pushJudgeLine, pushPlayerLine, pushSystemLine, pushTrace } from '../debug/trace.ts'
+import { markPlayerLine, noteLink, pushJudgeLine, pushPlayerLine, pushSystemLine, pushTrace } from '../debug/trace.ts'
 import type { GameVoice, LinkStatus, ToolCall } from '../realtime/client.ts'
 import { verbatimSpeech } from '../realtime/speechMatch.ts'
 import { echoesTranscriptionPrompt } from './promptEcho.ts'
@@ -1037,6 +1037,7 @@ export function attachController(options: {
       choiceInModel = null
       window.clearTimeout(choiceModelTimer)
     }
+    markPlayerLine(u.itemId, state === 'cell' && cell ? { kind: 'cell', cell: cell.label } : { kind: state === 'noise' ? 'noise' : 'other' })
     pushTrace('note', `выбор: реплика #${u.order} → ${state}${cell ? ` ${cell.label}` : ''}`)
     runNextSelection()
     settleChoice()
@@ -1057,6 +1058,7 @@ export function attachController(options: {
     }
     const chosen = [...choiceTurn].reverse().find((u) => u.state === 'cell')
     if (chosen?.cell) {
+      markPlayerLine(chosen.itemId, { kind: 'picked', cell: chosen.cell.label })
       pushTrace('note', `выбор: берём реплику #${chosen.order} (${chosen.cell.label}) из ${choiceTurn.length}: ${choiceTurnLog()}`)
       const { themeId, value } = chosen.cell
       choiceTheme = null
@@ -1816,6 +1818,8 @@ export function attachController(options: {
       answerInModel = null
       window.clearTimeout(answerModelTimer)
     }
+    // Пометка в чате: как модель поняла реплику (только заминка/шум; ответ помечается при решении).
+    if (state === 'judged' && (u.speech === 'stall' || u.speech === 'noise')) markPlayerLine(u.itemId, { kind: u.speech })
     pushTrace('note', `ответ: реплика #${u.order} → ${state}${u.speech ? ` ${u.speech}` : ''}${u.judgment ? ` ${u.judgment.status}` : ''}${u.guessing ? ' (перебор)' : ''}`)
     runNextAnswerJudgment()
     settleAnswer()
@@ -1873,6 +1877,7 @@ export function attachController(options: {
       const judgment = chosen.guessing ? { ...chosen.judgment, status: 'incorrect' as const } : chosen.judgment
       answerDecision = { judgment, guessing: Boolean(chosen.guessing) }
       decisionGuessing = chosen.guessing ? { attemptId: judgment.attemptId, questionId: judgment.questionId } : null
+      markPlayerLine(chosen.itemId, { kind: chosen.guessing ? 'guessing' : 'counted' })
       pushTrace('note', `ответ: берём реплику #${chosen.order} из ${answerTurn.length}${chosen.guessing ? ' — перебор вариантов, не засчитано' : ''}: ${answerTurnLog()}`)
       actor.send({ type: 'ANSWER_SETTLED' })
       return

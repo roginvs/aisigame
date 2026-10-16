@@ -24,7 +24,8 @@ export function readMessageRing(value: unknown): ConferenceMessageRing | null {
     ring[`message${i}`] = line.kind === 'chat'
       ? { kind: 'chat', name: line.name, text: line.text, ...at }
       : { kind: 'conversation', ...(line.id === undefined ? {} : { id: line.id }), role: line.role, text: line.text, ...at,
-          ...(line.note === undefined ? {} : { note: line.note }) }
+          ...(line.note === undefined ? {} : { note: line.note }),
+          ...(line.mark === undefined ? {} : { mark: line.mark }) }
   }
   return ring
 }

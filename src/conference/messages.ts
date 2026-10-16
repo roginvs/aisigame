@@ -1,4 +1,5 @@
 /** Сообщения конференции — plain JSON, без классов. */
+import { readChatMark, type ChatMark } from '../debug/trace.ts'
 import { readHostEar, type HostEar } from '../game/hostEar.ts'
 import { readAppeal, readOutcomes } from '../game/appeals.ts'
 import { readSpecialState } from '../game/specialState.ts'
@@ -13,6 +14,8 @@ export type ConferenceConversationLine = {
   role: 'host' | 'player' | 'judge' | 'error' | 'system'
   text: string
   note?: string
+  /** Реплика игрока: как модель её поняла (заминка, шум, засчитано, ячейка…). Старые клиенты игнорируют. */
+  mark?: ChatMark
   /** ISO-время для общего хронологического потока с текстовым чатом. */
   at?: string
 }
@@ -582,7 +585,8 @@ function validConversationLine(value: unknown): boolean {
     typeof value.text === 'string' && value.text.length <= 20_000 &&
     (value.note === undefined || (typeof value.note === 'string' && value.note.length <= 20_000)) &&
     (value.at === undefined || shortString(value.at, 40)) &&
-    (value.id === undefined || shortString(value.id, 80))
+    (value.id === undefined || shortString(value.id, 80)) &&
+    (value.mark === undefined || readChatMark(value.mark) !== undefined)
 }
 
 function validChatLine(value: unknown): boolean {

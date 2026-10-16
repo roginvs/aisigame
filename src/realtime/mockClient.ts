@@ -90,7 +90,7 @@ export class MockRealtimeClient implements GameVoice {
     if (!itemId || this.playerChatPublished.has(itemId)) return
     this.suppressPlayerChat(itemId)
     this.playerChatPublished.add(itemId)
-    pushPlayerLine(heard.trim() || 'речь не распознана')
+    pushPlayerLine(heard.trim() || 'речь не распознана', itemId)
   }
 
   async connect(_apiKey: string, _options?: { captureMic?: boolean }): Promise<void> {
@@ -376,7 +376,7 @@ export class MockRealtimeClient implements GameVoice {
     if (this.playerChatPublished.has(itemId) || this.playerChatSuppressed.has(itemId)) return
     if (this.isPromptEcho(text, itemId)) return
     this.playerChatPublished.add(itemId)
-    pushPlayerLine(text || 'речь не распознана')
+    pushPlayerLine(text || 'речь не распознана', itemId)
   }
 
   private isPromptEcho(text: string, itemId: string | null): boolean {

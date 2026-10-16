@@ -1,5 +1,5 @@
 import { useEffect, useLayoutEffect, useRef, useState, useSyncExternalStore, type ReactNode } from 'react'
-import { getLivePlayerLine, getTrace, subscribeLivePlayerLine, subscribeTrace, type ChatRole, type TraceEntry } from '../debug/trace.ts'
+import { chatMarkLabel, getLivePlayerLine, getTrace, readChatMark, subscribeLivePlayerLine, subscribeTrace, type ChatRole, type TraceEntry } from '../debug/trace.ts'
 import type { ConferenceMessageRing } from '../conference/messages.ts'
 import { chatPinKey, isAtTail, pinColumn } from './chatScroll.ts'
 import { formatChatTime } from './chatTime.ts'
@@ -24,6 +24,7 @@ export function ConversationChat(props?: {
       text: chatText(entry.detail) || entry.title,
       at: entry.at,
       ...(chatNote(entry.detail) ? { note: chatNote(entry.detail) } : {}),
+      ...(chatMark(entry.detail) ? { mark: chatMark(entry.detail) } : {}),
     }))
   const stream = props?.messageRing ? conversationStreamFromRing(props.messageRing) : mergeConversationStream(voiceLines, [])
   const [draft, setDraft] = useState('')
@@ -57,6 +58,7 @@ export function ConversationChat(props?: {
                     role: item.role,
                     text: item.text,
                     ...(item.note ? { note: item.note } : {}),
+                    ...(item.mark ? { mark: item.mark } : {}),
                   },
                 }}
               />
@@ -168,10 +170,12 @@ function Bubble(props: { entry: TraceEntry }) {
   const role = chatRole(props.entry.detail)
   const text = chatText(props.entry.detail) || props.entry.title
   const note = role === 'host' ? chatNote(props.entry.detail) : ''
+  const mark = role === 'player' ? chatMark(props.entry.detail) : undefined
   return (
     <p className={`bubble ${bubbleClass(role)}`}>
       <BubbleHead label={roleLabel(role)} at={props.entry.at} />
       {text}
+      {mark ? <span className={`chat-mark chat-mark-${mark.kind}`} data-mark={mark.kind}>{chatMarkLabel(mark)}</span> : null}
       {note ? <small className="bubble-note">{note}</small> : null}
     </p>
   )
@@ -219,6 +223,10 @@ function chatNote(detail: unknown): string {
     return detail.note
   }
   return ''
+}
+
+function chatMark(detail: unknown) {
+  return detail && typeof detail === 'object' && 'mark' in detail ? readChatMark(detail.mark) : undefined
 }
 
 function roleLabel(role: ChatRole): string {

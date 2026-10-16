@@ -243,8 +243,8 @@ export class MasterSession {
         if (line && this.statePublisher) this.broadcastMessage({ kind: 'conversation', ...line })
       }
     })
-    this.editUnsub = subscribeChatEdits(({ id, text }) => {
-      const update = this.statePublisher?.editMessage(id, text)
+    this.editUnsub = subscribeChatEdits(({ id, text, mark }) => {
+      const update = this.statePublisher?.editMessage(id, text, mark)
       if (!update) return
       this.sendState(update, 'чат: правка')
       this.onHistory(this.statePublisher!.history())

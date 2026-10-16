@@ -2283,3 +2283,22 @@ button.buzzer.buzz-nudge {
     animation: buzz-nudge-soft calc(var(--nudge-ms, 450ms) * var(--nudge-count, 3)) ease-out 1;
   }
 }
+
+/* Пометка реплики игрока: как её поняла модель (заминка/шум/засчитано/ячейка). */
+.chat-mark {
+  display: inline-block;
+  margin-left: 0.4em;
+  padding: 0 0.45em;
+  border-radius: 999px;
+  font-size: 0.72em;
+  line-height: 1.5;
+  vertical-align: 0.1em;
+  white-space: nowrap;
+  background: rgba(127, 127, 127, 0.18);
+  color: inherit;
+  opacity: 0.85;
+}
+.chat-mark-counted,
+.chat-mark-picked { background: rgba(46, 160, 67, 0.25); opacity: 1; font-weight: 600; }
+.chat-mark-guessing { background: rgba(218, 54, 51, 0.25); opacity: 1; font-weight: 600; }
+.chat-mark-cell { background: rgba(56, 132, 255, 0.18); }

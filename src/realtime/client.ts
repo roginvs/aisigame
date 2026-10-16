@@ -253,7 +253,7 @@ export class RealtimeClient {
     diag('чат', 'строка оценки показана', { itemId, source: 'оценка', chars: heard.length })
     this.suppressPlayerChat(itemId)
     this.playerChatPublished.add(itemId)
-    pushPlayerLine(heard.trim() || 'речь не распознана')
+    pushPlayerLine(heard.trim() || 'речь не распознана', itemId)
   }
 
   private trimJudgeRequests(): void {
@@ -626,7 +626,7 @@ export class RealtimeClient {
     if (this.playerChatPublished.has(itemId) || this.playerChatSuppressed.has(itemId)) return
     if (this.isPromptEcho(text, itemId)) return
     this.playerChatPublished.add(itemId)
-    pushPlayerLine(text || 'речь не распознана')
+    pushPlayerLine(text || 'речь не распознана', itemId)
   }
 
   private isPromptEcho(text: string, itemId: string | null): boolean {

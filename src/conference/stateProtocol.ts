@@ -1,3 +1,4 @@
+import type { ChatMark } from '../debug/trace.ts'
 import {
   CONFERENCE_HISTORY_LIMIT,
   type ConferenceHistoryMessage,
@@ -59,13 +60,13 @@ export class ConferenceStatePublisher {
    * Правка реплики в истории по стабильному id: новый текст или null — слот очищается.
    * Уходит обычным partialUpdate слота: гости применяют его как любую смену слота.
    */
-  editMessage(id: string, text: string | null): PartialUpdateMessage | null {
+  editMessage(id: string, text: string | null, mark?: ChatMark): PartialUpdateMessage | null {
     for (let i = 0; i < CONFERENCE_HISTORY_LIMIT; i++) {
       const slot = `message${i}` as ConferenceMessageSlot
       const line = this.state[slot]
       if (!line || line.kind !== 'conversation' || line.id !== id) continue
       const changes: Partial<ConferenceState> = {}
-      changes[slot] = text ? { ...line, text } : null
+      changes[slot] = text ? { ...line, text, ...(mark ? { mark } : {}) } : null
       return this.apply(changes)
     }
     return null
