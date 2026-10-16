@@ -118,7 +118,7 @@ export function attachController(options: {
   /** Текст текущего хода ведущей — чтобы не принять её эхо за ответ игрока при раннем слухе. */
   let lastHostSpoken = ''
   let specialHeard = ''
-  let specialIntroTimer: ReturnType<typeof setTimeout> | null = null
+  let specialIntroTimer: { timer: ReturnType<typeof setTimeout>; path: string; say: () => void } | null = null
   /** Инвалидирует фразу без кнопки после смены окна buzzing. */
   let buzzEpoch = 0
   /** Инвалидирует talkover после нового чтения. */
@@ -216,6 +216,17 @@ export function attachController(options: {
     if (!waiting) return
     held.push(() => {
       if (isAnnounceSpeakingPath(statePath(actor.getSnapshot().value))) waiting.say()
+    })
+  }
+
+  /** Пауза во время мяу/динь: первая фраза кота/аукциона ещё не заказана — закажем после RESUME. */
+  function holdSpecialIntro(): void {
+    if (!specialIntroTimer) return
+    clearTimeout(specialIntroTimer.timer)
+    const { path, say } = specialIntroTimer
+    specialIntroTimer = null
+    held.push(() => {
+      if (statePath(actor.getSnapshot().value) === path) say()
     })
   }
 
@@ -577,6 +588,7 @@ export function attachController(options: {
     }
     if (path === 'paused') {
       holdAnnounceWait()
+      holdSpecialIntro()
       clearBuzzerWarning()
       client.setMicEnabled(false)
       client.discardInputAudio()
@@ -586,9 +598,13 @@ export function attachController(options: {
     if (from === 'paused') {
       client.setOutputMuted(false)
       if (buzzerChimeLive(path)) armBuzzerWarning(context.phaseDurationMs ?? gameConfig.buzzerMs)
+      // Кот/аукцион: RESUME сворачивает подсостояние (cat.picking → cat.announcing, staking.listening → staking.asking…).
+      // Узел ждёт конец реплики, которой ещё не было, — как при обычном входе заказываем её заново.
+      const rerouted = (path.startsWith('cat.') || path.startsWith('auction.')) && path !== context.resumePath
       const skipped =
         (path === 'bridging' && context.roundIndex !== fromRound) ||
-        (path === 'finished' && context.resumePath !== 'finished')
+        (path === 'finished' && context.resumePath !== 'finished') ||
+        rerouted
       if (!skipped) {
         const pending = held.splice(0)
         if (pending.length) {
@@ -656,7 +672,7 @@ export function attachController(options: {
       if (context.appeal?.summary === 'pending') speak('roundSummary', roundSummaryInstructions(context), undefined, true)
       else client.interruptSpeech('окно апелляции')
     }
-    if (specialIntroTimer && !path.endsWith('.announcing')) { clearTimeout(specialIntroTimer); specialIntroTimer = null }
+    if (specialIntroTimer && !path.endsWith('.announcing')) { clearTimeout(specialIntroTimer.timer); specialIntroTimer = null }
     if (path === 'cat.announcing' || path === 'auction.announcing') {
       specialEpoch += 1
       choiceEpoch += 1
@@ -669,13 +685,14 @@ export function attachController(options: {
       const purpose = path === 'cat.announcing' ? 'cat' : 'auction'
       const waitMs = from === 'paused' || from.startsWith(purpose === 'cat' ? 'cat.' : 'auction.') ? 0 : purpose === 'cat' ? catMeowMs : auctionDingMs
       if (waitMs > 0) options.playSpecialSound?.(purpose)
-      if (specialIntroTimer) clearTimeout(specialIntroTimer)
-      specialIntroTimer = setTimeout(() => {
+      if (specialIntroTimer) clearTimeout(specialIntroTimer.timer)
+      const say = () => speakWhileListening(purpose, purpose === 'cat' ? catCue(actor.getSnapshot().context) : auctionCue(actor.getSnapshot().context))
+      const timer = setTimeout(() => {
         specialIntroTimer = null
-        const now = actor.getSnapshot()
-        if (statePath(now.value) !== path) return
-        speakWhileListening(purpose, purpose === 'cat' ? catCue(now.context) : auctionCue(now.context))
+        if (statePath(actor.getSnapshot().value) !== path) return
+        say()
       }, waitMs)
+      specialIntroTimer = { timer, path, say }
     }
     if (specialListening(path) && path !== 'cat.announcing' && path !== 'auction.announcing') {
       specialEpoch += 1
