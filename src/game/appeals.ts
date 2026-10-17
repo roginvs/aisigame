@@ -1,6 +1,6 @@
 import type { AppealContext, AppealRequest, GameContext, OutcomeLedger, PlayerId } from './types.ts'
 
-export const APPEAL_WINDOW_MS = 5_000
+export const APPEAL_WINDOW_MS = 10_000
 let appealScale = 1
 /** Демо и e2e: растянуть окно апелляции (4 — в четыре раза дольше), чтобы тест под нагрузкой не опаздывал к кнопке. */
 export function setAppealScale(next: number): void {

@@ -788,7 +788,7 @@ export const gameMachine = setup({
       return {
         special: baseSpecial('auction', question.id, giverId, {
           recipientId: giverId, nominal, order: circleFrom(context.players, giverId), options: open.options,
-          bid: auto ?? null, leaderId: auto === undefined ? null : giverId,
+          bid: auto ?? null, leaderId: auto === undefined ? null : giverId, autoStake: auto !== undefined,
           log: auto === undefined ? [] : [`${playerName(context, giverId)} — ${auto}, автоматически`],
         }),
         statusLine: 'Аукцион', phaseStartedAt: null, phaseDurationMs: null,
@@ -797,7 +797,8 @@ export const gameMachine = setup({
     auctionAutoOpen: assign(({ context }) => {
       const special = context.special
       if (!special) return {}
-      return { special: { ...special, bid: special.nominal, leaderId: special.giverId, options: [], log: [...special.log, `${playerName(context, special.giverId)} — ${special.nominal}, автоматически`] } }
+      return { special: { ...special, bid: special.nominal, leaderId: special.giverId, options: [], autoStake: true,
+        log: [...special.log, `${playerName(context, special.giverId)} — ${special.nominal}, автоматически`] } }
     }),
     applyAuctionBid: assign(({ context, event }) => {
       const special = context.special
@@ -1263,6 +1264,7 @@ export const gameMachine = setup({
       event.type === 'CHOOSER_OFFLINE' && context.special?.kind === 'cat' && context.special.recipientId === null &&
       event.fromPlayerId === context.special.giverId && event.toPlayerId !== event.fromPlayerId && inRoster(context, event.toPlayerId),
     auctionHasBid: ({ context }) => context.special?.bid != null,
+    auctionAutoStake: ({ context }) => context.special?.kind === 'auction' && context.special.autoStake === true,
     auctionOpenerOffline: ({ context, event }) =>
       event.type === 'CHOOSER_OFFLINE' && context.special?.kind === 'auction' && context.special.bid === null && event.fromPlayerId === context.special.giverId,
     validAuctionBid: ({ context, event }) =>
@@ -1585,9 +1587,10 @@ export const gameMachine = setup({
               { guard: and([heardPurpose('auction'), 'auctionHasBid']), target: 'advancing' },
               { guard: heardPurpose('auction'), target: 'listening' },
             ],
-            PLAYER_SPEECH_FINISHED: 'resolving',
+            // Автоставка: отвечать нечего, речь при объявлении — не заявка. Дальше перекупка идёт как обычно.
+            PLAYER_SPEECH_FINISHED: { guard: not('auctionAutoStake'), target: 'resolving' },
             AUCTION_BID: { guard: 'validAuctionBid', target: '#game.auction.advancing', actions: 'applyAuctionBid' },
-            AUCTION_UNCLEAR: { target: 'clarifying', actions: 'noteSpecialUnclear' },
+            AUCTION_UNCLEAR: { guard: not('auctionAutoStake'), target: 'clarifying', actions: 'noteSpecialUnclear' },
           },
         },
         asking: {

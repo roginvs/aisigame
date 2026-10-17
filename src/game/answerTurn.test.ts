@@ -35,11 +35,24 @@ class GuessClient extends MockRealtimeClient {
   }
 }
 
-async function boot(client: MockRealtimeClient, beforeBuzz?: () => void) {
+/** Мок-модель, которая для каждой реплики по порядку возвращает заданный вердикт. */
+class StatusClient extends MockRealtimeClient {
+  statuses: Array<{ status: string; heard?: string }> = []
+  judged = 0
+  override requestTool(purpose: string, turn: number, name: string, instructions: string, isolated = false, tool?: { name: string }): void {
+    if (name !== 'submitAnswerJudgment') { super.requestTool(purpose, turn, name, instructions, isolated, tool); return }
+    const verdict = this.statuses[this.judged] ?? { status: 'correct', heard: 'пылесосел' }
+    this.judged += 1
+    window.setTimeout(() => this.onToolCall({ name, callId: `s${this.judged}`, arguments: {
+      status: verdict.status, heard: verdict.heard ?? '', reason: '', speech: 'answer' } }, purpose, turn), 40)
+  }
+}
+
+async function boot(client: MockRealtimeClient, beforeBuzz?: () => void, questions?: QuestionPack) {
   const actor = createActor(gameMachine); actor.start()
   const stop = attachController({ actor, client, judgmentMode: 'text', getApiKey: () => 'k', setLink: () => {} })
   cleanups.push(() => { stop(); actor.stop() })
-  actor.send({ type: 'START_GAME', pack })
+  actor.send({ type: 'START_GAME', pack: questions ?? pack })
   await vi.advanceTimersByTimeAsync(80)
   actor.send({ type: 'QUESTION_SELECTED', themeId: 't', value: 100 })
   await vi.advanceTimersByTimeAsync(1200)
@@ -80,6 +93,40 @@ describe('ответ из нескольких реплик', () => {
     client.hear('пылесосел', 900); await vi.advanceTimersByTimeAsync(1000)
     client.hear('нет, Бетельгейзе', 900); await vi.advanceTimersByTimeAsync(answerSilenceDecideMs + 300)
     expect(score()).toBe(-100)
+  })
+
+  it('верный ответ, потом неразборчивая реплика: верное остаётся решающим', async () => {
+    const client = new StatusClient()
+    client.statuses = [{ status: 'correct', heard: 'пылесосел' }, { status: 'unintelligible' }]
+    const { score } = await boot(client)
+    client.hear('пылесосел', 900); await vi.advanceTimersByTimeAsync(1000)
+    client.hear('пкпф', 600); await vi.advanceTimersByTimeAsync(answerSilenceDecideMs + 300)
+    expect(score()).toBe(100)
+    expect(notes().some((t) => t.startsWith('ответ: берём реплику #1 из 2'))).toBe(true)
+  })
+
+  it('верный ответ, потом спорная реплика: верное остаётся решающим', async () => {
+    const client = new StatusClient()
+    client.statuses = [{ status: 'correct', heard: 'пылесосел' }, { status: 'ambiguous' }]
+    const { score } = await boot(client)
+    client.hear('пылесосел', 900); await vi.advanceTimersByTimeAsync(1000)
+    client.hear('кажется, пылесос', 800); await vi.advanceTimersByTimeAsync(answerSilenceDecideMs + 300)
+    expect(score()).toBe(100)
+  })
+
+  it('созвучие всё равно просит повтор, даже если раньше был верный ответ', async () => {
+    const client = new StatusClient()
+    const titov: QuestionPack = {
+      name: 'Turn', rounds: [{ index: 0, kind: 'normal', name: 'Раунд' }], warnings: [],
+      questions: [{ id: 'q', themeId: 't', themeName: 'Тема', roundIndex: 0, value: 100, text: 'Кто был вторым человеком в космосе?', answers: ['Герман Титов'] }],
+    }
+    client.statuses = [{ status: 'correct', heard: 'Герман Титов' }, { status: 'incorrect', heard: 'Читов' }]
+    const { score, path } = await boot(client, undefined, titov)
+    client.hear('Герман Титов', 900); await vi.advanceTimersByTimeAsync(1000)
+    client.hear('Читов', 800); await vi.advanceTimersByTimeAsync(answerSilenceDecideMs + 200)
+    // Решением стала реплика с созвучием: очки ещё не начислены, созвучие просит повтор.
+    expect(score()).toBe(0)
+    expect(path()).toBe('answering.waiting')
   })
 
   it('новая речь в паузе тишины откладывает вердикт: таймер начинается заново', async () => {

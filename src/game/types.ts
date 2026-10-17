@@ -91,6 +91,8 @@ export type SpecialState = {
   bid: number | null
   allIn: boolean
   options: AuctionOption[]
+  /** Аукцион открыт автоставкой (деньги ≤ номинала или открывший отключился): объявление идёт, заявки при нём не слушаем. */
+  autoStake?: boolean
   log: string[]
   /** Что не разобрали в последней реплике — для переспроса. */
   unclear: string

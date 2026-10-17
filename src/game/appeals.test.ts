@@ -2,7 +2,7 @@ import { createActor } from 'xstate'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { gameConfig } from '../config.ts'
 import { announceInstructions, roundSummaryInstructions } from './controller.ts'
-import { appealButton, appealRequestError, settleOutcome } from './appeals.ts'
+import { appealButton, appealRequestError, appealWindowMs, settleOutcome } from './appeals.ts'
 import { gameMachine, statePath } from './machine.ts'
 import { persistMatch, readSavedGame } from './savedGame.ts'
 import type { JudgmentStatus, QuestionPack } from './types.ts'
@@ -114,7 +114,7 @@ describe('ручные апелляции', () => {
   it('истечение перехвата закрывает старое окно; появляется отдельное окно закрытого вопроса', () => {
     const actor = start(); normal(actor, 1, 'incorrect')
     const a = actor.getSnapshot().context.appeal!
-    vi.advanceTimersByTime(5_000)
+    vi.advanceTimersByTime(appealWindowMs())
     actor.send({ type: 'APPEAL_REQUESTED', questionId: a.questionId, windowId: a.windowId, playerId: 1, requestId: 'late' })
     expect(path(actor)).toBe('announcing.speaking'); say(actor)
     expect(path(actor)).toBe('choosing.listening')
@@ -186,7 +186,7 @@ describe('ручные апелляции', () => {
   it('последний вопрос без финала не объявляет победителя до конца окна', () => {
     const input = { ...pack, questions: [pack.questions[0]!] }
     const actor = start(input, [1]); normal(actor, 1, 'ambiguous')
-    expect(path(actor)).toBe('roundSummaryWindow'); vi.advanceTimersByTime(4_999); expect(path(actor)).toBe('roundSummaryWindow')
+    expect(path(actor)).toBe('roundSummaryWindow'); vi.advanceTimersByTime(appealWindowMs() - 1); expect(path(actor)).toBe('roundSummaryWindow')
     vi.advanceTimersByTime(1); expect(path(actor)).toBe('finished')
   })
 
@@ -204,7 +204,7 @@ describe('ручные апелляции', () => {
     const actor = start(); normal(actor, 1, 'incorrect'); normal(actor, 2, 'correct')
     vi.advanceTimersByTime(2_000); actor.send({ type: 'PAUSE', path: path(actor) }); request(actor, 1)
     vi.advanceTimersByTime(60_000); expect(path(actor)).toBe('paused')
-    actor.send({ type: 'RESUME' }); vi.advanceTimersByTime(2_999)
+    actor.send({ type: 'RESUME' }); vi.advanceTimersByTime(appealWindowMs() - 2_001)
     expect(actor.getSnapshot().context.appeal).not.toBeNull(); vi.advanceTimersByTime(1)
     expect(actor.getSnapshot().context.appeal).toBeNull()
   })
@@ -266,7 +266,7 @@ describe('ручные апелляции', () => {
     expect(path(actor)).toBe('roundSummaryWindow'); expect(actor.getSnapshot().context.appeal?.summary).toBe('pending')
     const text = roundSummaryInstructions(actor.getSnapshot().context)
     expect(text).toContain('Впереди второй раунд'); expect(text).toContain('Игрок 1')
-    vi.advanceTimersByTime(5_000)
+    vi.advanceTimersByTime(appealWindowMs())
     expect(path(actor)).toBe('roundSummaryWindow'); expect(actor.getSnapshot().context.appeal?.timeUp).toBe(true)
     const a = actor.getSnapshot().context.appeal!
     expect(appealRequestError(actor.getSnapshot().context, path(actor), { questionId: a.questionId, windowId: a.windowId, playerId: 1, requestId: 'late' })).not.toBeNull()
@@ -282,7 +282,7 @@ describe('ручные апелляции', () => {
     request(actor, 1); expect(path(actor)).toBe('appealConfirm'); confirm(actor); say(actor)
     expect(path(actor)).toBe('roundSummaryWindow'); expect(actor.getSnapshot().context.appeal?.summary).toBe('pending')
     actor.send({ type: 'HOST_AUDIO_FINISHED', purpose: 'roundSummary' }); expect(path(actor)).toBe('roundSummaryWindow')
-    vi.advanceTimersByTime(5_000); expect(path(actor)).toBe('choosing.listening')
+    vi.advanceTimersByTime(appealWindowMs()); expect(path(actor)).toBe('choosing.listening')
     expect(scores(actor)).toEqual([100, -100]); expect(actor.getSnapshot().context.roundIndex).toBe(1)
   })
 })

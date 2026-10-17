@@ -1194,6 +1194,11 @@ export function attachController(options: {
     const context = snapshot.context
     const special = context.special
     if (!special) return
+    // Автоставка открыта: объявление ещё идёт, отвечать нечего — реплики не заявки (аукцион продолжает перекупку как обычно).
+    if (special.kind === 'auction' && special.autoStake && path === 'auction.announcing') {
+      pushTrace('note', 'аукцион на автоставке: реплика во время объявления — не ставка')
+      return
+    }
     if (echoesChoicePrompt(heard.text, specialPrompt(path, context))) {
       pushTrace('note', 'распознавание повторило подсказку вариантов, это не выбор')
       return
@@ -1616,7 +1621,7 @@ export function attachController(options: {
         : undefined
     const cellLabel = picked
       ? `${picked.themeName}${kind === 'final' ? '' : ` ${picked.value}`}`
-      : `${themeId || '—'} ${value || ''}`.trim()
+      : cellFallbackLabel(snapshotNow.context, kind, themeId, value)
     pushJudgeLine(selectionChatText(transcript, Boolean(picked), cellLabel))
     const themeOnly = call && !picked && !(confident && knownQuestion) ? themeOnlyReason(snapshotNow.context, themeId, kind) : null
     if (!call || !picked) {
@@ -1868,12 +1873,20 @@ export function attachController(options: {
     if (path !== 'answering.settling' && !(force && path === 'answering.hearing')) return
     let chosen: AnswerUtterance | null = null
     let failed = false
+    let unintelligible = false
+    let fallback: AnswerUtterance | null = null
     for (const u of [...answerTurn].reverse()) {
-      if (u.state === 'judged' && (u.speech === 'stall' || u.speech === 'noise')) continue
-      if (u.state === 'judged' && u.judgment) chosen = u
-      else failed = true
+      if (u.state !== 'judged') { failed = true; break }
+      if (u.speech === 'stall' || u.speech === 'noise') continue
+      const status = u.judgment?.status
+      // Неразборчивая — не ответ вовсе. Спорная или требующая уточнения — стоп-реплика с переспросом,
+      // но если раньше была разобранная, решает она («строго последний разборчивый»).
+      if (status === 'unintelligible') { unintelligible = true; continue }
+      if (status === 'ambiguous' || status === 'needs_clarification') { fallback ??= u; continue }
+      chosen = u
       break
     }
+    if (!chosen && !failed && fallback) chosen = fallback
     stopJudgeRun()
     answerQueue.length = 0
     answerInModel = null
@@ -1901,7 +1914,7 @@ export function attachController(options: {
       actor.send({ type: 'ANSWER_SETTLED' })
       return
     }
-    pushTrace('note', `ответ: разборчивого ответа нет ни в одной реплике — как молчание: ${answerTurnLog()}`)
+    pushTrace('note', `ответ: разборчивого ответа нет ни в одной реплике${unintelligible ? ' (неразборчиво/спорно)' : ''} — как молчание: ${answerTurnLog()}`)
     actor.send({ type: 'ANSWER_NONE' })
   }
 
@@ -2071,6 +2084,18 @@ export function themeOnlyReason(context: GameContext, themeId: string, kind: 'no
     && question.themeId === themeId && !context.playedIds.includes(question.id))
   const name = open[0]?.themeName
   return name ? `Тема «${name}» понятна, стоимость не расслышала. Назовите стоимость.` : null
+}
+
+/** Название темы по внутреннему id раунда; сырой id в чат не показываем. */
+function themeNameById(context: GameContext, themeId: string): string | null {
+  return roundThemes(context.questions, context.roundIndex).find((theme) => theme.id === themeId)?.name ?? null
+}
+
+/** Подпись неоткрытой ячейки для «Оценки»: тема (по возможности) и цена; внутренних id нет. */
+function cellFallbackLabel(context: GameContext, kind: 'normal' | 'final', themeId: string, value: number): string {
+  const name = themeNameById(context, themeId)
+  const price = kind === 'final' || !value ? '' : ` ${value}`
+  return `${name ?? '—'}${price}`.trim() || '—'
 }
 
 /** Свободные ячейки по темам: «id — тема: номиналы». */

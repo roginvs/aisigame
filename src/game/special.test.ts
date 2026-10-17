@@ -267,6 +267,48 @@ describe('аукцион', () => {
     expect(score(actor, 1)).toBe(100)
   })
 
+  it('автоставка: реплика при объявлении не выводит из announcing; дальше перекупка идёт как обычно', () => {
+    const actor = start(['Аня', 'Боря'], [1000, 0])
+    actor.send({ type: 'QUESTION_SELECTED', themeId: 'a', value: 100 })
+    expect(ctx(actor).special?.autoStake).toBe(true)
+    // Речь и «не расслышала» во время объявления автоставки — не заявки: отвечать нечего.
+    actor.send({ type: 'PLAYER_SPEECH_FINISHED' })
+    expect(path(actor)).toBe('auction.announcing')
+    actor.send({ type: 'AUCTION_UNCLEAR', reason: 'не расслышала' })
+    expect(path(actor)).toBe('auction.announcing')
+    vi.advanceTimersByTime(gameConfig.judgeMs + 1)
+    expect(path(actor)).toBe('auction.announcing')
+    // Объявление закончилось — перекупка: Аня может перебить автоставку.
+    heard(actor, 'auction')
+    expect(path(actor)).toBe('auction.asking')
+    expect(ctx(actor).special).toMatchObject({ leaderId: 2, bid: 100, recipientId: 1 })
+    heard(actor, 'auctionAsk')
+    actor.send({ type: 'AUCTION_BID', playerId: 1, option: { kind: 'pass' } })
+    expect(path(actor)).toBe('auction.won')
+    expect(ctx(actor).special).toMatchObject({ leaderId: 2, bid: 100, autoStake: true })
+    heard(actor, 'auctionWon')
+    readAndAnswer(actor)
+    judge(actor, 'correct')
+    expect(score(actor, 1)).toBe(1000)
+    expect(score(actor, 2)).toBe(100)
+  })
+
+  it('автоставка после отключения открывшего: машина сразу к перекупке, спрашивают следующего', () => {
+    const actor = start(['Аня', 'Боря'], [1000, 1000])
+    actor.send({ type: 'QUESTION_SELECTED', themeId: 'a', value: 100 })
+    expect(path(actor)).toBe('auction.announcing')
+    actor.send({ type: 'CHOOSER_OFFLINE', fromPlayerId: 2, toPlayerId: 1 })
+    expect(path(actor)).toBe('auction.asking')
+    expect(ctx(actor).special).toMatchObject({ autoStake: true, bid: 100, leaderId: 2, recipientId: 1 })
+    actor.send({ type: 'AUCTION_BID', playerId: 1, option: { kind: 'pass' } })
+    expect(path(actor)).toBe('auction.won')
+    heard(actor, 'auctionWon')
+    readAndAnswer(actor)
+    judge(actor, 'correct')
+    expect(score(actor, 1)).toBe(1000)
+    expect(score(actor, 2)).toBe(1100)
+  })
+
   it('пас окончательный; перекупленный выбравший снова ходит; неясно — переспрос', () => {
     const actor = start(['Аня', 'Боря'], [1000, 1000])
     actor.send({ type: 'QUESTION_SELECTED', themeId: 'a', value: 100 })
