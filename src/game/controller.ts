@@ -1,5 +1,6 @@
 import { diag } from '../debug/diag.ts'
 import { setLeakTarget, failedAttempts, resetFailedAttempts, suspiciousOnce } from '../debug/suspicious.ts'
+import { jokeCoin } from './jokeCoin.ts'
 import { auctionBidToolFor, finalBetToolFor, selectQuestionToolFor } from '../realtime/tools.ts'
 import type { Actor, SnapshotFrom } from 'xstate'
 import { clearHostEar, getHostEar, subscribeHostEar, hostEarHearing, hostEarHostSpoke, hostEarMicClosed, hostEarProcessing, hostEarShown, hostEarSurvives, settleHostEar } from './hostEar.ts'
@@ -2349,6 +2350,7 @@ export function choosingReminderCue(context: GameContext, reminder: ChoosingRemi
       situation: `Выбирает вопрос игрок: ${who}. Давно молчит или не удалось понять выбор. Предлагаешь ему ячейку: тема «${themeName}», номинал ${value}.`,
       goal: `Обратись к игроку по имени и предложи именно эту ячейку вопросом, например «${who}, хочешь «${themeName}» за ${value}?».`,
       constraints: ['Другие ячейки не называй. Ячейку сама не открывай — ждёшь ответа игрока.', style],
+      mood: true,
     })
   }
   const final = currentRound(context, context.roundIndex)?.kind === 'final'
@@ -2372,12 +2374,14 @@ function openChoiceCells(context: GameContext) {
 const cueBrevity = 'Без вступления и пересказа задания. Говори только саму реплику для игроков; служебные пометки не озвучивай.'
 
 /** Свободная реплика: ситуация, цель и жёсткие рамки — без готового скрипта. */
-function hostCue(parts: { situation: string; goal: string; constraints?: string[]; length?: string }): string {
+function hostCue(parts: { situation: string; goal: string; constraints?: string[]; length?: string; mood?: boolean }): string {
   const limits = (parts.constraints ?? []).filter(Boolean)
   const length = parts.length ?? 'Одна короткая фраза.'
+  const mood = parts.mood && jokeCoin.flip() ? ['Настроение: можно добавить одну очень короткую добрую шутку или лёгкое кокетство своими словами и к месту.'] : []
   return [
     `Ситуация: ${parts.situation}`,
     `Цель: ${parts.goal}`,
+    ...mood,
     `Ограничения: ${[...limits, length, cueBrevity].join(' ')}`,
   ]
     .filter(Boolean)
@@ -2401,6 +2405,7 @@ export function mutedMicCue(playerName: string): string {
       boardSecrets,
       'Ячейку не выбирай.',
     ],
+    mood: true,
   })
 }
 
@@ -2427,6 +2432,7 @@ export function noBuzzerCue(playerName: string): string {
       boardSecrets,
       'Одна короткая фраза. Окно кнопки и часы словами не трогай, кнопку не нажимай за игрока. Правильный ответ не произноси.',
     ],
+    mood: true,
   })
 }
 
@@ -2440,6 +2446,7 @@ export function mutedAnswerMicCue(playerName: string): string {
       boardSecrets,
       'Одна короткая фраза. Таймер ответа словами не останавливай и попытку не закрывай. Правильный ответ не произноси.',
     ],
+    mood: true,
   })
 }
 
@@ -2512,6 +2519,7 @@ export function bridgeInstructions(context: GameContext): string {
       goal: `Коротко назови счёт каждого, объяви финал и попроси выбрать одну тему. Можно обратиться к выбирающему по имени.`,
       constraints: [boardSecrets],
       length: 'Две-три короткие фразы: счёт каждого игрока важнее краткости.',
+      mood: true,
     })
   }
   return hostCue({
@@ -2519,6 +2527,7 @@ export function bridgeInstructions(context: GameContext): string {
     goal: `Коротко назови счёт каждого, объяви следующий раунд и попроси выбрать вопрос. Можно обратиться к выбирающему по имени.`,
     constraints: [boardSecrets],
     length: 'Две-три короткие фразы: счёт каждого игрока важнее краткости.',
+    mood: true,
   })
 }
 
@@ -2765,6 +2774,7 @@ export function idleNudgeCue(path: string, context: GameContext): string {
         ? `Поторопи выбирающего, назвав по имени: время на выбор заканчивается.${next ? ` Можно намекнуть, что иначе выбирать будет ${next}.` : ''}`
         : `Обратись к выбирающему по имени и предложи выбрать вопрос.`,
       constraints: [boardSecrets, ...style.slice(0, 1), 'Ячейку сама не выбирай.'],
+      mood: true,
     })
   }
   if (path === 'cat.picking') {
@@ -2773,6 +2783,7 @@ export function idleNudgeCue(path: string, context: GameContext): string {
       situation: `Кот в мешке. Отдаёт вопрос другому игроку: ${giver}. Молчит около ${waited} с.${soon('кот уйдёт случайному игроку')}`,
       goal: `Обратись по имени к игроку ${giver} и спроси, кому отдать кота.`,
       constraints: [...style, 'Тему кота не называй. Вопрос не читай.'],
+      mood: true,
     })
   }
   if (path === 'cat.staking.listening') {
@@ -2782,6 +2793,7 @@ export function idleNudgeCue(path: string, context: GameContext): string {
       situation: `Кот в мешке у игрока ${recipient}. Ставка на выбор: минимум ${amount(options[0])} или максимум ${amount(options.at(-1))}. Молчит около ${waited} с.${soon('ставка будет минимальной')}`,
       goal: `Обратись по имени к игроку ${recipient} и спроси: минимум или максимум.`,
       constraints: ['Своими словами.', 'Вопрос не читай.'],
+      mood: true,
     })
   }
   const special = context.special
@@ -2793,6 +2805,7 @@ export function idleNudgeCue(path: string, context: GameContext): string {
       : `Аукцион. Ставка ${amount(special?.bid)} у игрока ${nameOf(context, special?.leaderId)}. Решает игрок: ${bidder}. Молчит около ${waited} с.${soon('это будет пас')}`,
     goal: opening ? `Обратись по имени к игроку ${bidder} и попроси назвать ставку.` : `Обратись по имени к игроку ${bidder} и спроси: перекупает или пас.`,
     constraints: [...style],
+    mood: true,
   })
 }
 
@@ -2804,6 +2817,7 @@ export function idleAutoCue(context: GameContext): string {
     situation: `Кот в мешке у игрока ${recipient}. Около ${seconds(idle?.waitedMs ?? 0)} с ставку не назвали, поэтому она минимальная: ${amount(idle?.stake ?? context.special?.stake)}. Дальше ты прочитаешь вопрос.`,
     goal: `Коротко скажи, обратившись по имени к игроку ${recipient}: ставку не назвали, играем на минимум ${amount(idle?.stake ?? context.special?.stake)}.`,
     constraints: ['Своими словами.', 'Вопрос не читай.'],
+    mood: true,
   })
 }
 

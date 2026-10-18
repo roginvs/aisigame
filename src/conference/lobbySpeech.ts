@@ -1,4 +1,5 @@
 import type { QuestionPack } from '../game/types.ts'
+import { jokeCoin } from '../game/jokeCoin.ts'
 import type { GameVoice } from '../realtime/client.ts'
 import { formatEta } from './packProgress.ts'
 import type { RosterEntry } from './roster.ts'
@@ -48,6 +49,9 @@ export function lobbySpeechInstructions(facts: LobbySpeechFacts): string {
     'Игроков называй только по имени, без ролей; поручений не давай.',
     everyoneReady ? 'Все готовы: скажи, что можно начинать; кнопку сама не жми.' : 'Ещё не все готовы: старт не обещай.',
     'Проценты по одному и скорость загрузки не называй; время без оценки не выдумывай. Можно подхватить недавний разговор.',
+    ...(jokeCoin.flip()
+      ? ['Настроение: можно добавить одну очень короткую добрую шутку или лёгкое кокетство — своими словами и к месту.']
+      : []),
   ]
   if (facts.kind === 'opened') lines.push(`Комната только открыта, ждём игроков по ссылке. Пакет: «${facts.packName}». ${facts.packSummary}`)
   if (facts.kind === 'update') lines.push('Сначала коротко о новом событии.')

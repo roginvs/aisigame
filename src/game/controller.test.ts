@@ -7,7 +7,8 @@ import { getTrace } from '../debug/trace.ts'
 import type { ToolCall } from '../realtime/client.ts'
 import { MockRealtimeClient } from '../realtime/mockClient.ts'
 vi.mock('../audio/beep.ts', () => ({ playTimeoutBeep: vi.fn(), unlockAudio: vi.fn() }))
-import { attachController, specialListening, type GameControllerActions } from './controller.ts'
+import { attachController, mutedMicCue, specialListening, type GameControllerActions } from './controller.ts'
+import { jokeCoin } from './jokeCoin.ts'
 import { gameMachine, statePath } from './machine.ts'
 import type { Question, QuestionPack } from './types.ts'
 
@@ -1220,5 +1221,19 @@ describe('пометки реплик выбора в чате', () => {
       .map((e) => (e.detail as { mark?: { kind: string; cell?: string } }).mark)
     expect(marks.slice(-2)).toEqual([{ kind: 'other' }, { kind: 'picked', cell: 'ВОЛГА 200' }])
     stop(); actor.stop()
+  })
+})
+
+describe('настроение подсказки: монетка jokeCoin', () => {
+  it('монетка решает, подсказке ли разрешена короткая шутка', () => {
+    const original = jokeCoin.flip
+    try {
+      jokeCoin.flip = () => false
+      expect(mutedMicCue('Маша')).not.toContain('Настроение:')
+      jokeCoin.flip = () => true
+      expect(mutedMicCue('Маша')).toContain('Настроение: можно добавить одну очень короткую добрую шутку')
+    } finally {
+      jokeCoin.flip = original
+    }
   })
 })

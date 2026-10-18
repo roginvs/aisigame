@@ -135,6 +135,12 @@ export const fallbackCommitMinMs = 900
 export const suspiciousUtteranceLowMs = 1500
 export const suspiciousUtteranceHighMs = 2500
 
+/**
+ * Доля свободных реплик, которым подсказка разрешает настроение — короткую шутку или кокетство
+ * (монетка jokeCoin, тесты подменяют flip). Сам ход формулировать это не обязывает.
+ */
+export const jokeCueChance = 0.3
+
 /** Гость: полоска таймера не переякоривается, если новый расчёт старта отличается не больше чем на столько (сетевой джиттер). */
 export const TIMER_RESYNC_THRESHOLD_MS = 300
 
