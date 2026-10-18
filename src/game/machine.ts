@@ -477,6 +477,16 @@ export const gameMachine = setup({
     }),
     /** Минус только что получен — апелляция доступна сразу, ещё во время реплики ведущей. */
     markAnswerShown: assign(() => ({ answerShownAt: Date.now(), answerClipEnded: false })),
+    /**
+     * Окно медиа ответа (min–max) начинает отсчёт, когда медиа реально включилось:
+     * звук и ролик стартуют в holding, уже после объявлении. Картинка появляется
+     * вместе с входом в announcing — там якорь в markAnswerShown правильный.
+     */
+    anchorAnswerHold: assign(({ context }) => {
+      const question = questionById(context.questions, context.activeQuestionId)
+      if (!question || !answerHasClip(question.answerMedia)) return {}
+      return { answerShownAt: Date.now() }
+    }),
     markAnswerClipEnded: assign(() => ({ answerClipEnded: true })),
     openAppealNow: assign(({ context }) => {
       if (isFinal(context) || context.appeal?.activePlayerId != null || context.announceKind === 'repeat') return {}
@@ -1903,7 +1913,7 @@ export const gameMachine = setup({
               { guard: 'moreFinalists', target: '#game.turnCue', actions: 'nextFinalist' },
               { guard: and(['purposeAnnounce', 'closedAppeal']), target: '#game.appealNext' },
               { guard: 'othersCanAnswer', target: '#game.buzzing', actions: 'reopenBuzzers' },
-              { guard: 'announceMediaHold', target: 'holding' },
+              { guard: 'announceMediaHold', target: 'holding', actions: 'anchorAnswerHold' },
               { guard: and(['purposeAnnounce', 'normalRound']), target: '#game.afterQuestion' },
               { guard: 'roundOverAndNext', target: '#game.bridging', actions: 'advanceRound' },
               { guard: 'roundOver', target: '#game.finished' },

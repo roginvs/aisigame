@@ -693,26 +693,28 @@ describe('game machine', () => {
     expect(statePath(actor.getSnapshot().value)).toBe('choosing.listening')
   })
 
-  it('медиа ответа: всё объявление / клип, не меньше min и не больше max с момента показа', () => {
-    const withMedia = (answerMedia: QuestionPack['questions'][number]['answerMedia']) => {
-      const pack: QuestionPack = {
-        ...demoPack,
-        questions: demoPack.questions.map((question) =>
-          question.id === 'history-100' ? { ...question, answerMedia } : question,
-        ),
-      }
-      const actor = createActor(gameMachine)
-      actor.start()
-      actor.send({ type: 'START_GAME', pack })
-      actor.send({ type: 'CONNECTED' })
-      actor.send({ type: 'HOST_AUDIO_FINISHED', purpose: 'welcome' })
-      actor.send({ type: 'QUESTION_SELECTED', themeId: 'history', value: 100 })
-      vi.advanceTimersByTime(gameConfig.cellFlashMs)
-      actor.send({ type: 'HOST_AUDIO_FINISHED', purpose: 'read' })
-      vi.advanceTimersByTime(gameConfig.buzzerMs)
-      expect(statePath(actor.getSnapshot().value)).toBe('announcing.speaking')
-      return actor
+  const announceWithMedia = (answerMedia: QuestionPack['questions'][number]['answerMedia']) => {
+    const pack: QuestionPack = {
+      ...demoPack,
+      questions: demoPack.questions.map((question) =>
+        question.id === 'history-100' ? { ...question, answerMedia } : question,
+      ),
     }
+    const actor = createActor(gameMachine)
+    actor.start()
+    actor.send({ type: 'START_GAME', pack })
+    actor.send({ type: 'CONNECTED' })
+    actor.send({ type: 'HOST_AUDIO_FINISHED', purpose: 'welcome' })
+    actor.send({ type: 'QUESTION_SELECTED', themeId: 'history', value: 100 })
+    vi.advanceTimersByTime(gameConfig.cellFlashMs)
+    actor.send({ type: 'HOST_AUDIO_FINISHED', purpose: 'read' })
+    vi.advanceTimersByTime(gameConfig.buzzerMs)
+    expect(statePath(actor.getSnapshot().value)).toBe('announcing.speaking')
+    return actor
+  }
+
+  it('медиа ответа: всё объявление / клип, не меньше min и не больше max; клип считается с включения', () => {
+    const withMedia = announceWithMedia
     // Картинка: короткое объявление (1 с) — добрать до min.
     const imageQuick = withMedia([{ kind: 'image', name: 'seal.svg', url: 'blob:seal' }])
     vi.advanceTimersByTime(1000)
@@ -746,13 +748,26 @@ describe('game machine', () => {
     clip.send({ type: 'ANSWER_MEDIA_ENDED' })
     // Уже прошло больше min — сразу дальше.
     expect(statePath(clip.getSnapshot().value)).toBe('choosing.listening')
-    // Длинный клип обрезается на max.
+    // Длинный клип обрезается на max от момента, когда клип включился (в holding).
     const longClip = withMedia([{ kind: 'video', name: 'clip.mp4', url: 'blob:clip' }])
     vi.advanceTimersByTime(100)
     longClip.send({ type: 'HOST_AUDIO_FINISHED', purpose: 'announce' })
     expect(statePath(longClip.getSnapshot().value)).toBe('announcing.holding')
-    vi.advanceTimersByTime(answerMediaMaxMs - 100)
+    vi.advanceTimersByTime(answerMediaMaxMs)
     expect(statePath(longClip.getSnapshot().value)).toBe('choosing.listening')
+  })
+
+  it('окно звука ответа считается с включения в holding, а не от начала объявления', () => {
+    const voice = announceWithMedia([{ kind: 'audio', name: 'song.mp3', url: 'blob:song' }])
+    // Долгое объявление (4 с), звук включается только после него.
+    vi.advanceTimersByTime(4000)
+    voice.send({ type: 'HOST_AUDIO_FINISHED', purpose: 'announce' })
+    expect(statePath(voice.getSnapshot().value)).toBe('announcing.holding')
+    // Если бы окно шло от начала объявления, уже истекло бы 4 с тому назад.
+    vi.advanceTimersByTime(answerMediaMaxMs - 1)
+    expect(statePath(voice.getSnapshot().value)).toBe('announcing.holding')
+    vi.advanceTimersByTime(1)
+    expect(statePath(voice.getSnapshot().value)).toBe('choosing.listening')
   })
 
   it('списывает номинал за молчание и не штрафует, если речь уже началась', () => {
