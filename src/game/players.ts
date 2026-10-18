@@ -21,10 +21,11 @@ export function playersFromNames(text: string): Player[] {
   return names.map((name, index) => ({ id: index + 1, name, score: 0 }))
 }
 
-/** В начале раунда выбирает второй, если игроков хотя бы двое, иначе первый. */
-export function openingChooser(players: readonly Player[]): PlayerId {
-  if (players.length >= 2) return players.find((player) => player.id === 2)?.id ?? players[1]?.id ?? 1
-  return players[0]?.id ?? 1
+/** Раунд открывает по кругу со 2-го: раунд 1 — второй игрок, раунд 2 — третий и так далее; финал продолжает круг. */
+export function openingChooser(players: readonly Player[], roundIndex = 0): PlayerId {
+  if (players.length === 0) return 1
+  const index = (roundIndex + 1) % players.length
+  return players[index]?.id ?? players[0]?.id ?? 1
 }
 
 export function playerName(players: readonly Player[], id: PlayerId | null): string {

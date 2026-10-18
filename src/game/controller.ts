@@ -2498,7 +2498,7 @@ export function roundSummaryInstructions(context: GameContext): string {
   const nextIndex = nextPlayableRound(context.rounds, context.questions, context.roundIndex)
   const next = context.rounds.find((round) => round.index === nextIndex)
   const scores = scoreRoster(context)
-  const chooser = playerName(context.players, openingChooser(context.players)) || 'игрок'
+  const chooser = playerName(context.players, openingChooser(context.players, nextIndex)) || 'игрок'
   const ordinal = roundOrdinals[context.rounds.filter((round) => round.kind === 'normal' && round.index <= nextIndex).length - 1]
   const ahead = next?.kind === 'final' ? 'финальный раунд' : ordinal ? `${ordinal} раунд` : `раунд «${next?.name ?? ''}»`
   return hostCue({

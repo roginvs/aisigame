@@ -35,9 +35,17 @@ describe('playersFromNames', () => {
     expect(playerFromBuzzKey('Digit4', plain)).toBeNull()
   })
 
-  it('в начале раунда выбирает второго, а одного игрока — его самого', () => {
-    expect(openingChooser(playersFromNames('А\nБ\nВ'))).toBe(2)
-    expect(openingChooser(playersFromNames('Один'))).toBe(1)
+  it('раунды открываются по кругу со второго: 1-й раунд — второй, 2-й — третий, финал — снова первый', () => {
+    const players = playersFromNames('А\nБ\nВ\nГ')
+    expect(openingChooser(players, 0)).toBe(2)
+    expect(openingChooser(players, 1)).toBe(3)
+    expect(openingChooser(players, 2)).toBe(4)
+    expect(openingChooser(players, 3)).toBe(1)
+    // Троим: 1-й раунд — второй, финал (индекс 2) — снова первый.
+    const trio = playersFromNames('А\nБ\nВ')
+    expect(openingChooser(trio, 0)).toBe(2)
+    expect(openingChooser(trio, 2)).toBe(1)
+    expect(openingChooser(playersFromNames('Один'), 0)).toBe(1)
   })
 })
 
