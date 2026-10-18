@@ -159,6 +159,8 @@ export class RealtimeClient {
   /** Идущие ответы модели: unscoped `response.cancel` шлём только при них (иначе `response_cancel_not_active`). */
   private activeResponses = new Set<string>()
   private inputItemId: string | null = null
+  /** Запасной commit: длительность реплики, которую видит уровень, а модель — нет (fa584db п. 1). */
+  private pendingForcedUtterance: { durationMs: number } | null = null
   private itemPrompts = new ItemPrompts()
   private promptEchoLogged = new Set<string>()
   private transcripts = new Map<string, StoredTranscript>()
@@ -430,6 +432,17 @@ export class RealtimeClient {
     if (!track) return
     this.usingExternalInput = true
     void sender.replaceTrack(track)
+  }
+
+  /** Запасной commit (fa584db п. 1): модельная VAD промахнулась, а уровни Jitsi показывают реплику — коммитим буфер сами. */
+  forceInputCommit(durationMs: number): void {
+    if (this.wire) {
+      pushTrace('note', 'запасной commit: провод этого провайдера не даёт input_audio_buffer.commit, реплика остаётся на его VAD')
+      return
+    }
+    if (this.pendingForcedUtterance) return
+    this.pendingForcedUtterance = { durationMs }
+    this.send({ type: 'input_audio_buffer.commit' })
   }
 
   setMicEnabled(enabled: boolean): void {
@@ -966,6 +979,12 @@ export class RealtimeClient {
       const error = asRecord(event.error)
       // Гонка: ответ закончился раньше нашей отмены. Не ошибка и не повод проваливать tool.
       if (error.code === 'response_cancel_not_active') return
+      if (error.code === 'input_audio_buffer_commit_empty') {
+        // Мы сами коммитили переполненный буфер, а его уже очистили (discard/пауза) — не ошибка.
+        pushTrace('note', 'запасной commit пуст: в буфере нет аудио')
+        this.pendingForcedUtterance = null
+        return
+      }
       const message = readErrorMessage(event)
       pushTrace('note', `Ошибка API: ${message}`)
       const errorId = typeof error.event_id === 'string' ? error.event_id : ''
@@ -1080,6 +1099,19 @@ export class RealtimeClient {
     if (type === 'output_audio_buffer.stopped') this.onPlaybackStopped(event)
     if (type === 'output_audio_buffer.cleared') this.onOutputCleared(event)
     if (type === 'conversation.item.truncated') this.onTruncated(event)
+    if (type === 'input_audio_buffer.committed') {
+      // Запасной commit (fa584db п. 1): обычные коммиты серверной VAD приходят без нашего ожидания —
+      // реагируем только на свой. Реплика идёт обычным путём: синтетический speech_stopped
+      // открывает попытку через контроллер, судья получает item по этому itemId.
+      const forced = this.pendingForcedUtterance
+      this.pendingForcedUtterance = null
+      if (!forced) return
+      const itemId = readItemId(event)
+      diag('слух', 'запасной commit принят', { itemId, speechMs: Math.round(forced.durationMs) })
+      if (itemId) this.speechStoppedAt.set(itemId, performance.now())
+      this.onSpeechStopped({ durationMs: forced.durationMs, itemId })
+      return
+    }
     if (type === 'input_audio_buffer.speech_started') {
       this.inputStartedAt = performance.now()
       this.inputAudioStartMs = typeof event.audio_start_ms === 'number' ? event.audio_start_ms : null
@@ -1656,6 +1688,7 @@ export type GameVoice = Pick<
   | 'setOutputMuted'
   | 'setLocalPlayback'
   | 'discardInputAudio'
+  | 'forceInputCommit'
   | 'setSpeechSpeed'
   | 'setTranscriptionPrompt'
   | 'gatePlayerChat'

@@ -488,6 +488,32 @@ describe('attachController answer listening', () => {
     actor.stop()
   })
 
+  it('запасной commit: модель молчит, уровень показал реплику хода — коммитим буфер, один на попытку', async () => {
+    const client = new MockRealtimeClient()
+    const forceInputCommit = vi.spyOn(client, 'forceInputCommit')
+    const { actor, stop, actions } = await boot(client)
+    actor.send({ type: 'QUESTION_SELECTED', themeId: 'p', value: 400 })
+    await vi.advanceTimersByTimeAsync(gameConfig.cellFlashMs + 80)
+    actor.send({ type: 'BUZZER_PRESSED', playerId: 1 })
+    expect(statePath(actor.getSnapshot().value)).toBe('answering.waiting')
+
+    // Чужой игрок: молчим. Короткий шум: молчим.
+    actions().answerSilentCommit(2, 1400)
+    expect(forceInputCommit).not.toHaveBeenCalled()
+    actions().answerSilentCommit(1, 300)
+    expect(forceInputCommit).not.toHaveBeenCalled()
+    // Своя попытка, реплика длиннее порога: commit с длительностью.
+    actions().answerSilentCommit(1, 1400)
+    expect(forceInputCommit).toHaveBeenCalledTimes(1)
+    expect(forceInputCommit).toHaveBeenCalledWith(1400)
+    // Одна попытка — один запасной commit.
+    actions().answerSilentCommit(1, 1400)
+    expect(forceInputCommit).toHaveBeenCalledTimes(1)
+
+    stop()
+    actor.stop()
+  })
+
   it('ответ сообщением в чат: реплика того, чей ход, идёт в оценку, чужое — игнорируется', async () => {
     const client = new MockRealtimeClient()
     const requestTool = vi.spyOn(client, 'requestTool')

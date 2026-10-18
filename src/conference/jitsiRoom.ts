@@ -528,11 +528,17 @@ export async function connectJitsiConference(input: {
   }
   const tileListeners = new Set<(tiles: ConferenceTile[]) => void>()
   const hostSpeakingListeners = new Set<(speaking: boolean) => void>()
-  /** Реплики людей: дорожка ≥1 с говорила (уровень Jitsi) — напоминание «ответ без кнопки». */
-  const speechActivityListeners = new Set<(participantId: string) => void>()
-  const speechLevels = createSpeechLevels((participantId) => {
-    for (const listener of speechActivityListeners) listener(participantId)
-  })
+  /** Реплика людей: дорожка ≥1 с говорила (уровень Jitsi) — напоминание «ответ без кнопки»; конец реплики с длительностью — запасной commit. */
+  const speechActivityListeners = new Set<(participantId: string, end?: { durationMs: number }) => void>()
+  const speechLevels = createSpeechLevels(
+    (participantId) => {
+      for (const listener of speechActivityListeners) listener(participantId)
+    },
+    Date.now,
+    (participantId, durationMs) => {
+      for (const listener of speechActivityListeners) listener(participantId, { durationMs })
+    },
+  )
   let lastHostSpeaking = false
   const localId = () => conference.myUserId() || 'local'
   let botHandle: ConferenceHandle | null = null

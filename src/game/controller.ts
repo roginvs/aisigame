@@ -3,7 +3,7 @@ import { auctionBidToolFor, finalBetToolFor, selectQuestionToolFor } from '../re
 import type { Actor, SnapshotFrom } from 'xstate'
 import { clearHostEar, getHostEar, subscribeHostEar, hostEarHearing, hostEarHostSpoke, hostEarMicClosed, hostEarProcessing, hostEarShown, hostEarSurvives, settleHostEar } from './hostEar.ts'
 import { playTimeoutBeep } from '../audio/beep.ts'
-import { answerOverrunSafetyMs, answerSilenceDecideMs, answerUtteranceJudgeMs, bargeInSustainMs, choiceClarifyAfterMs, choiceLateTranscriptMs, choiceResolveTimeoutMs, mutedChooserMaxReminders, auctionDingMs, audioJudgmentTimings, catMeowMs, transcriptWaitMs } from '../options.ts'
+import { answerOverrunSafetyMs, answerSilenceDecideMs, answerUtteranceJudgeMs, bargeInSustainMs, choiceClarifyAfterMs, choiceLateTranscriptMs, choiceResolveTimeoutMs, fallbackCommitMinMs, mutedChooserMaxReminders, auctionDingMs, audioJudgmentTimings, catMeowMs, transcriptWaitMs } from '../options.ts'
 import { matchAuctionSpeech, optionLabel } from './auction.ts'
 import { matchCatStake, nextInCircle } from './cat.ts'
 import { idleThresholds } from './idle.ts'
@@ -67,6 +67,8 @@ export type GameControllerActions = {
   remindMutedAnswerer: (playerName: string) => void
   /** Речь без кнопки по уровню звука: playerId из дорожки Jitsi. */
   speechWithoutBuzzer: (playerId: number) => void
+  /** Запасной commit (fa584db п. 1): реплика уровня Jitsи кончилась, а модель о речи не знает. */
+  answerSilentCommit: (playerId: number, durationMs: number) => void
   /** Выбор вопроса: модель сама формулирует короткую фразу, каждый раз новую. */
   /** Мастер: микрофон выбирающего стабильно выключен (true) или включился (false). */
   setChooserMicOff: (off: boolean) => void
@@ -157,6 +159,8 @@ export function attachController(options: {
   let answerTurn: AnswerUtterance[] = []
   let answerTurnAttempt: number | null = null
   let answerSeq = 0
+  /** Запасной commit сделан максимум один на попытку (fa584db п. 1). */
+  let fallbackCommitAttempt: number | null = null
   /** Окно кнопки, в котором уже прошло напоминание по уровню (один вопрос = одно окно). */
   let noBuzzerKey: number | string | null = null
   let noBuzzerDone = false
@@ -1989,9 +1993,35 @@ export function attachController(options: {
     speakWhileListening('noBuzzer', noBuzzerCue(player.name))
   }
 
+  /**
+   * Запасной commit (план fa584db п. 1): модельная VAD промахнулась и `speech_started` не приходила,
+   * а уровни Jitsi видели реплику того, чей ход, и она закончилась. Коммитим буфер сами: клиент
+   * делает `input_audio_buffer.commit` и по `committed` отдаёт синтетический конец речи — реплика
+   * идёт обычным путём попытки (транскрипт/аудио-судья, счёт меняет машина). Максимум один на попытку.
+   */
+  function answerSilentCommit(playerId: number, durationMs: number): void {
+    const snapshot = actor.getSnapshot()
+    const path = statePath(snapshot.value)
+    if (!path.startsWith('answering')) return
+    const context = snapshot.context
+    if (context.activePlayerId !== playerId) return
+    if (!answerAttemptLive()) return
+    if (durationMs < fallbackCommitMinMs) return
+    // Модель в этот момент уже слушает эту реплику (speech_started была) или коммитил в этой попытке.
+    if (openSpeechItemId !== null || fallbackCommitAttempt === context.attemptId) return
+    fallbackCommitAttempt = context.attemptId
+    pushTrace('note', 'модель молчит, микрофонный уровень показал реплику — делаем запасной commit', {
+      playerId,
+      attemptId: context.attemptId,
+      speechMs: Math.round(durationMs),
+    })
+    client.forceInputCommit(durationMs)
+  }
+
   onActions?.({
     chatAnswer,
     speechWithoutBuzzer,
+    answerSilentCommit,
     remindMutedAnswerer(playerName) {
       if (statePath(actor.getSnapshot().value) !== 'answering.waiting') return
       if (Date.now() - lastAnswerSpeechAt < gameConfig.mutedAnswerReminderMs) {

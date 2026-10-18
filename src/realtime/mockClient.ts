@@ -111,6 +111,9 @@ export class MockRealtimeClient implements GameVoice {
     this.onLink({ mic: enabled ? 'live' : 'muted' })
   }
 
+  /** Мок сам имитирует начало/конец речи — запасной commit не нужен, остаётся заглушкой для тестов. */
+  forceInputCommit(_durationMs: number): void {}
+
   /** Последняя суженная схема инструмента — для тестов. */
   lastTool: { name: string } | null = null
   lastToolAudioItemId: string | null = null

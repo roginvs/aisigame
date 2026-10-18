@@ -8,11 +8,14 @@ type SpeechState = { since: number; last: number; fired: boolean }
 
 /**
  * Устойчивая речь участника по уровням Jitsi (кадры раз в 200 мс): слово-другое, кашель
- * и стук не считаются. Реплика — одно уведомление; тишина дольше `gapMs` открывает новое.
+ * и стук не считаются. Реплика — одно уведомление в начале; `onEpisodeEnd` приходит один раз
+ * в конце реплики (тишина дольше порога) с длительностью от первого звукового кадра —
+ * это запасной источник «реплика закончилась» для commit, когда модельная VAD молчит.
  */
 export function createSpeechLevels(
   onEpisode: (participantId: string) => void,
   now: () => number = Date.now,
+  onEpisodeEnd: (participantId: string, durationMs: number) => void = () => {},
 ): {
   note: (participantId: string, level: number) => void
   clear: (participantId: string) => void
@@ -20,13 +23,21 @@ export function createSpeechLevels(
 } {
   const running = new Map<string, SpeechState>()
 
+  const finish = (participantId: string, entry: SpeechState): void => {
+    // Длительность реплики — от первого до последнего звукового кадра; хвост тишины до разрыва не в счёт.
+    if (entry.fired) onEpisodeEnd(participantId, Math.max(0, entry.last - entry.since))
+  }
+
   return {
     note(participantId, level) {
       if (!participantId) return
       const nowMs = now()
       const previous = running.get(participantId)
       if (!Number.isFinite(level) || level <= 0 || (level < LEVEL_THRESHOLD && (!previous || nowMs - previous.last > GAP_MS))) {
-        if (previous) running.delete(participantId)
+        if (previous) {
+          running.delete(participantId)
+          finish(participantId, previous)
+        }
         return
       }
       if (level < LEVEL_THRESHOLD) {
@@ -46,7 +57,10 @@ export function createSpeechLevels(
       }
     },
     clear: (participantId) => {
+      const finished = running.get(participantId)
+      if (!finished) return
       running.delete(participantId)
+      finish(participantId, finished)
     },
     dispose: () => {
       running.clear()

@@ -715,15 +715,17 @@ export default function App() {
     hostSpeakingUnsubRef.current?.()
     hostSpeakingUnsubRef.current = handle.subscribeHostSpeaking(setConferenceHostSpeaking)
     speechActivityUnsubRef.current?.()
-    speechActivityUnsubRef.current = handle.subscribeSpeechActivity((participantId) => {
+    speechActivityUnsubRef.current = handle.subscribeSpeechActivity((participantId, end) => {
       // Реплика ≥1 с по уровню: если это человек, ждущий кнопки, контроллер напомнит про кнопку.
+      // Конец реплики, которую модель не заметила, — запасной commit в буфер (fa584db п. 1).
       const pairs: readonly ConferenceJitsiPair[] = masterSnapshotRef.current?.jitsiIds ?? []
       const found = pairs.find(([jitsiId]) => jitsiId === participantId)
       const clientId = found ? found[1] : null
       if (!clientId) return
       const entry = masterSessionRef.current?.rosterList().find((item) => item.clientId === clientId)
       if (!entry || entry.playerId === null) return
-      controllerActionsRef.current?.speechWithoutBuzzer(entry.playerId)
+      if (end) controllerActionsRef.current?.answerSilentCommit(entry.playerId, end.durationMs)
+      else controllerActionsRef.current?.speechWithoutBuzzer(entry.playerId)
     })
   }
 

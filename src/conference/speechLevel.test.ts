@@ -79,6 +79,45 @@ describe('createSpeechLevels — устойчивая речь по уровня
     levels.dispose()
   })
 
+  it('конец реплики: одна тишина-разрыв даёт один конец с длительностью, короткий шум без конца', () => {
+    const clock = timed()
+    const onEpisode = vi.fn()
+    const onEpisodeEnd = vi.fn()
+    const levels = createSpeechLevels(onEpisode, clock.now, onEpisodeEnd)
+    for (let i = 0; i < 6; i += 1) {
+      clock.tick()
+      levels.note('p1', 0.5)
+    }
+    // Реплика закончилась: кадры тихие с разрывом больше паузы.
+    clock.tick(700)
+    levels.note('p1', 0)
+    expect(onEpisodeEnd).toHaveBeenCalledTimes(1)
+    expect(onEpisodeEnd).toHaveBeenCalledWith('p1', 1000)
+    // Реплика короче секунды устойчивости (не `fired`) — конца не было.
+    clock.tick()
+    levels.note('p2', 0.5)
+    clock.tick(700)
+    clock.tick()
+    levels.note('p2', 0)
+    expect(onEpisodeEnd).toHaveBeenCalledTimes(1)
+    expect(onEpisode).toHaveBeenCalledTimes(1)
+    levels.dispose()
+  })
+
+  it('clear участника отдаёт конец реплики тоже', () => {
+    const clock = timed()
+    const onEpisodeEnd = vi.fn()
+    const levels = createSpeechLevels(() => {}, clock.now, onEpisodeEnd)
+    for (let i = 0; i < 6; i += 1) {
+      clock.tick()
+      levels.note('p1', 0.5)
+    }
+    levels.clear('p1')
+    expect(onEpisodeEnd).toHaveBeenCalledTimes(1)
+    expect(onEpisodeEnd).toHaveBeenCalledWith('p1', 1000)
+    levels.dispose()
+  })
+
   it('без участника уведомлений нет', () => {
     const clock = timed()
     const onEpisode = vi.fn()
