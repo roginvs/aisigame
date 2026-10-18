@@ -22,6 +22,7 @@ import { createMicMixer, type MicMixer, type MixerRemote } from './audioMix.ts'
 import { cameraFacing, isMobileCameraDevice, nextCameraDeviceId, shouldMirrorVideo, switchFacingCamera, type CameraFacing } from './camera.ts'
 import { createSpeakerActivity } from './speakerActivity.ts'
 import { conferenceAudioStream, createConferenceAudioOutput } from './conferenceAudio.ts'
+import { compressMic, compressMicEligible, type MicCompression } from './micCompression.ts'
 import { createSpeechLevels } from './speechLevel.ts'
 import { PACK_CHANNEL_HIGH_WATER_BYTES, PACK_CHANNEL_LOW_WATER_BYTES } from './chunks.ts'
 import { jitsiVideoLive, mediaStreamTrackFromJitsi, micTrackIsDead } from './micTrack.ts'
@@ -446,6 +447,9 @@ export async function connectJitsiConference(input: {
   let localVideo: JitsiTrack | null = null
   let localMicMedia: MediaStream | null = null
   let micLive = false
+  /** Компрессор опубликованного микрофона: сырую дорожку не трогаем, в комнату уходит сжатая. */
+  let micCompress: MicCompression | null = null
+  let micCompressTrack: JitsiTrack | null = null
   /** Пользователь хочет микрофон включённым — даже если дорожка оборвалась на телефоне. */
   let wantMicLive = false
   let recoveringMic = false
@@ -759,9 +763,25 @@ export async function connectJitsiConference(input: {
 
   async function dropLocalAudioTrack(): Promise<void> {
     stopWatchingLocalMic()
+    micCompress?.stop()
+    micCompress = null
+    const compressed = micCompressTrack
+    micCompressTrack = null
     const previous = localAudio
     localAudio = null
     localMicMedia = null
+    if (compressed) {
+      try {
+        await conference.removeTrack(compressed)
+      } catch {
+        // Обработанная дорожка могла уже уйти из комнаты.
+      }
+      try {
+        compressed.dispose()
+      } catch {
+        // ignore
+      }
+    }
     if (!previous) return
     try {
       await conference.removeTrack(previous)
@@ -783,15 +803,57 @@ export async function connectJitsiConference(input: {
     localAudio = next
     // Тот же объект, что опубликован в комнату, и та же функция, что для чужих дорожек.
     // Свою дорожку Jitsi обратно не присылает (trackAdded только у других).
-    localMicMedia = conferenceAudioStream(next)
+    // В модель и на уровень кнопки — та же обработанная дорожка, что уходит в комнату:
+    // модель слышит ровно то, что слышат люди.
     watchLocalMic(next)
-    await conference.addTrack(next)
-    await Promise.resolve(next.unmute())
+    const published = await publishProcessedMic(next)
+    localMicMedia = conferenceAudioStream(published)
+    await conference.addTrack(published)
+    await Promise.resolve(published.unmute())
     reopenAudioOutputs()
     micLive = true
     syncModelMixer()
     conferenceAudio.resume()
     emitTiles()
+  }
+
+  /**
+   * Компрессор опубликованного микрофона: сырую дорожку оставляем без обработки
+   * (микс модели, уровни), в комнату уходит сжатая копия. Не получилось — сырая, как раньше.
+   */
+  async function publishProcessedMic(raw: JitsiTrack): Promise<JitsiTrack> {
+    micCompress?.stop()
+    micCompressTrack = null
+    const browserTrack = mediaStreamTrackFromJitsi(raw)
+    if (!browserTrack || micTrackIsDead(browserTrack) || !compressMicEligible()) return raw
+    const handled = compressMic(browserTrack)
+    if (!handled) return raw
+    browserTrack.addEventListener?.('ended', () => {
+      // Устройство сменилось или дорожка умерла: обработка осталась молчащей — пересобираем микрофон.
+      const active = handled.stream.getAudioTracks()[0]
+      if (!active || active.readyState !== 'live') void recoverLocalMic()
+    }, { once: true })
+    try {
+      const created = await JitsiMeetJS.createLocalTracksFromMediaStreams([
+        { stream: handled.stream, mediaType: 'audio' },
+      ])
+      const compressed = created[0] ?? null
+      for (const extra of created.slice(1)) extra.dispose()
+      if (compressed && !micTrackIsDead(mediaStreamTrackFromJitsi(compressed))) {
+        micCompress = handled
+        micCompressTrack = compressed
+        pushTrace('note', 'Микрофон конференции публикуется с компрессором (тихих выравниваем)')
+        return compressed
+      }
+      compressed?.dispose()
+      handled.stop()
+      pushTrace('note', 'Обработанная дорожка микрофона не ожила — публикуют сырую')
+      return raw
+    } catch (error) {
+      handled.stop()
+      pushTrace('note', `Компрессор микрофона не подключён: ${error instanceof Error ? error.message : String(error)}`)
+      return raw
+    }
   }
 
   async function recoverLocalMic(): Promise<void> {
@@ -963,6 +1025,14 @@ export async function connectJitsiConference(input: {
     },
     async setMicLive(live: boolean) {
       wantMicLive = live
+      const toggle = async (track: JitsiTrack | null, op: 'mute' | 'unmute'): Promise<void> => {
+        if (!track) return
+        try {
+          await Promise.resolve(op === 'mute' ? track.mute() : track.unmute())
+        } catch {
+          // Глушение одной из дорожек не рвёт попытку: ошибки логируем и идём дальше.
+        }
+      }
       if (live) {
         // На телефоне ОС иногда убивает MediaStreamTrack: mute/unmute уже не помогает.
         if (localAudio && micTrackIsDead(mediaStreamTrackFromJitsi(localAudio))) {
@@ -973,13 +1043,15 @@ export async function connectJitsiConference(input: {
           await publishFreshLocalMic()
           return
         }
-        await Promise.resolve(localAudio.unmute())
+        await toggle(localAudio, 'unmute')
+        await toggle(micCompressTrack, 'unmute')
         micLive = true
         watchLocalMic(localAudio)
-      } else if (localAudio) {
-        await Promise.resolve(localAudio.mute())
-        micLive = false
       } else {
+        // Сырую дорожку device-gate не видит, поэтому глушим и обработанную копию в комнате тоже.
+        // (Мьютим обе, даже если сырой не было: при live=true восстановить нечего.)
+        await toggle(localAudio, 'mute')
+        await toggle(micCompressTrack, 'mute')
         micLive = false
       }
       syncModelMixer()

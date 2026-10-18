@@ -31,3 +31,6 @@ coverage
 
 # Local third-party SIGame packs. The built-in demo stays tracked.
 /public/packs/external/
+
+# Vitest run artifacts.
+/.vitest/
