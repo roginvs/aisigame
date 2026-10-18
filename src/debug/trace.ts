@@ -292,7 +292,7 @@ export function pushErrorLine(text: string): void {
 export function pushSystemLine(text: string): void {
   const clean = text.trim()
   if (!clean) return
-  pushTrace('chat', 'Игра', { role: 'system' satisfies ChatRole, text: clean })
+  pushTrace('chat', 'Техническое', { role: 'system' satisfies ChatRole, text: clean })
 }
 
 export function getTrace(): TraceEntry[] {

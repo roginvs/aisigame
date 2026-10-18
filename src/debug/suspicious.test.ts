@@ -14,7 +14,7 @@ describe('suspicious — слой «подозрительно» (диагнос
     expect(latest.some((entry) => entry.title.includes('подозрительно · слегка:'))).toBe(true)
     expect(latest.some((entry) => {
       const detail = entry.detail as { role?: string; text?: string } | undefined
-      return detail?.role === 'system' && detail.text?.startsWith('Техническое · подозрительно (слегка):') === true
+      return detail?.role === 'system' && detail.text?.startsWith('подозрительно (слегка):') === true
     })).toBe(true)
   })
 

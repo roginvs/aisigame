@@ -5,7 +5,7 @@ export function roleLabel(role: ChatRole, speaker?: string): string {
   if (role === 'player') return speaker?.trim() || 'Услышано'
   if (role === 'judge') return 'Оценка'
   if (role === 'error') return 'Ошибка'
-  if (role === 'system') return 'Игра'
+  if (role === 'system') return 'Техническое'
   return 'Ведущая'
 }
 

@@ -2229,8 +2229,11 @@ button.buzzer.chooser:disabled {
 }
 
 .bubble.from-system {
-  background: rgb(92 113 136 / 18%);
+  border-left: 2px solid rgb(96 138 152 / 55%);
+  background: rgb(96 122 140 / 12%);
+  color: rgb(148 166 180);
   font-size: 0.9em;
+  font-variant-numeric: tabular-nums;
 }
 
 /* Аббревиатуры на переключателях ведущей (ОПА, МС): крупнее, тем же цветом. */

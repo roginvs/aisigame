@@ -46,7 +46,7 @@ export function suspicious(level: SuspicionLevel, text: string, detail?: Record<
   const clean = text.trim()
   if (!clean) return
   pushTrace('note', `подозрительно · ${level}: ${clean}`, detail)
-  pushSystemLine(`Техническое · подозрительно (${level}): ${clean}`)
+  pushSystemLine(`подозрительно (${level}): ${clean}`)
 }
 
 /** true — заметка прозвучала, false — тот же ключ недавно уже был. */
