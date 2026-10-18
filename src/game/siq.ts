@@ -162,7 +162,9 @@ export async function loadSiq(data: ArrayBuffer): Promise<QuestionPack> {
   const head = new TextDecoder().decode(data.slice(0, 120)).trimStart()
   if (head.startsWith('<')) return parseContentXml(new TextDecoder().decode(data))
   try {
-    const zip = await JSZip.loadAsync(data)
+    // checkCRC32: контрольная сумма каждой записи проверяется при чтении —
+    // побитая запись не раздувается в мусор, а валит загрузку с внятной ошибкой.
+    const zip = await JSZip.loadAsync(data, { checkCRC32: true })
     const file = zip.file(/content\.xml$/i)[0]
     if (!file) throw new Error('В пакете нет content.xml')
     return attachMedia(parseContentXml(await file.async('string')), zip)

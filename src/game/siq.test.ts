@@ -188,6 +188,27 @@ describe('parseContentXml', () => {
     expect(pack.questions[1]?.media).toEqual([])
   })
 
+  it('побитая запись архива валит загрузку (CRC32), не проходит битой картинкой', async () => {
+    const zip = new JSZip()
+    zip.file('content.xml', v5)
+    // STORE: данные записи лежат в архиве как есть — правка байта не рвёт inflate,
+    // и только проверка CRC32 ловит порчу (ровно этот случай и закрываем).
+    zip.file('Images/pic.png', new Uint8Array([7, 7, 7, 7, 7, 7, 7, 7]), { compression: 'STORE' })
+    const bytes = new Uint8Array(await zip.generateAsync({ type: 'arraybuffer' }))
+    const marker = [7, 7, 7, 7, 7, 7, 7, 7]
+    let at = -1
+    for (let i = 0; i + marker.length <= bytes.length; i += 1) {
+      if (marker.every((value, offset) => bytes[i + offset] === value)) {
+        at = i
+        break
+      }
+    }
+    expect(at).toBeGreaterThanOrEqual(0)
+    const corrupted = new Uint8Array(bytes)
+    corrupted[at] = 8
+    await expect(loadSiq(corrupted.buffer as ArrayBuffer)).rejects.toThrow('Не удалось открыть файл')
+  })
+
   it('keeps one bundled demo with the supported question variants', () => {
     const dir = path.resolve(import.meta.dirname, '../../packs')
     const names = readdirSync(dir).filter((name) => name.endsWith('.xml'))
