@@ -82,6 +82,8 @@ export type ConferenceMedia = {
   subscribeTiles: (handler: (tiles: ConferenceTile[]) => void) => () => void
   /** Уровень речи бота «Ведущая» в Jitsi — для пульсации портрета, не плитки. */
   subscribeHostSpeaking: (handler: (speaking: boolean) => void) => () => void
+  /** Дорожка участника начала реплику (≥1 с речи по уровню): напоминание об ответе без кнопки. */
+  subscribeSpeechActivity: (handler: (participantId: string) => void) => () => void
   bindVideo: (participantId: string, element: HTMLVideoElement | null) => void
 }
 
@@ -164,6 +166,9 @@ export function createBroadcastMedia(displayName: string): ConferenceMedia & { d
       hostSpeakingListeners.add(handler)
       handler(false)
       return () => hostSpeakingListeners.delete(handler)
+    },
+    subscribeSpeechActivity() {
+      return () => {}
     },
     bindVideo() {},
     dispose() {

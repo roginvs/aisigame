@@ -69,7 +69,7 @@ import {
 import { audioJudgmentCapable, judgmentModeFromUrl, writeJudgmentMode, type JudgmentInputMode } from './realtime/judgmentRequest.ts'
 import { createVoice } from './realtime/voice.ts'
 import { emptyMessageRing, readMessageRing } from './conference/messageRing.ts'
-import type { ConferenceMessageRing, ConferenceSnapshot } from './conference/messages.ts'
+import type { ConferenceJitsiPair, ConferenceMessageRing, ConferenceSnapshot } from './conference/messages.ts'
 import type { PackPhase } from './conference/packProgress.ts'
 import type { RosterEntry } from './conference/roster.ts'
 import { GameScreen } from './ui/GameScreen.tsx'
@@ -150,6 +150,7 @@ export default function App() {
   const hearTurnOnlyRef = useRef(hearTurnOnly)
   /** Последний разосланный мастером снимок: экран мастера рисуется из него, как у гостей. */
   const [masterSnapshot, setMasterSnapshot] = useState<ConferenceSnapshot | null>(null)
+  const masterSnapshotRef = useRef<ConferenceSnapshot | null>(null)
   const masterSessionRef = useRef<MasterSession | null>(null)
   const joinerSessionRef = useRef<JoinerSession | null>(null)
   // Кончились заготовленные <audio>: мастер пишет строку в чат сам, игрок шлёт мастеру — у всех одна строка.
@@ -204,6 +205,7 @@ export default function App() {
   const conferenceHandleRef = useRef<ConferenceHandle | null>(null)
   const tilesUnsubRef = useRef<(() => void) | null>(null)
   const hostSpeakingUnsubRef = useRef<(() => void) | null>(null)
+  const speechActivityUnsubRef = useRef<(() => void) | null>(null)
   const tearingDownConferenceRef = useRef(false)
   const [conferenceTiles, setConferenceTiles] = useState<ConferenceTile[]>([])
   const [conferenceHostSpeaking, setConferenceHostSpeaking] = useState(false)
@@ -640,12 +642,15 @@ export default function App() {
     const joinerSession = joinerSessionRef.current
     const unsubscribeTiles = tilesUnsubRef.current
     const unsubscribeHostSpeaking = hostSpeakingUnsubRef.current
+    const unsubscribeSpeechActivity = speechActivityUnsubRef.current
     const disposeTransport = transportDisposeRef.current
     masterSessionRef.current = null
     setMasterSnapshot(null)
+    masterSnapshotRef.current = null
     joinerSessionRef.current = null
     tilesUnsubRef.current = null
     hostSpeakingUnsubRef.current = null
+    speechActivityUnsubRef.current = null
     transportDisposeRef.current = null
     conferenceHandleRef.current = null
     conferenceLobbyRef.current = false
@@ -656,6 +661,7 @@ export default function App() {
       joinerSession?.dispose()
       unsubscribeTiles?.()
       unsubscribeHostSpeaking?.()
+      unsubscribeSpeechActivity?.()
       disposeTransport?.()
       setGameSoundRoute('local')
       voiceClientRef.current?.stopSession()
@@ -708,6 +714,17 @@ export default function App() {
     tilesUnsubRef.current = handle.subscribeTiles(setConferenceTiles)
     hostSpeakingUnsubRef.current?.()
     hostSpeakingUnsubRef.current = handle.subscribeHostSpeaking(setConferenceHostSpeaking)
+    speechActivityUnsubRef.current?.()
+    speechActivityUnsubRef.current = handle.subscribeSpeechActivity((participantId) => {
+      // Реплика ≥1 с по уровню: если это человек, ждущий кнопки, контроллер напомнит про кнопку.
+      const pairs: readonly ConferenceJitsiPair[] = masterSnapshotRef.current?.jitsiIds ?? []
+      const found = pairs.find(([jitsiId]) => jitsiId === participantId)
+      const clientId = found ? found[1] : null
+      if (!clientId) return
+      const entry = masterSessionRef.current?.rosterList().find((item) => item.clientId === clientId)
+      if (!entry || entry.playerId === null) return
+      controllerActionsRef.current?.speechWithoutBuzzer(entry.playerId)
+    })
   }
 
   async function toggleConferenceMic(): Promise<void> {
@@ -884,6 +901,7 @@ export default function App() {
         resumePlayers: restoringGame ? resume?.saved.players : undefined,
         usePackPipe: !useBroadcast,
         onSnapshot: (snapshot) => {
+          masterSnapshotRef.current = snapshot
           setMasterSnapshot(snapshot)
         },
         // Кто есть кто в Jitsi — в снимок всем (пары и служебные id), не по именам.

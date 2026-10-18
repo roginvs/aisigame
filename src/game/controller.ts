@@ -65,6 +65,8 @@ type GameActor = Actor<typeof gameMachine>
 export type GameControllerActions = {
   chatAnswer: (playerName: string, text: string) => void
   remindMutedAnswerer: (playerName: string) => void
+  /** Речь без кнопки по уровню звука: playerId из дорожки Jitsi. */
+  speechWithoutBuzzer: (playerId: number) => void
   /** Выбор вопроса: модель сама формулирует короткую фразу, каждый раз новую. */
   /** Мастер: микрофон выбирающего стабильно выключен (true) или включился (false). */
   setChooserMicOff: (off: boolean) => void
@@ -155,6 +157,9 @@ export function attachController(options: {
   let answerTurn: AnswerUtterance[] = []
   let answerTurnAttempt: number | null = null
   let answerSeq = 0
+  /** Окно кнопки, в котором уже прошло напоминание по уровню (один вопрос = одно окно). */
+  let noBuzzerKey: number | string | null = null
+  let noBuzzerDone = false
   const answerQueue: AnswerUtterance[] = []
   let answerInModel: AnswerUtterance | null = null
   let answerModelTimer = 0
@@ -1965,9 +1970,28 @@ export function attachController(options: {
     settleAnswer()
   }
 
+  /** Речь в открытом окне кнопки без нажатия: по уровню звука, один раз на вопрос окно («Имя, ответ только по кнопке»). */
+  function speechWithoutBuzzer(playerId: number): void {
+    const path = statePath(actor.getSnapshot().value)
+    if (path !== 'reading.armed' && path !== 'buzzing.open') return
+    const context = actor.getSnapshot().context
+    if (context.rounds.find((round) => round.index === context.roundIndex)?.kind === 'final') return
+    const key = context.activeQuestionId ?? context.roundIndex
+    if (noBuzzerKey !== key) {
+      noBuzzerKey = key
+      noBuzzerDone = false
+    }
+    if (noBuzzerDone) return
+    const player = context.players.find((item) => item.id === playerId)
+    if (!player || context.missedIds.includes(playerId)) return
+    noBuzzerDone = true
+    pushTrace('note', `кнопки: речь без кнопки у ${player.name} — короткое напоминание по уровню микрофона`)
+    speakWhileListening('noBuzzer', noBuzzerCue(player.name))
+  }
 
   onActions?.({
     chatAnswer,
+    speechWithoutBuzzer,
     remindMutedAnswerer(playerName) {
       if (statePath(actor.getSnapshot().value) !== 'answering.waiting') return
       if (Date.now() - lastAnswerSpeechAt < gameConfig.mutedAnswerReminderMs) {
@@ -2102,6 +2126,7 @@ function isSpeechPurpose(purpose: string): purpose is SpeechPurpose {
     purpose === 'chooserHandoff' ||
     purpose === 'micWarning' ||
     purpose === 'buzzCall' ||
+    purpose === 'noBuzzer' ||
     purpose === 'idleNudge' ||
     purpose === 'idleAuto' ||
     purpose === 'falseStart' ||
@@ -2251,6 +2276,18 @@ export function buzzCallCue(playerName: string): string {
   })
 }
 
+/** Подсказка отвечающему: один раз за попытку, формулировку модель выбирает сама. */
+export function noBuzzerCue(playerName: string): string {
+  const name = playerName.trim() || 'Игрок'
+  return hostCue({
+    situation: `В открытом окне кнопки звучит голос игрока: ${name}, но кнопку пока не нажимали. Ответ можно назвать только после нажатия своей кнопки.`,
+    goal: `Обратись к отвечающему по имени, мягко напомни: нужно нажать свою кнопку.`,
+    constraints: [
+      boardSecrets,
+      'Одна короткая фраза. Окно кнопки и часы словами не трогай, кнопку не нажимай за игрока. Правильный ответ не произноси.',
+    ],
+  })
+}
 
 /** Подсказка отвечающему: один раз за попытку, формулировку модель выбирает сама. */
 export function mutedAnswerMicCue(playerName: string): string {

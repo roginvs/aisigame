@@ -35,6 +35,7 @@ export async function createConferenceTransport(input: {
       subscribeServiceIds: media.subscribeServiceIds,
       subscribeTiles: media.subscribeTiles,
       subscribeHostSpeaking: media.subscribeHostSpeaking,
+    subscribeSpeechActivity: media.subscribeSpeechActivity,
       bindVideo: media.bindVideo,
       dispose: () => {
         media.dispose()

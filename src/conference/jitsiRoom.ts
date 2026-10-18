@@ -22,6 +22,7 @@ import { createMicMixer, type MicMixer, type MixerRemote } from './audioMix.ts'
 import { cameraFacing, isMobileCameraDevice, nextCameraDeviceId, shouldMirrorVideo, switchFacingCamera, type CameraFacing } from './camera.ts'
 import { createSpeakerActivity } from './speakerActivity.ts'
 import { conferenceAudioStream, createConferenceAudioOutput } from './conferenceAudio.ts'
+import { createSpeechLevels } from './speechLevel.ts'
 import { PACK_CHANNEL_HIGH_WATER_BYTES, PACK_CHANNEL_LOW_WATER_BYTES } from './chunks.ts'
 import { jitsiVideoLive, mediaStreamTrackFromJitsi, micTrackIsDead } from './micTrack.ts'
 import { pushTrace } from '../debug/trace.ts'
@@ -523,6 +524,11 @@ export async function connectJitsiConference(input: {
   }
   const tileListeners = new Set<(tiles: ConferenceTile[]) => void>()
   const hostSpeakingListeners = new Set<(speaking: boolean) => void>()
+  /** Реплики людей: дорожка ≥1 с говорила (уровень Jitsi) — напоминание «ответ без кнопки». */
+  const speechActivityListeners = new Set<(participantId: string) => void>()
+  const speechLevels = createSpeechLevels((participantId) => {
+    for (const listener of speechActivityListeners) listener(participantId)
+  })
   let lastHostSpeaking = false
   const localId = () => conference.myUserId() || 'local'
   let botHandle: ConferenceHandle | null = null
@@ -868,6 +874,7 @@ export async function connectJitsiConference(input: {
     if (input.bot || typeof id !== 'string' || typeof level !== 'number') return
     jitsiLevels.set(id, level)
     speakerActivity.note(id, level)
+    speechLevels.note(id, level)
   })
 
   conference.on(confEvents.trackMute, (track: unknown) => {
@@ -1135,6 +1142,10 @@ export async function connectJitsiConference(input: {
       handler(lastHostSpeaking)
       return () => hostSpeakingListeners.delete(handler)
     },
+    subscribeSpeechActivity(handler) {
+      speechActivityListeners.add(handler)
+      return () => speechActivityListeners.delete(handler)
+    },
     bindVideo(participantId, element) {
       const previous = videoBindings.get(participantId)
       const track = participantId === localId() ? localVideo : remoteVideo.get(participantId)
@@ -1168,6 +1179,7 @@ export async function connectJitsiConference(input: {
       conferenceAudio.dispose()
       tileListeners.clear()
       hostSpeakingListeners.clear()
+      speechLevels.dispose()
       serviceIdListeners.clear()
       for (const [id, track] of remoteVideo) {
         const el = videoBindings.get(id)

@@ -465,6 +465,29 @@ describe('attachController answer listening', () => {
     actor.stop()
   })
 
+  it('речь без кнопки по уровню: одно напоминание на окно', async () => {
+    const client = new MockRealtimeClient()
+    const requestSpeech = vi.spyOn(client, 'requestSpeech')
+    const { actor, stop, actions } = await boot(client)
+    actor.send({ type: 'QUESTION_SELECTED', themeId: 'p', value: 400 })
+    await vi.advanceTimersByTimeAsync(gameConfig.cellFlashMs + 80)
+    expect(statePath(actor.getSnapshot().value)).toBe('buzzing.open')
+
+    // Реплика игрока, который ещё не отвечал: короткое напоминание про кнопку.
+    const beforeReminder = requestSpeech.mock.calls.length
+    actions().speechWithoutBuzzer(2)
+    const cue = String(requestSpeech.mock.calls.at(-1)?.[2] ?? '')
+    expect(requestSpeech).toHaveBeenLastCalledWith('noBuzzer', expect.any(Number), cue, undefined, expect.anything())
+    expect(cue).toContain('Игрок 2')
+    expect(cue).not.toContain('к Игрок 2')
+    // Вторая реплика в том же окне — молчим.
+    actions().speechWithoutBuzzer(2)
+    expect(requestSpeech.mock.calls.length).toBe(beforeReminder + 1)
+
+    stop()
+    actor.stop()
+  })
+
   it('ответ сообщением в чат: реплика того, чей ход, идёт в оценку, чужое — игнорируется', async () => {
     const client = new MockRealtimeClient()
     const requestTool = vi.spyOn(client, 'requestTool')
