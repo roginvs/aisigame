@@ -4,6 +4,7 @@ import { gameConfig, hostInstructions, withHostRules } from '../config.ts'
 import { recordResponseUsage, resetUsage } from './usage.ts'
 import { livePlayerChatVisible } from './liveSpeech.ts'
 import { clearLivePlayerLine, editChatLine, logTrace, pushHostLine, pushPlayerLine, pushTrace, setLivePlayerLine } from '../debug/trace.ts'
+import { checkHostUtterance } from '../debug/suspicious.ts'
 import { outputCut, outputFlushWaitMs, timersAfterPlaybackStarted, timersAfterResponseDone } from './playback.ts'
 import type { HostAudioTimers, OutputCutState } from './playback.ts'
 import { openAiVadEagerness, freeReplyMaxOutputTokens, hostCutCaptionWaitMs } from '../options.ts'
@@ -713,7 +714,10 @@ export class RealtimeClient {
       chatNote,
       mustSay: expect ? undefined : revealedAnswer(instructions),
     }
-    if (expect) pushHostLine(expect)
+    if (expect) {
+      pushHostLine(expect)
+      checkHostUtterance(expect)
+    }
     this.armHardLimit()
     this.cancelActiveResponse()
     if (flushFirst) {
@@ -1252,11 +1256,15 @@ export class RealtimeClient {
       this.whenCutKnown(cut, (played, source) => {
         const shown = cutCaption(line, played, this.hostPace.msPerChar)
         pushTrace('note', cutTraceTitle(cut.reason, played, source, shown), { full: line, playedMs: played, source, shown: shown || null, msPerChar: this.hostPace.msPerChar })
-        if (shown) pushHostLine(shown, caption)
+        if (shown) {
+          pushHostLine(shown, caption)
+          checkHostUtterance(shown)
+        }
       })
       return
     }
     const entryId = pushHostLine(line, caption)
+    checkHostUtterance(line)
     const liveItem = itemId ?? (speech && purpose === speech.purpose ? speech.itemId : null)
     if (entryId && liveItem) {
       this.shownCaptions.set(liveItem, { entryId, text: line })
@@ -1308,6 +1316,7 @@ export class RealtimeClient {
     this.clearSpeechTimers()
     this.cancelActiveResponse()
     pushHostLine(answer)
+    checkHostUtterance(answer)
     if (!this.canSend()) {
       this.dropLink('Связь с ведущей прервалась. Начните игру ещё раз.')
       return

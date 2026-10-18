@@ -1,9 +1,10 @@
 import { diag } from '../debug/diag.ts'
+import { setLeakTarget, failedAttempts, resetFailedAttempts, suspiciousOnce } from '../debug/suspicious.ts'
 import { auctionBidToolFor, finalBetToolFor, selectQuestionToolFor } from '../realtime/tools.ts'
 import type { Actor, SnapshotFrom } from 'xstate'
 import { clearHostEar, getHostEar, subscribeHostEar, hostEarHearing, hostEarHostSpoke, hostEarMicClosed, hostEarProcessing, hostEarShown, hostEarSurvives, settleHostEar } from './hostEar.ts'
 import { playTimeoutBeep } from '../audio/beep.ts'
-import { answerOverrunSafetyMs, answerSilenceDecideMs, answerUtteranceJudgeMs, bargeInSustainMs, choiceClarifyAfterMs, choiceLateTranscriptMs, choiceResolveTimeoutMs, fallbackCommitMinMs, mutedChooserMaxReminders, auctionDingMs, audioJudgmentTimings, catMeowMs, transcriptWaitMs } from '../options.ts'
+import { answerOverrunSafetyMs, answerSilenceDecideMs, answerUtteranceJudgeMs, bargeInSustainMs, choiceClarifyAfterMs, choiceLateTranscriptMs, choiceResolveTimeoutMs, fallbackCommitMinMs, mutedChooserMaxReminders, auctionDingMs, audioJudgmentTimings, catMeowMs, suspiciousUtteranceHighMs, suspiciousUtteranceLowMs, transcriptWaitMs } from '../options.ts'
 import { matchAuctionSpeech, optionLabel } from './auction.ts'
 import { matchCatStake, nextInCircle } from './cat.ts'
 import { idleThresholds } from './idle.ts'
@@ -161,6 +162,19 @@ export function attachController(options: {
   let answerSeq = 0
   /** Запасной commit сделан максимум один на попытку (fa584db п. 1). */
   let fallbackCommitAttempt: number | null = null
+
+  /** Долгая реплика с живым VAD, которую модель не разобрала: от 1,5 с «слегка», от 2,5 с «сильно». */
+  function suspicionOverUnintelligible(durationMs: number, label: string, detail: Record<string, unknown>): void {
+    if (durationMs === 0) return
+    if (durationMs >= suspiciousUtteranceHighMs) {
+      suspiciousOnce('сильно', `${label}-high`, 15_000, `долгая речь осталась неуслышанной у модели (${Math.round(durationMs)} мс)`, detail)
+      return
+    }
+    if (durationMs >= suspiciousUtteranceLowMs) {
+      suspiciousOnce('слегка', `${label}-low`, 15_000, `речь без разбора у модели (${Math.round(durationMs)} мс)`, detail)
+    }
+  }
+
   /** Окно кнопки, в котором уже прошло напоминание по уровню (один вопрос = одно окно). */
   let noBuzzerKey: number | string | null = null
   let noBuzzerDone = false
@@ -585,6 +599,14 @@ export function attachController(options: {
     fromRound: number,
   ): void {
     const context = snapshot.context
+    // Детектор «подозрительно»: машина перешла в announcing по таймауту оценки — модель не успела (judgeMs).
+    if (path === 'announcing' && from === 'judging' && context.judgmentReason === 'Модель не успела оценить ответ') {
+      suspiciousOnce('слегка', 'judgeMissed', 20_000, 'оценка не пришла в отведённое окно (judgeMs)', {
+        questionId: context.activeQuestionId,
+        playerId: context.activePlayerId,
+        attemptId: context.attemptId,
+      })
+    }
     const judgingLive = answerLivePath(path) || (path === 'paused' && answerLivePath(context.resumePath))
     if (judgeRun && (!judgingLive || judgeRun.context.attemptId !== context.attemptId || judgeRun.context.activeQuestionId !== context.activeQuestionId)) stopJudgeRun()
     if ((answerTurn.length || answerDeadlineTimer) && (!judgingLive || answerTurnAttempt !== context.attemptId)) resetAnswerTurn('попытка закрыта')
@@ -1041,6 +1063,12 @@ export function attachController(options: {
     choiceModelTimer = window.setTimeout(() => {
       if (choiceInModel !== next || expectingToolTurn !== turn) return
       pushTrace('note', `выбор: модель не ответила за ${choiceResolveTimeoutMs} мс по реплике #${next.order}`)
+      const timeoutContext = actor.getSnapshot().context
+      suspiciousOnce('слегка', 'choiceResolveTimeout', 20_000, 'модель не ответила на выбор за отведённое окно', {
+        questionId: timeoutContext.activeQuestionId,
+        chooserId: timeoutContext.chooserId,
+        order: next.order,
+      })
       expectingToolTurn = null
       finishUtterance(next, 'none', undefined, 'Я не уверена, какую ячейку вы назвали. Повторите тему и стоимость.')
     }, choiceResolveTimeoutMs)
@@ -1119,6 +1147,12 @@ export function attachController(options: {
   function decideChoice(heard: { text: string; arrived: boolean }, durationMs: number, itemId: string | null, u: ChoiceUtterance): void {
     if (echoesChoicePrompt(heard.text, listeningPrompt(actor.getSnapshot().context))) {
       pushTrace('note', 'распознавание повторило подсказку тем, это не выбор')
+      if (durationMs >= suspiciousUtteranceLowMs) {
+        suspicionOverUnintelligible(durationMs, 'choiceEcho', {
+          questionId: actor.getSnapshot().context.activeQuestionId,
+          utterance: u.order,
+        })
+      }
       choiceCaption(itemId, '')
       return finishUtterance(u, 'noise')
     }
@@ -1531,6 +1565,17 @@ export function attachController(options: {
     }
     if (echo || phantom) {
       pushTrace('note', echo ? 'распознавание повторило подсказку ответа, это не ответ' : `фантом ответа из подсказки (${answerDurationMs} мс, conf ${heard.confidence ?? '—'}): ${heard.text}`)
+      if (answerDurationMs >= suspiciousUtteranceLowMs) {
+        const echoContext = run.context
+        suspicionOverUnintelligible(answerDurationMs, 'promptEcho', {
+          questionId: echoContext.activeQuestionId,
+          playerId: echoContext.activePlayerId,
+          attemptId: echoContext.attemptId,
+          durationMs: Math.round(answerDurationMs),
+          confidence: heard.confidence,
+          mode: run.mode,
+        })
+      }
       client.suppressPlayerChat(itemId)
       // Эхо подсказки — не речь игрока: реплика «шум», решают остальные реплики хода.
       run.utterance.speech = 'noise'
@@ -1730,6 +1775,16 @@ export function attachController(options: {
     // Вид реплики решает модель; нет поля (старый ответ провайдера) — считаем попыткой ответа, как раньше.
     utterance.speech = args.speech === 'stall' || args.speech === 'noise' ? args.speech : 'answer'
     utterance.guessing = args.guessing === true
+    if (utterance.speech === 'noise' && utterance.durationMs >= suspiciousUtteranceLowMs && judgment.status !== 'correct') {
+      const noiseContext = snapshot.context
+      suspicionOverUnintelligible(utterance.durationMs, 'longNoise', {
+        questionId: noiseContext.activeQuestionId,
+        playerId: noiseContext.activePlayerId,
+        attemptId: noiseContext.attemptId,
+        order: utterance.order,
+        heard: heard || judgment.heard,
+      })
+    }
     utterance.heard = judgment.heard || heard
     utterance.judgment = judgment
     finishAnswerUtterance(utterance, 'judged')
@@ -1898,7 +1953,18 @@ export function attachController(options: {
       const status = u.judgment?.status
       // Неразборчивая — не ответ вовсе. Спорная или требующая уточнения — стоп-реплика с переспросом,
       // но если раньше была разобранная, решает она («строго последний разборчивый»).
-      if (status === 'unintelligible') { unintelligible = true; continue }
+      if (status === 'unintelligible') {
+        unintelligible = true
+        const actorContext = actor.getSnapshot().context
+        suspicionOverUnintelligible(u.durationMs, 'unintelligible', {
+          questionId: actorContext.activeQuestionId,
+          playerId: actorContext.activePlayerId,
+          attemptId: actorContext.attemptId,
+          order: u.order,
+          heard: u.heard || u.judgment?.heard || '',
+        })
+        continue
+      }
       if (status === 'ambiguous' || status === 'needs_clarification') { fallback ??= u; continue }
       chosen = u
       break
@@ -1932,6 +1998,10 @@ export function attachController(options: {
       return
     }
     pushTrace('note', `ответ: разборчивого ответа нет ни в одной реплике${unintelligible ? ' (неразборчиво/спорно)' : ''} — как молчание: ${answerTurnLog()}`)
+    const silentAttemptContext = actor.getSnapshot().context
+    failedAttempts(silentAttemptContext.activeQuestionId ?? '', silentAttemptContext.activePlayerId ?? null, 'ответа за окно не услышано', {
+      attemptId: silentAttemptContext.attemptId,
+    })
     actor.send({ type: 'ANSWER_NONE' })
   }
 
@@ -1945,6 +2015,16 @@ export function attachController(options: {
     }
     if (!decision.guessing) markPlayerLine(decision.itemId, { kind: 'counted', verdict: decision.judgment.status })
     pushJudgeLine(judgmentChatText(decision.judgment.status, decision.judgment.heard))
+    if (decision.judgment.status === 'correct') {
+      resetFailedAttempts()
+    } else if (decision.judgment.status !== 'needs_clarification' && decision.judgment.status !== 'ambiguous' && decision.judgment.status !== 'near_miss') {
+      // Неудачная попытка (минус или ноль): детектор «подозрительно» по повторам, логику не меняет.
+      const decisionContext = actor.getSnapshot().context
+      failedAttempts(decisionContext.activeQuestionId ?? '', decisionContext.activePlayerId ?? null, `вердикт ${decision.judgment.status}`, {
+        attemptId: decisionContext.attemptId,
+        heard: decision.judgment.heard,
+      })
+    }
     actor.send({ type: 'ANSWER_JUDGED', judgment: decision.judgment })
   }
 
@@ -2017,6 +2097,29 @@ export function attachController(options: {
     })
     client.forceInputCommit(durationMs)
   }
+
+  /**
+   * Утечка эталона (детектор «подозрительно»): источник текущего вопроса для
+   * checkHostUtterance в клиенте. Отдаёт эталоны активного вопроса, пока ячейка не сыграна,
+   * и не отдаёт вовсе в фазах, где строка «пакетный» текст идёт по правилам (чтение, объявления).
+   */
+  setLeakTarget(() => {
+    const snapshot = actor.getSnapshot()
+    const path = statePath(snapshot.value)
+    if (['startMenu', 'connecting', 'failed', 'stopped', 'finished', 'paused'].some((item) => path.startsWith(item))) return null
+    // Чтение вопроса и окна объявлений репликируют пакет одним и тем же голосом — там не проверяем.
+    if (path.startsWith('reading') || path.startsWith('announcing')) return null
+    const context = snapshot.context
+    const questionId = context.activeQuestionId
+    if (!questionId) return null
+    const question = questionById(context.questions, questionId)
+    if (!question) return null
+    return {
+      questionId,
+      answers: question.answers,
+      closed: context.playedIds.includes(questionId),
+    }
+  })
 
   onActions?.({
     chatAnswer,

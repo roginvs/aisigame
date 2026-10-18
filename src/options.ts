@@ -127,6 +127,14 @@ export const gameSoundsRetryDelaysMs = [1000, 2000, 5000, 10_000] as const
  */
 export const fallbackCommitMinMs = 900
 
+/**
+ * Проверки «подозрительно» (пороги, только диагностика, логику не меняют):
+ * неразборчивая/шумовая реплика от 1,5 с — «слегка», от 2,5 с — «сильно»;
+ * дольше — тем более на дампах живой игры реплики 1,3–2,4 с.
+ */
+export const suspiciousUtteranceLowMs = 1500
+export const suspiciousUtteranceHighMs = 2500
+
 /** Гость: полоска таймера не переякоривается, если новый расчёт старта отличается не больше чем на столько (сетевой джиттер). */
 export const TIMER_RESYNC_THRESHOLD_MS = 300
 
