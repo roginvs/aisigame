@@ -1,6 +1,6 @@
 import type { AppealContext, AppealRequest, GameContext, OutcomeLedger, PlayerId } from './types.ts'
 
-export const APPEAL_WINDOW_MS = 10_000
+export const APPEAL_WINDOW_MS = 7_000
 let appealScale = 1
 /** Демо и e2e: растянуть окно апелляции (4 — в четыре раза дольше), чтобы тест под нагрузкой не опаздывал к кнопке. */
 export function setAppealScale(next: number): void {
@@ -27,7 +27,9 @@ export function appealRequestError(context: GameContext, path: string, request: 
   if (path === 'paused' || path === 'stopped') return 'Игра приостановлена'
   if (!appeal || appeal.timeUp || appeal.questionId !== request.questionId || appeal.windowId !== request.windowId) return 'Окно апелляции закрыто'
   const series = appeal.activePlayerId !== null && appeal.stage === 'closed'
-  const announcing = path === 'announcing' || path === 'announcing.speaking'
+  // `stateIn('announcing')` в машине покрывает и субсостояние holding —
+  // кнопка апелляции не мигает во время удержания медиа ответа.
+  const announcing = path === 'announcing' || path.startsWith('announcing.')
   const window = appeal.stage === 'open' ? path === 'buzzing.open' || announcing : path.startsWith('choosing.') || path === 'roundSummaryWindow' || announcing
   if (!series && !window) return 'Окно апелляции закрыто'
   if (!eligibleAppealPlayers(context, appeal.questionId).includes(request.playerId)) return 'Нет права на апелляцию'

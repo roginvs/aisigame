@@ -2,7 +2,7 @@ import { createActor } from 'xstate'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { gameConfig } from '../config.ts'
 import { announceInstructions, roundSummaryInstructions } from './controller.ts'
-import { appealButton, appealRequestError, appealWindowMs, settleOutcome } from './appeals.ts'
+import { appealButton, appealRequestError, appealWindowMs, APPEAL_WINDOW_MS, settleOutcome } from './appeals.ts'
 import { gameMachine, statePath } from './machine.ts'
 import { persistMatch, readSavedGame } from './savedGame.ts'
 import type { JudgmentStatus, QuestionPack } from './types.ts'
@@ -147,8 +147,7 @@ describe('ручные апелляции', () => {
     expect(path(actor)).toBe('choosing.listening'); expect(appealButton(actor.getSnapshot().context, path(actor), 1)).toBeNull()
   })
 
-  it('минус — апелляция доступна сразу, ещё пока ведущая говорит', () => {
-    const actor = start(); actor.send({ type: 'BUZZER_PRESSED', playerId: 1 }); result(actor, 'incorrect')
+  it('минус — апелляция доступна сразу, ещё пока ведущая говорит', () => {    const actor = start(); actor.send({ type: 'BUZZER_PRESSED', playerId: 1 }); result(actor, 'incorrect')
     expect(path(actor)).toBe('announcing.speaking')
     expect(appealButton(actor.getSnapshot().context, path(actor), 1)).toEqual({ label: 'Апелляция', enabled: true })
     request(actor, 1); expect(path(actor)).toBe('appealCue')
@@ -158,6 +157,24 @@ describe('ручные апелляции', () => {
     expect(appealButton(closed.getSnapshot().context, path(closed), 1)?.enabled).toBe(true)
     request(closed, 1); expect(path(closed)).toBe('appealConfirm'); confirm(closed)
     expect(path(closed)).toBe('announcing.speaking'); expect(scores(closed)).toEqual([100])
+  })
+
+  it('после верного ответа окно оспаривания живёт в announcing, в том числе в holding: кнопка не мигает во время удержания медиа', () => {
+    const actor = start(); normal(actor, 1, 'incorrect'); normal(actor, 2, 'correct')
+    expect(actor.getSnapshot().context.appeal?.stage).toBe('closed')
+    const context = actor.getSnapshot().context
+    expect(path(actor)).toBe('choosing.listening')
+    expect(appealButton(context, 'announcing.speaking', 1)).toEqual({ label: 'Апелляция', enabled: true })
+    expect(appealButton(context, 'announcing.holding', 1)).toEqual({ label: 'Апелляция', enabled: true })
+  })
+
+  it('оба закрытых окна — 7 секунд, строка итогов называет фактическую длину', () => {
+    expect(APPEAL_WINDOW_MS).toBe(7_000)
+    expect(appealWindowMs()).toBe(7_000)
+    const input = { ...pack, questions: [pack.questions[0]!] }
+    const actor = start(input, [1]); normal(actor, 1, 'incorrect')
+    expect(path(actor)).toBe('roundSummaryWindow')
+    expect(actor.getSnapshot().context.statusLine).toBe('Апелляции · 7 секунд')
   })
 
   it('выбор первым закрывает окно, апелляция первым отсекает уже запущенный голосовой выбор', () => {

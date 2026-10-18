@@ -1742,7 +1742,7 @@ export const gameMachine = setup({
       ],
     },
     roundSummaryWindow: {
-      entry: assign(({ context }) => ({ statusLine: 'Апелляции · 5 секунд', phaseStartedAt: Date.now(), phaseDurationMs: appealMsLeft(context.appeal) })),
+      entry: assign(({ context }) => ({ statusLine: `Апелляции · ${Math.round(appealWindowMs() / 1000)} секунд`, phaseStartedAt: Date.now(), phaseDurationMs: appealMsLeft(context.appeal) })),
       after: { appealLeft: [
         // The window never cuts the round summary: appeals close, the phrase finishes, then the round advances.
         { guard: 'summaryPending', actions: 'markAppealTimeUp' },
