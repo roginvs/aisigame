@@ -5,6 +5,7 @@ import {
   lobbySpeechInstructions,
 } from './lobbySpeech.ts'
 import type { RosterEntry } from './roster.ts'
+import { jokeCoin } from '../game/jokeCoin.ts'
 
 function entry(patch: Partial<RosterEntry> & Pick<RosterEntry, 'clientId' | 'name'>): RosterEntry {
   return {
@@ -98,5 +99,20 @@ describe('lobbySpeechInstructions', () => {
     expect(instructions).toContain('Все готовы')
     expect(instructions).toContain('можно начинать')
     expect(lobbyRosterStatusLine(roster[1]!)).toContain('пакет сверен, готов')
+  })
+})
+
+describe('настроение реплики лобби: монетка jokeCoin', () => {
+  it('монетка решает, упоминать ли шутку в инструкции лобби', () => {
+    const facts = { kind: 'idle' as const, packName: 'Демо', packSummary: 'Один раунд', roster: [] as RosterEntry[] }
+    const original = jokeCoin.flip
+    try {
+      jokeCoin.flip = () => false
+      expect(lobbySpeechInstructions(facts)).not.toContain('Настроение:')
+      jokeCoin.flip = () => true
+      expect(lobbySpeechInstructions(facts)).toContain('Настроение: можно добавить одну очень короткую добрую шутку')
+    } finally {
+      jokeCoin.flip = original
+    }
   })
 })
