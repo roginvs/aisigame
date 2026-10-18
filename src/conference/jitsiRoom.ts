@@ -536,12 +536,74 @@ export async function connectJitsiConference(input: {
     }
     const summary = hearWindow.summary(performance.now())
     trackFocusFailOpen(summary)
+    trackBrokenFocusClone(samples)
   }
 
   /** Сколько замеров тишины у фокуса (по 250 мс) терпим, пока в комнате говорят другие. */
   const focusQuietSamplesToOpen = 12
   /** Столько миллисекунд чужой речи в окне — «говорит кто-то, но не фокус». */
   const otherSpeakingMsToOpen = 800
+
+  /**
+   * Битый клон фокуса: Jitsi слышит громкую речь, а клон в миксе отдаёт шёпот с редкими спайками
+   * (дамп 15-53-44: у фокуса jitsiPeak 0,99 при rms 0,011 — модель получила тишину, серверная VAD
+   * не сработала, запасной commit «в буфере нет аудио», ведущая трижды минуснула). Такой сигнал
+   * не «немой клон» — rms не буквальный ноль, поэтому отдельный детектор.
+   */
+  const brokenCloneSamples = 4 // 1 с подряд
+  /** Столько «речь» от Jitsi (SPEAKING_LEVEL) — уже заметно громко на фоне шёпота ниже 0,02 RMS. */
+  const brokenCloneRmsCeil = 0.02
+  let brokenCloneRun = 0
+  let brokenHoldUntil = 0
+  let brokenCloneCooldownUntil = 0
+
+  /** Замер окна слушания: ключ источника, владелец, уровень в миксе и уровень Jitsi. */
+  type HearSampleView = {
+    key: string
+    participantId: string
+    rms: number
+    jitsi: number | null
+  }
+
+  function trackBrokenFocusClone(samples: readonly HearSampleView[]): void {
+    const focus = modelHearOnlyId
+    if (typeof focus !== 'string') return
+    // Аварийный слух держим, пока не станет ясно, что клон снова звучит.
+    const current = samples.find((item) => item.participantId === focus) ?? null
+    if (Date.now() < brokenHoldUntil) {
+      if (current !== null && current.rms >= brokenCloneRmsCeil) {
+        brokenHoldUntil = 0
+        brokenCloneCooldownUntil = 0
+        pushTrace('note', 'Модель: клон фокуса снова звучит — возвращаю узкий фокус', {
+          participantId: focus,
+          name: participantName(focus),
+          rms: current.rms,
+        })
+      }
+      return
+    }
+    if (Date.now() < brokenCloneCooldownUntil) return
+    const broken = current !== null && current.jitsi !== null && current.jitsi >= SPEAKING_LEVEL && current.rms < brokenCloneRmsCeil
+    if (!broken) {
+      brokenCloneRun = 0
+      return
+    }
+    brokenCloneRun += 1
+    if (brokenCloneRun < brokenCloneSamples) return
+    brokenCloneRun = 0
+    brokenHoldUntil = Date.now() + 15_000
+    brokenCloneCooldownUntil = Date.now() + 15_000
+    // Пересоздаём клон и на время открываем всех: звук фокуса мог не дойти, а речь была.
+    const key = current?.key ?? ''
+    if (key !== 'bus' && key !== 'local') modelMixer?.reattach(key)
+    pushTrace('note', 'Модель: у фокуса речь от Jitsi, а в миксе шёпот — пересоздаю клон и слушаю всех', {
+      participantId: focus,
+      name: participantName(focus),
+      jitsiPeak: current?.jitsi ?? null,
+      rms: current?.rms ?? null,
+    })
+    syncModelMixer()
+  }
 
   type HearSummarySources = Array<{
     participantId: string
@@ -854,11 +916,12 @@ export async function connectJitsiConference(input: {
       remotes.push({ key: entry.key, participantId: owner, stream, muted })
       mixerOwners.set(`remote-${entry.key}`, owner)
     }
+    // Аварийный слух может перешибить фокус: тишина у фокуса при чужой речи или битый клон — слушаем всех.
+    const hearAll = focusFailOpen || Date.now() < brokenHoldUntil
     const result = modelMixer.update({
       remotes,
       local: { participantId: localId(), stream: localMicMedia, live: micLive },
-      // Аварийный слух может перешибить фокус: тишина у фокуса при чужой речи — слушаем всех.
-      focus: focusFailOpen ? null : modelHearOnlyId,
+      focus: hearAll ? null : modelHearOnlyId,
     })
     const focus = modelHearOnlyId
     const fallbackKey = typeof focus === 'string' ? focus : ''
@@ -1218,9 +1281,12 @@ export async function connectJitsiConference(input: {
       const changed = participantId !== modelHearOnlyId
       modelHearOnlyId = participantId
       if (changed) {
-        // Новый фокус — сторожка тишины начинает с нуля.
+        // Новый фокус — сторожки тишины и битого клона начинают с нуля.
         focusFailOpen = false
         focusQuietRun = 0
+        brokenCloneRun = 0
+        brokenHoldUntil = 0
+        brokenCloneCooldownUntil = 0
       }
       syncModelMixer()
       if (changed) {

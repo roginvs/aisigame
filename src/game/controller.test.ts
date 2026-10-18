@@ -542,12 +542,15 @@ describe('attachController answer listening', () => {
     expect(forceInputCommit).not.toHaveBeenCalled()
     actions().answerSilentCommit(1, 300)
     expect(forceInputCommit).not.toHaveBeenCalled()
-    // Своя попытка, реплика длиннее порога: commit с длительностью.
-    actions().answerSilentCommit(1, 1400)
+    // Реплика неопознанного участника во время попытки — это активный игрок: commit с длительностью.
+    actions().answerSilentCommit(null, 1400)
     expect(forceInputCommit).toHaveBeenCalledTimes(1)
     expect(forceInputCommit).toHaveBeenCalledWith(1400)
-    // Одна попытка — один запасной commit.
+    // Одна попытка — один запасной commit, даже для опознанного игрока.
     actions().answerSilentCommit(1, 1400)
+    expect(forceInputCommit).toHaveBeenCalledTimes(1)
+    // Неопознанный участник при живой попытке — реплика активного игрока, но лимит уже исчерпан.
+    actions().answerSilentCommit(null, 1400)
     expect(forceInputCommit).toHaveBeenCalledTimes(1)
 
     stop()

@@ -69,7 +69,7 @@ export type GameControllerActions = {
   /** Речь без кнопки по уровню звука: playerId из дорожки Jitsi. */
   speechWithoutBuzzer: (playerId: number) => void
   /** Запасной commit (fa584db п. 1): реплика уровня Jitsи кончилась, а модель о речи не знает. */
-  answerSilentCommit: (playerId: number, durationMs: number) => void
+  answerSilentCommit: (playerId: number | null, durationMs: number) => void
   /** Выбор вопроса: модель сама формулирует короткую фразу, каждый раз новую. */
   /** Мастер: микрофон выбирающего стабильно выключен (true) или включился (false). */
   setChooserMicOff: (off: boolean) => void
@@ -2085,11 +2085,13 @@ export function attachController(options: {
    * делает `input_audio_buffer.commit` и по `committed` отдаёт синтетический конец речи — реплика
    * идёт обычным путём попытки (транскрипт/аудио-судья, счёт меняет машина). Максимум один на попытку.
    */
-  function answerSilentCommit(playerId: number, durationMs: number): void {
+  function answerSilentCommit(playerId: number | null, durationMs: number): void {
     const snapshot = actor.getSnapshot()
     const path = statePath(snapshot.value)
     if (!path.startsWith('answering')) return
     const context = snapshot.context
+    // Реплика от неопознанного участника: во время попытки это почти наверняка активный игрок.
+    if (playerId === null) playerId = context.activePlayerId
     if (context.activePlayerId !== playerId) return
     if (!answerAttemptLive()) return
     if (durationMs < fallbackCommitMinMs) return

@@ -723,10 +723,19 @@ export default function App() {
     speechActivityUnsubRef.current = handle.subscribeSpeechActivity((participantId, end) => {
       // Реплика ≥1 с по уровню: если это человек, ждущий кнопки, контроллер напомнит про кнопку.
       // Конец реплики, которую модель не заметила, — запасной commit в буфер (fa584db п. 1).
-      const pairs: readonly ConferenceJitsiPair[] = masterSnapshotRef.current?.jitsiIds ?? []
+      const snapshot = masterSnapshotRef.current
+      const pairs: readonly ConferenceJitsiPair[] = snapshot?.jitsiIds ?? []
       const found = pairs.find(([jitsiId]) => jitsiId === participantId)
       const clientId = found ? found[1] : null
-      if (!clientId) return
+      if (clientId === null) {
+        // Служебные не участвуют; остальные игроки известны по парам. Если участник не опознан
+        // (привязка endpoint сдвинулась или снята), во время попытки реплика почти наверняка от
+        // активного игрока: пусть контроллер решает (дамп 15-53-44 — Машу не опознали и потеряли).
+        if (!snapshot || !end) return
+        if (participantId === snapshot.hostJitsiId || participantId === snapshot.soundsJitsiId) return
+        controllerActionsRef.current?.answerSilentCommit(null, end.durationMs)
+        return
+      }
       const entry = masterSessionRef.current?.rosterList().find((item) => item.clientId === clientId)
       if (!entry || entry.playerId === null) return
       if (end) controllerActionsRef.current?.answerSilentCommit(entry.playerId, end.durationMs)
