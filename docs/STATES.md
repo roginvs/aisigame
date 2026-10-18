@@ -357,6 +357,8 @@ stateDiagram-v2
 
 `RESUME` возвращает ровно сохранённый путь. Часы заново, полной длительностью, получают только пути из `showsClock`: `buzzing`, `buzzing.open`, строка `buzzing.reminding`, `answering.waiting`. Для `answering.waiting` длительность — `clarifyMs`, если повтор уже был, иначе `answerMs`. Для окна кнопки — `stealBuzzerMs`, если `missedIds` не пуст, иначе `buzzerMs`.
 
+Пауза и снятие доступны всем участникам, включая после конца партии (`finished` → `paused` → `finished`). Toggle приходит и от мастера (локально), и от игроков сообщением `pause` конференции: мастер сам решает `PAUSE`/`RESUME` по своему состоянию; события до начала партии игнорируются. Машина и переходы от этого не меняются; экран в паузе рисует оверлей «Пауза» вместо главного экрана (после конца партии — «Игра окончена»). Тест: `src/conference/masterSession.test.ts` («игрок toggle-ит паузу…»), e2e `conference-pause.play.ts`.
+
 86. `welcoming` → `welcoming`.
 87. `bridging` → `bridging`.
 88. `choosing.listening` → `choosing.listening`.

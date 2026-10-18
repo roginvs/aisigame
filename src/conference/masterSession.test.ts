@@ -815,6 +815,47 @@ describe('MasterSession resume', () => {
     actor.stop()
   })
 
+  it('игрок toggle-ит паузу: ставит и снимает, а до начала игры toggle игнорируется', () => {
+    const actor = createActor(gameMachine)
+    actor.start()
+    const transport = new MemoryTransport()
+    const session = new MasterSession({
+      transport,
+      client: { requestSpeech: vi.fn() } as unknown as GameVoice,
+      actor,
+      masterClientId: 'master-client',
+      masterName: 'Мастер',
+      pack: demoPack,
+      packBytes: new Uint8Array([1, 2, 3]),
+      packHash: 'hash',
+      authorityToken: 'master-token',
+      onRoster: () => {},
+    })
+    transport.receive({ type: 'hello', clientId: 'guest-client', authToken: 'guest-token', name: 'Гость' })
+    transport.receive({ type: 'packVerified', clientId: 'guest-client', authToken: 'guest-token', hash: 'hash' })
+    transport.receive({ type: 'ready', clientId: 'guest-client', authToken: 'guest-token' })
+    // До начала партии toggle не проходит (gameStarted = false).
+    transport.receive({ type: 'pause', clientId: 'guest-client', authToken: 'guest-token' })
+    expect(statePath(actor.getSnapshot().value)).toBe('startMenu')
+    session.startGame(() => {
+      actor.send({ type: 'START_GAME', pack: demoPack })
+      actor.send({ type: 'CONNECTED' })
+      actor.send({ type: 'HOST_AUDIO_FINISHED', purpose: 'welcome' })
+    })
+    expect(statePath(actor.getSnapshot().value)).toBe('choosing.listening')
+
+    // Игрок ставит паузу…
+    transport.receive({ type: 'pause', clientId: 'guest-client', authToken: 'guest-token' })
+    expect(statePath(actor.getSnapshot().value)).toBe('paused')
+    expect(actor.getSnapshot().context.resumePath).toBe('choosing.listening')
+    // …и снимает её.
+    transport.receive({ type: 'pause', clientId: 'guest-client', authToken: 'guest-token' })
+    expect(statePath(actor.getSnapshot().value)).toBe('choosing.listening')
+
+    session.dispose()
+    actor.stop()
+  })
+
   it('принимает выбор ячейки только от назначенного выбирающего', () => {
     const actor = createActor(gameMachine)
     actor.start()

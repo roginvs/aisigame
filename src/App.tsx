@@ -220,7 +220,7 @@ export default function App() {
   const [joiningStatus, setJoiningStatus] = useState<string | null>(null)
   const [masterClientId] = useState(readClientId)
   const joinerFlipPackRef = useRef<(() => void) | null>(null)
-  const conferenceMicBeforePause = useRef(false)
+
   const model = voiceById(modelId)
   const needsKey = model.provider !== 'mock'
   const activeKey =
@@ -1388,23 +1388,16 @@ export default function App() {
         send({ type: 'QUESTION_SELECTED', themeId, value })
       }}
       onPause={() => {
-        if (conferenceRole === 'joiner') return
-        const handle = conferenceHandleRef.current
+        // Пауза — «поболтать»: включают и снимают все. Игрок шлёт toggle,
+        // мастер решает по своему состоянию. Микрофон конференции не трогаем:
+        // люди разговаривают, модельный вход закрыто контроллером (setMicEnabled(false) на 'paused').
+        if (conferenceRole === 'joiner') {
+          joinerSessionRef.current?.sendPauseToggle()
+          return
+        }
         if (path === 'paused') {
           send({ type: 'RESUME' })
-          if (conferenceMicBeforePause.current && handle) {
-            void handle.setMicLive(true).catch((error: unknown) => {
-              setConferenceError(error instanceof Error ? error.message : 'Микрофон недоступен')
-            })
-          }
-          conferenceMicBeforePause.current = false
         } else {
-          conferenceMicBeforePause.current = Boolean(handle?.micLive())
-          if (conferenceMicBeforePause.current && handle) {
-            void handle.setMicLive(false).catch((error: unknown) => {
-              setConferenceError(error instanceof Error ? error.message : 'Микрофон недоступен')
-            })
-          }
           send({ type: 'PAUSE', path })
         }
       }}

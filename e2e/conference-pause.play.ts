@@ -2,7 +2,7 @@ import { expect, test, type Page } from '@playwright/test'
 
 // Пауза у гостя выглядит как у мастера: resumePath едет в снимке (эталон-подсветка остаётся).
 test.setTimeout(120_000)
-test('карточка ведущей одинакова; пауза на объявлении ответа: у гостя подсветка верного варианта как у мастера', async ({ browser }) => {
+test('пауза для всех: оверлей «Пауза» у мастера и гостя, гость снимает паузу', async ({ browser }) => {
   const context = await browser.newContext({ viewport: { width: 900, height: 900 } })
   const master = await context.newPage()
   const joiner = await context.newPage()
@@ -41,11 +41,16 @@ test('карточка ведущей одинакова; пауза на объ
   // Ведущая объявляет (табло уже открыто для выбора), пауза посреди объявления.
   await expect(master.getByRole('button', { name: 'Выбор, 100, сыграно' })).toBeVisible({ timeout: 30_000 })
   await master.getByRole('button', { name: 'Пауза' }).click()
-  await expect(joiner.getByText('Пауза', { exact: true }).first()).toBeVisible({ timeout: 5_000 })
-  // В паузе вопрос с подсветкой верного варианта — у мастера и у гостя одинаково.
-  await expect(master.locator('.choices .is-right')).toBeVisible()
-  await expect(joiner.locator('.choices .is-right')).toBeVisible({ timeout: 5_000 })
-  await expect(joiner.locator('.choices .is-right')).toHaveText(/Звёздные войны/)
+  // В паузе табло и вопрос скрыты: вместо них большой текст «Пауза» — и у мастера, и у гостя.
+  await expect(master.locator('.stage-pause')).toBeVisible({ timeout: 5_000 })
+  await expect(joiner.locator('.stage-pause')).toBeVisible({ timeout: 5_000 })
+  await expect(master.locator('.stage-pause')).toHaveText(/Пауза/)
+  // Игрок снимает паузу: toggle паузы доступен всем.
+  await joiner.getByRole('button', { name: 'Дальше' }).click()
+  // После «Дальше» оба вернулись из паузы: главный экран снова рисуется (у обоих одинаково).
+  await expect(master.locator('.stage-pause')).toBeHidden({ timeout: 5_000 })
+  await expect(master.locator('.board')).toBeVisible()
+  await expect(joiner.locator('.board')).toBeVisible({ timeout: 5_000 })
   if (process.env.SHOT_DIR) {
     await master.screenshot({ path: `${process.env.SHOT_DIR}/sync-pause-master.png` })
     await joiner.screenshot({ path: `${process.env.SHOT_DIR}/sync-pause-joiner.png` })

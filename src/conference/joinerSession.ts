@@ -196,6 +196,12 @@ export class JoinerSession {
     this.transport.send({ type: 'buzz', clientId: this.clientId, authToken: this.authToken })
   }
 
+  /** Toggle паузы: мастер сам решает по своему состоянию — ставит или снимает. */
+  sendPauseToggle(): void {
+    if (!this.hashOk) return
+    this.transport.send({ type: 'pause', clientId: this.clientId, authToken: this.authToken })
+  }
+
   sendSpecialPick(pick: { target: 'player' | 'stake' | 'auction'; playerId?: number; amount?: number; choice?: 'pass' | 'allIn' | number }): void {
     this.transport.send({ type: 'specialPick', clientId: this.clientId, authToken: this.authToken, ...pick })
   }

@@ -266,6 +266,13 @@ export type BuzzMessage = {
   authToken: string
 }
 
+/** Игрок → мастер: toggle паузы. Ставит паузу или снимает по текущему состоянию машины. */
+export type PauseToggleMessage = {
+  type: 'pause'
+  clientId: string
+  authToken: string
+}
+
 export type PickMessage = {
   type: 'pick'
   clientId: string
@@ -340,6 +347,7 @@ export type ConferenceMessage =
   | AppealMessage
   | AppealReplyMessage
   | BuzzMessage
+  | PauseToggleMessage
   | PickMessage
   | SpecialPickMessage
   | ChatMessage
@@ -400,6 +408,8 @@ export function isConferenceMessage(value: unknown): value is ConferenceMessage 
     case 'statusRequest':
     case 'ready':
     case 'buzz':
+      return client()
+    case 'pause':
       return client()
     case 'appeal':
       return client() && shortString(value.questionId, 2_000) && integer(value.playerId, 1) && integer(value.windowId, 1) && shortString(value.requestId, 200)

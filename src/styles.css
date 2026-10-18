@@ -1079,6 +1079,29 @@ button.continue-with-file .continue-file {
   min-width: 0;
 }
 
+/* Пауза — «поболтать»: главный экран сжимается до надписи, ряд участников тянет остаток высоты. */
+.play.is-paused {
+  grid-template-rows: auto minmax(0, 1fr);
+}
+
+.stage-pause {
+  display: grid;
+  place-items: center;
+  padding: 24px 16px;
+  border: 1px dashed #3a4856;
+  border-radius: 18px;
+  color: #cfd8e3;
+}
+
+.stage-pause span {
+  font-size: clamp(2rem, 6vw, 4.5rem);
+  letter-spacing: 0.35em;
+  text-transform: uppercase;
+  font-weight: 600;
+  opacity: 0.85;
+  white-space: nowrap;
+}
+
 .stage > .board,
 .stage > .question,
 .stage > .conference-lobby-status,
@@ -1824,6 +1847,11 @@ button.buzzer.chooser:disabled {
   }
   .play,
   .conference-layout .play {
+    grid-template-rows: auto auto;
+  }
+  /* Пауза: на узком экране надпись тоже сжимается, остальное в потоке (страница скроллится). */
+  .play.is-paused,
+  .conference-layout .play.is-paused {
     grid-template-rows: auto auto;
   }
   .conference-layout .talk .chat-column {

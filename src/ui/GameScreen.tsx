@@ -257,6 +257,8 @@ export function GameScreen(props: {
   const finalRound = round?.kind === 'final'
   const paused = path === 'paused'
   const stopped = path === 'stopped'
+  // Пауза — «поболтать»: главный экран сжимается до надписи, карточки и видео занимают остальное.
+  const finishedNow = path === 'finished'
   const [now, setNow] = useState(() => Date.now())
   const penaltyClock = paused && context.pauseStartedAt !== null ? context.pauseStartedAt : now
   const penaltyLive = Object.values(context.falseStarts).some((stamp) => falseStartCooling(stamp, penaltyClock))
@@ -460,12 +462,11 @@ export function GameScreen(props: {
               <AirStatus link={link} />
             </>
           )}
-          {conference && !conference.isMaster ? null : (
-            <button type="button" className={paused ? 'ghost pause-on' : 'ghost'} onClick={onPause} disabled={stopped} aria-label={paused ? 'Дальше' : 'Пауза'} title={paused ? 'Дальше' : 'Пауза'}>
-              <span aria-hidden="true">{paused ? '▶' : '⏸'}</span>
-              <span className="btn-label" aria-hidden="true">{paused ? 'Дальше' : 'Пауза'}</span>
-            </button>
-          )}
+          {/* Пауза — «поболтать»: включают и снимают все. */}
+          <button type="button" className={paused ? 'ghost pause-on' : 'ghost'} onClick={onPause} disabled={stopped} aria-label={paused ? 'Дальше' : 'Пауза'} title={paused ? 'Дальше' : 'Пауза'}>
+            <span aria-hidden="true">{paused ? '▶' : '⏸'}</span>
+            <span className="btn-label" aria-hidden="true">{paused ? 'Дальше' : 'Пауза'}</span>
+          </button>
           {conference?.onCopyInvite ? (
             <button
               type="button"
@@ -526,8 +527,15 @@ export function GameScreen(props: {
       </header>
 
       <section className="layout">
-        <div className="play">
+        <div className={paused || finishedNow ? 'play is-paused' : 'play'}>
         <div className="stage">
+        {paused || finishedNow ? (
+          <div className={paused ? 'stage-pause' : 'stage-pause is-finished'}>
+            <span aria-hidden="true">{paused ? 'Пауза' : 'Игра окончена'}</span>
+            <span className="visually-hidden">{paused ? 'Пауза' : 'Игра окончена'}</span>
+          </div>
+        ) : (
+        <>
         {conference?.masterOffline && !conference.waitingMaster ? (
           <p className="error banner">Мастер-игрок отключился</p>
         ) : null}
@@ -671,6 +679,8 @@ export function GameScreen(props: {
             </>
           )}
         </div>
+        )}
+        </>
         )}
         </div>
 

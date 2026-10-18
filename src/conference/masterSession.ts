@@ -537,6 +537,14 @@ export class MasterSession {
       this.actor.send({ type: 'BUZZER_PRESSED', playerId: entry.playerId })
       return
     }
+    if (message.type === 'pause') {
+      // Пауза доступна всем: игрок toggle — мастер решает по своему состоянию.
+      if (!this.gameStarted || !this.verified.has(message.clientId)) return
+      const path = statePath(this.actor.getSnapshot().value)
+      if (path === 'paused') this.actor.send({ type: 'RESUME' })
+      else this.actor.send({ type: 'PAUSE', path })
+      return
+    }
     if (message.type === 'pick') {
       if (!this.gameStarted || !this.verified.has(message.clientId)) return
       const snap = this.actor.getSnapshot()
