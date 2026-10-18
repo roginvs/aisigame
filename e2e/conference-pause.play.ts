@@ -41,14 +41,17 @@ test('пауза для всех: оверлей «Пауза» у мастер�
   // Ведущая объявляет (табло уже открыто для выбора), пауза посреди объявления.
   await expect(master.getByRole('button', { name: 'Выбор, 100, сыграно' })).toBeVisible({ timeout: 30_000 })
   await master.getByRole('button', { name: 'Пауза' }).click()
-  // В паузе табло и вопрос скрыты: вместо них большой текст «Пауза» — и у мастера, и у гостя.
-  await expect(master.locator('.stage-pause')).toBeVisible({ timeout: 5_000 })
-  await expect(joiner.locator('.stage-pause')).toBeVisible({ timeout: 5_000 })
-  await expect(master.locator('.stage-pause')).toHaveText(/Пауза/)
+  // В паузе табло, разговор и карточку ведущей скрываем: остаются хедер и крупные карточки участников.
+  await expect(master.locator('.play.is-paused')).toBeVisible({ timeout: 5_000 })
+  await expect(joiner.locator('.play.is-paused')).toBeVisible({ timeout: 5_000 })
+  await expect(master.locator('.play.is-paused > .stage')).toBeHidden()
+  await expect(master.locator('.layout.is-paused > .talk')).toBeHidden()
+  await expect(joiner.locator('.layout.is-paused > .talk')).toBeHidden()
+  await expect(master.locator('.play.is-paused .conference-player')).toHaveCount(2)
   // Игрок снимает паузу: toggle паузы доступен всем.
   await joiner.getByRole('button', { name: 'Дальше' }).click()
   // После «Дальше» оба вернулись из паузы: главный экран снова рисуется (у обоих одинаково).
-  await expect(master.locator('.stage-pause')).toBeHidden({ timeout: 5_000 })
+  await expect(master.locator('.play.is-paused')).toBeHidden({ timeout: 5_000 })
   await expect(master.locator('.board')).toBeVisible()
   await expect(joiner.locator('.board')).toBeVisible({ timeout: 5_000 })
   if (process.env.SHOT_DIR) {

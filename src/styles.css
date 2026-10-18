@@ -1102,6 +1102,48 @@ button.continue-with-file .continue-file {
   white-space: nowrap;
 }
 
+/* Пауза и «Игра окончена» (решение автора): только хедер и карточки участников — как можно крупнее.
+   Табло, колонку разговора с карточкой ведущей и кнопки у карточек прячем; микрофон/камера
+   на паузе живут в шапке (ConferenceMediaControls в GameScreen). */
+.layout.is-paused { grid-template-columns: minmax(0, 1fr); }
+.play.is-paused { grid-template-rows: minmax(0, 1fr); }
+.play.is-paused > .stage { display: none; }
+.layout.is-paused > .talk { display: none; }
+.play.is-paused .players {
+  grid-row: auto;
+  display: grid;
+  grid-template-columns: repeat(var(--pause-cols, 2), minmax(0, 1fr));
+  grid-auto-flow: row;
+  grid-auto-rows: minmax(0, 1fr);
+  height: 100%;
+  align-content: stretch;
+  gap: 10px;
+}
+.play.is-paused .players .player {
+  min-width: 0;
+  min-height: 0;
+  max-width: none;
+  height: 100%;
+}
+.play.is-paused .buzzer,
+.play.is-paused .key-hint { display: none; }
+.play.is-paused .player-meta { font-size: clamp(1.05rem, 2.6dvh, 2rem); }
+.play.is-paused .conference-player {
+  grid-template-rows: minmax(0, 1fr) auto;
+  height: 100%;
+  max-height: none;
+  align-content: stretch;
+  overflow: hidden;
+}
+.play.is-paused .conference-player .video-frame {
+  aspect-ratio: auto;
+  height: 100%;
+  min-height: 0;
+  max-height: none;
+}
+.play.is-paused .video-placeholder { font-size: clamp(1rem, 3dvh, 2.4rem); }
+.play.is-paused .player-game-slot { align-content: end; }
+
 .stage > .board,
 .stage > .question,
 .stage > .conference-lobby-status,
@@ -1849,10 +1891,14 @@ button.buzzer.chooser:disabled {
   .conference-layout .play {
     grid-template-rows: auto auto;
   }
-  /* Пауза: на узком экране надпись тоже сжимается, остальное в потоке (страница скроллится). */
+  /* Пауза на узком экране: страница скроллится, кадры сохраняют пропорцию 4:3, кнопки спрятаны. */
   .play.is-paused,
   .conference-layout .play.is-paused {
-    grid-template-rows: auto auto;
+    grid-template-rows: minmax(0, 1fr);
+  }
+  .play.is-paused .conference-player .video-frame {
+    aspect-ratio: 4 / 3;
+    height: auto;
   }
   .conference-layout .talk .chat-column {
     flex: none;

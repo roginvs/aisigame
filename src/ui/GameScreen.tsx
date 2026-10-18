@@ -3,7 +3,7 @@ import { auctionDingSound, catMeowSound, preloadPublicSound } from '../audio/bee
 import { specialListenerId } from '../game/controller.ts'
 import { SpecialPanel, type SpecialPick } from './SpecialPanel.tsx'
 import { specialPanelPath } from './specialPanelPath.ts'
-import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from 'react'
+import { useCallback, useEffect, useRef, useState, useSyncExternalStore, type CSSProperties } from 'react'
 import { flushSync } from 'react-dom'
 import type { SnapshotFrom } from 'xstate'
 import { appealButton } from '../game/appeals.ts'
@@ -24,6 +24,7 @@ import type { ConferenceTile } from '../conference/media.ts'
 import { ConferenceLobbyStatus } from './ConferenceLobbyStatus.tsx'
 import { ConferenceMediaControls } from './ConferenceVideoStrip.tsx'
 import { ConferencePlayersRow } from './ConferencePlayersRow.tsx'
+import { pauseColumns } from './pauseColumns.ts'
 import { AirStatus } from './airStatus.tsx'
 import { buzzerLabel } from './buzzerLabel.ts'
 import { nudgeActive, nudgeLevelOverride } from './buzzNudge.ts'
@@ -469,6 +470,19 @@ export function GameScreen(props: {
             <span aria-hidden="true">{paused ? '▶' : '⏸'}</span>
             <span className="btn-label" aria-hidden="true">{paused ? 'Дальше' : 'Пауза'}</span>
           </button>
+          {conference?.layout && (paused || finishedNow) ? (
+            /* Пауза: колонка разговора с кнопками mic/cam скрыта — управление переносится в шапку. */
+            <div className="pills header-media" aria-label="Микрофон и камера">
+              <ConferenceMediaControls
+                micLive={Boolean((conference.tiles ?? []).find((tile) => tile.isLocal)?.micLive)}
+                cameraOn={Boolean((conference.tiles ?? []).find((tile) => tile.isLocal)?.cameraOn)}
+                mediaBusy={conference.mediaBusy}
+                onToggleMic={() => conference.onToggleMic?.()}
+                onToggleCamera={() => conference.onToggleCamera?.()}
+                onNextCamera={() => conference.onNextCamera?.()}
+              />
+            </div>
+          ) : null}
           {conference?.onCopyInvite ? (
             <button
               type="button"
@@ -528,7 +542,7 @@ export function GameScreen(props: {
         </div>
       </header>
 
-      <section className="layout">
+      <section className={paused || finishedNow ? 'layout is-paused' : 'layout'}>
         <div className={paused || finishedNow ? 'play is-paused' : 'play'}>
         <div className="stage">
         {paused || finishedNow ? (
@@ -716,7 +730,10 @@ export function GameScreen(props: {
           layout
         />
       ) : (
-        <section className="players">
+        <section
+          className="players"
+          style={paused || finishedNow ? ({ '--pause-cols': String(pauseColumns(visiblePlayers.length)) } as CSSProperties) : undefined}
+        >
           {visiblePlayers.map((player) => {
             const playerId = player.id
             const active = context.activePlayerId === playerId

@@ -17,6 +17,7 @@ import { matchConferenceTile } from './conferenceTileMatch.ts'
 import { jitsiIdOfClient } from '../conference/jitsiIds.ts'
 import type { ConferenceJitsiPair } from '../conference/messages.ts'
 import { ConferenceVideoTile } from './ConferenceVideoStrip.tsx'
+import { pauseColumns } from './pauseColumns.ts'
 
 type BindVideo = (participantId: string, element: HTMLVideoElement | null) => void
 
@@ -86,7 +87,11 @@ export function ConferencePlayersRow(props: {
   if (mode === 'lobby') {
     const entries = roster.filter((entry) => !entry.hidden || entry.isMaster)
     return (
-      <section className="players conference-players" aria-label="Участники">
+      <section
+        className="players conference-players"
+        style={paused ? ({ '--pause-cols': String(pauseColumns(entries.length)) } as CSSProperties) : undefined}
+        aria-label="Участники"
+      >
         {entries.map((entry) => {
           const isSelf = Boolean(selfClientId && entry.clientId === selfClientId)
           const tile =
@@ -133,8 +138,13 @@ export function ConferencePlayersRow(props: {
     )
   }
 
+  const pending = pendingGuests(roster, players)
   return (
-    <section className="players conference-players" aria-label="Участники">
+    <section
+      className="players conference-players"
+      style={paused ? ({ '--pause-cols': String(pauseColumns(players.length + pending.length)) } as CSSProperties) : undefined}
+      aria-label="Участники"
+    >
       {players.map((player) => {
         const playerId = player.id
         const label = conferencePlayerLabel(player.name, hasMatchData)
@@ -219,7 +229,7 @@ export function ConferencePlayersRow(props: {
           </div>
         )
       })}
-      {pendingGuests(roster, players).map((entry) => {
+      {pending.map((entry) => {
         const isSelf = Boolean(selfClientId && entry.clientId === selfClientId)
         const tile =
           matchConferenceTile(tiles, { selfClientId, clientId: entry.clientId, jitsiIds }) ?? emptyTile(entry.clientId, entry.name, isSelf)
