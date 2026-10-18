@@ -49,6 +49,8 @@ export function buildConferenceSnapshot(input: {
   hostEar?: HostEar
   hostLink?: ConferenceSnapshot['hostLink']
   hearTurnOnly?: boolean
+  /** Пауза в лобби (машина контроллера стоит на паузе до старта партии). */
+  lobbyPaused?: boolean
   /** Кто есть кто в Jitsi (ведёт мастер, см. `masterSession.conferenceIds`). */
   jitsi?: ConferenceJitsiIds
 }): ConferenceSnapshot {
@@ -126,6 +128,7 @@ export function buildConferenceSnapshot(input: {
     error: input.context.error,
     ...(input.hostLink ? { hostLink: input.hostLink } : {}),
     ...(input.hearTurnOnly !== undefined ? { hearTurnOnly: input.hearTurnOnly } : {}),
+    lobbyPaused: input.lobbyPaused === true,
     ...(input.messageRing ?? emptyMessageRing()),
   }
 }

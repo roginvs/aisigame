@@ -274,6 +274,7 @@ export class MasterSession {
   }
 
   startGame(sendStart: (players: Player[]) => void): void {
+    this.resumeLobbyPause()
     this.clearLobbySpeechTimer()
     const masterEntry = this.roster.get(this.masterClientId)
     const players: Player[] = [
@@ -300,6 +301,7 @@ export class MasterSession {
 
   /** Запускает CONTINUE_GAME уже как активную конференцию, без промежуточного lobby snapshot. */
   resumeGame(sendResume: () => void): void {
+    this.resumeLobbyPause()
     this.clearLobbySpeechTimer()
     this.gameStarted = true
     this.gameStartedAt = Date.now()
@@ -538,11 +540,13 @@ export class MasterSession {
       return
     }
     if (message.type === 'pause') {
-      // Пауза доступна всем: игрок toggle — мастер решает по своему состоянию.
-      if (!this.gameStarted || !this.verified.has(message.clientId)) return
+      // Пауза доступна всем — и в партии, и в лобби: игрок toggle, мастер решает по своему состоянию.
+      if (!this.verified.has(message.clientId)) return
       const path = statePath(this.actor.getSnapshot().value)
       if (path === 'paused') this.actor.send({ type: 'RESUME' })
       else this.actor.send({ type: 'PAUSE', path })
+      // В лобби подписки машины молчат (attachMachine бреадкастит только игру) — шлём снимок сами.
+      if (!this.gameStarted) this.broadcastCurrentSnapshot()
       return
     }
     if (message.type === 'pick') {
@@ -652,6 +656,7 @@ export class MasterSession {
 
   private buildSnapshot(phase: string): ConferenceSnapshot {
     this.notePendingGuests()
+    const machinePath = statePath(this.actor.getSnapshot().value)
     const context = this.gameStarted
       ? this.actor.getSnapshot().context
       : lobbyContext(this.pack, this.roster.get(this.masterClientId)?.name ?? 'Мастер')
@@ -668,6 +673,7 @@ export class MasterSession {
       hostEar: this.publicEar(phase),
       hostLink: this.gameStarted ? this.publicLink() : undefined,
       hearTurnOnly: this.hearTurnOnly,
+      lobbyPaused: !this.gameStarted && machinePath === 'paused',
       timerRemainingMs: this.gameStarted ? timerRemainingMs(context, now) : null,
       falseStartIds: this.gameStarted
         ? Object.entries(this.actor.getSnapshot().context.falseStarts)
@@ -751,6 +757,9 @@ export class MasterSession {
 
   private speakLobbyTurn(): void {
     if (!this.lobbyOpenedSpeech || this.gameStarted) return
+    // Пауза в лобби: в модель ничего не шлём — ни реплик, ни напоминаний; после «Дальше»
+    // цепочку поднимет maybeLobbySpeech по следующей смене в комнате.
+    if (statePath(this.actor.getSnapshot().value) === 'paused') return
     if (!this.waitLobbySilence()) return
     const signature = this.lobbySignature()
     const changed = signature !== this.spokenLobbySignature
@@ -783,6 +792,11 @@ export class MasterSession {
   private clearLobbySpeechTimer(): void {
     window.clearTimeout(this.lobbySpeechTimer)
     this.lobbySpeechTimer = 0
+  }
+
+  /** Старт партии из паузы лобби: сначала «Дальше», машина возвращается в startMenu. */
+  private resumeLobbyPause(): void {
+    if (statePath(this.actor.getSnapshot().value) === 'paused') this.actor.send({ type: 'RESUME' })
   }
 
   addMidGamePlayer(clientId: string, name: string): Player | null {

@@ -1785,6 +1785,22 @@ describe('game machine', () => {
     expect(ids).toHaveLength(1)
     expect(ids[0]).toMatchObject({ id: 4, name: 'Первый', score: 0 })
   })
+
+  it('пауза в лобби: из startMenu можно встать на паузу и «Дальше» возвращает в startMenu', () => {
+    const actor = createActor(gameMachine)
+    actor.start()
+    expect(statePath(actor.getSnapshot().value)).toBe('startMenu')
+
+    actor.send({ type: 'PAUSE', path: 'startMenu' })
+    expect(statePath(actor.getSnapshot().value)).toBe('paused')
+    expect(actor.getSnapshot().context.resumePath).toBe('startMenu')
+
+    actor.send({ type: 'RESUME' })
+    expect(statePath(actor.getSnapshot().value)).toBe('startMenu')
+    // Игра не началась: после «Дальше» старт партии по-прежнему работает как обычно.
+    actor.send({ type: 'START_GAME', pack: demoPack, players: playersFromNames('А; Б; В') })
+    expect(statePath(actor.getSnapshot().value)).toBe('connecting')
+  })
 })
 
 function closeStack(actor: ReturnType<typeof reachBuzzing>, questionId: string) {

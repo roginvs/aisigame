@@ -1960,6 +1960,8 @@ export const gameMachine = setup({
         { guard: ({ context }) => context.resumePath === 'specialAway', target: 'specialAway', actions: ['resumeClock', 'restartAwayClock'] },
         { guard: ({ context }) => context.resumePath === 'appealCue', target: 'appealCue', actions: 'resumeClock' },
         { guard: ({ context }) => context.resumePath === 'roundSummaryWindow', target: 'roundSummaryWindow', actions: ['resumeClock', 'restartAppealClock'] },
+        // Лобби конференции: паузу ставили до старта партии — «Дальше» возвращает в startMenu.
+        { guard: ({ context }) => context.resumePath === 'startMenu', target: 'startMenu', actions: 'resumeClock' },
           { guard: ({ context }) => context.resumePath === 'welcoming', target: 'welcoming', actions: 'resumeClock' },
           { guard: ({ context }) => context.resumePath === 'bridging', target: 'bridging', actions: 'resumeClock' },
           { guard: ({ context }) => context.resumePath === 'choosing.listening', target: 'choosing.listening', actions: 'resumeClock' },

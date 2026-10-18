@@ -176,6 +176,8 @@ export function GameScreen(props: {
     /** Только мастер: галка «Меньше слышать» (вне хода — глухо). */
     hearTurnOnly?: boolean
     onHearTurnOnlyChange?: (value: boolean) => void
+    /** Пауза в лобби: у машины контроллера в снимке фаза «lobby», флаг идёт отдельным полем. */
+    lobbyPaused?: boolean
   }
 }) {
   const { snapshot, link, onBuzz, onPick, onPause, onReset, onNextRound, modelId, onModel, conference, onAnswerMediaEnded } = props
@@ -255,7 +257,7 @@ export function GameScreen(props: {
   const prices = roundPrices(context.questions, context.roundIndex)
   const boardThemes = roundThemes(context.questions, context.roundIndex)
   const finalRound = round?.kind === 'final'
-  const paused = path === 'paused'
+  const paused = path === 'paused' || (inLobby && conference?.lobbyPaused === true)
   const stopped = path === 'stopped'
   // Пауза — «поболтать»: главный экран сжимается до надписи, карточки и видео занимают остальное.
   const finishedNow = path === 'finished'

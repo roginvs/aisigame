@@ -1471,6 +1471,11 @@ export default function App() {
               // Переключатель мастера — его собственный; гостю то же значение приходит снимком.
               hearTurnOnly: conferenceRole === 'master' ? hearTurnOnly : joinerSnapshot?.hearTurnOnly,
               onHearTurnOnlyChange: conferenceRole === 'master' ? setHearTurnOnly : undefined,
+              // Пауза в лобби: у мастера — состояние его машины, у гостя — флаг из снимка.
+              lobbyPaused:
+                conferenceRole === 'master'
+                  ? conferenceLobby && path === 'paused'
+                  : joinerSnapshot?.lobbyPaused === true,
             }
           : undefined
       }

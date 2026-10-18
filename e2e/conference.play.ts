@@ -312,6 +312,49 @@ test.describe('конференция на BroadcastChannel', () => {
     await joiner.getByRole('button', { name: 'Я готов' }).click()
     await expect(master.getByText('Пакет сверен · готов')).toBeVisible({ timeout: 15_000 })
   })
+
+  test('пауза в лобби: ставят и снимают все, оверлей у мастера и гостя, старт после паузы', async ({ browser }) => {
+    const context = await browser.newContext()
+    await context.grantPermissions(['clipboard-read', 'clipboard-write'])
+    const master = await context.newPage()
+    const joiner = await context.newPage()
+    await master.goto('/?mock=1&transport=broadcast')
+    await master.getByLabel('Модель').selectOption('mock')
+    await master.getByRole('radio', { name: 'Конференция' }).check()
+    await master.getByLabel('Пакет вопросов').selectOption('demo')
+    await master.getByLabel('Ваше имя').fill('Мастер')
+    await master.getByRole('button', { name: 'Начать игру' }).click()
+    await expect(master.getByRole('button', { name: 'Начать игру' })).toBeVisible()
+
+    const invite = await copyInvite(master)
+    const localInvite = localInviteUrl(invite, master.url())
+    const joinerUrl = localInvite.includes('mock=1')
+      ? localInvite
+      : `${localInvite}${localInvite.includes('?') ? '&' : '?'}mock=1`
+    await joiner.goto(joinerUrl)
+    await joiner.getByLabel('Ваше имя').fill('Гость')
+    await joiner.getByRole('button', { name: 'Подключиться' }).click()
+    await expect(joiner.getByRole('button', { name: 'Я готов' })).toBeEnabled({ timeout: 60_000 })
+
+    // Гость ставит паузу — «Пауза» видна обоим, кнопки переключаются на «Дальше».
+    await joiner.getByRole('button', { name: 'Пауза', exact: true }).click()
+    await expect(joiner.locator('.stage-pause')).toContainText('Пауза')
+    await expect(master.locator('.stage-pause')).toContainText('Пауза')
+    await expect(master.getByRole('button', { name: 'Дальше' })).toBeVisible()
+    await expect(joiner.getByRole('button', { name: 'Дальше' })).toBeVisible()
+
+    // Мастер снимает — лобби возвращается у обоих.
+    await master.getByRole('button', { name: 'Дальше' }).click()
+    await expect(master.locator('.stage-pause')).toHaveCount(0)
+    await expect(joiner.locator('.stage-pause')).toHaveCount(0)
+    await expect(joiner.getByRole('button', { name: 'Я готов' })).toBeEnabled()
+
+    // Партия стартует после паузы как обычно.
+    await joiner.getByRole('button', { name: 'Я готов' }).click()
+    await master.getByRole('button', { name: 'Начать игру' }).click()
+    await expect(master.locator('.board')).toBeVisible({ timeout: 30_000 })
+    await expect(joiner.locator('.stage-pause')).toHaveCount(0)
+  })
 })
 
 async function hear(page: Page, text: string): Promise<void> {

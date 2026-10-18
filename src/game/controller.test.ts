@@ -428,6 +428,46 @@ describe('attachController answer listening', () => {
     actor.stop()
   })
 
+  it('пауза в лобби закрывает вход модели, «Дальше» открывает снова', async () => {
+    vi.useFakeTimers()
+    vi.stubGlobal('window', {
+      setTimeout: (handler: TimerHandler, timeout?: number) => globalThis.setTimeout(handler, timeout),
+      clearTimeout: (id: number) => globalThis.clearTimeout(id),
+    })
+    const client = new MockRealtimeClient()
+    const setMic = vi.spyOn(client, 'setMicEnabled')
+    const setOutputMuted = vi.spyOn(client, 'setOutputMuted')
+    const discardInput = vi.spyOn(client, 'discardInputAudio')
+    const actor = createActor(gameMachine)
+    actor.start()
+    const stop = attachController({
+      actor,
+      client,
+      getApiKey: () => 'test-key',
+      setLink: () => {},
+      keepVoiceSession: () => true,
+      voiceAlreadyConnected: () => true,
+      onActions: () => {},
+    })
+    expect(statePath(actor.getSnapshot().value)).toBe('startMenu')
+
+    actor.send({ type: 'PAUSE', path: 'startMenu' })
+    expect(statePath(actor.getSnapshot().value)).toBe('paused')
+    expect(setMic).toHaveBeenLastCalledWith(false)
+    expect(discardInput).toHaveBeenCalled()
+    expect(setOutputMuted).toHaveBeenLastCalledWith(true)
+
+    setMic.mockClear()
+    actor.send({ type: 'RESUME' })
+    expect(statePath(actor.getSnapshot().value)).toBe('startMenu')
+    // Лобби слышит всех: после «Дальше» микс модели снова открыт, выход не заглушен.
+    expect(setMic).toHaveBeenCalledWith(true)
+    expect(setOutputMuted).toHaveBeenLastCalledWith(false)
+
+    stop()
+    actor.stop()
+  })
+
   it('не принимает поздний selectQuestion после таймаута разбора выбора', async () => {
     class SilentToolClient extends MockRealtimeClient {
       lastToolTurn = 0

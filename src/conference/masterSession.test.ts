@@ -699,6 +699,99 @@ describe('MasterSession resume', () => {
     actor.stop()
   })
 
+  it('пауза в лобби: гость ставит и снимает, в модель ничего не уходит', () => {
+    const actor = createActor(gameMachine)
+    actor.start()
+    const transport = new MemoryTransport()
+    const requestSpeech = vi.fn()
+    const session = new MasterSession({
+      transport,
+      client: { requestSpeech } as unknown as GameVoice,
+      actor,
+      masterClientId: 'master-client',
+      masterName: 'Мастер',
+      pack: demoPack,
+      packBytes: new Uint8Array([1, 2, 3]),
+      packHash: 'hash',
+      authorityToken: 'master-token',
+      onRoster: () => {},
+    })
+
+    flushLobbySilence()
+    expect(requestSpeech).toHaveBeenCalledTimes(1)
+
+    transport.receive({ type: 'hello', clientId: 'guest-client', authToken: 'guest-token', name: 'Гость' })
+    transport.receive({ type: 'packVerified', clientId: 'guest-client', authToken: 'guest-token', hash: 'hash' })
+    for (let elapsed = 0; elapsed < LOBBY_SPEECH_MIN_INTERVAL_MS; elapsed += 3_000) {
+      vi.advanceTimersByTime(3_000)
+      transport.receive({ type: 'hello', clientId: 'guest-client', authToken: 'guest-token', name: 'Гость' })
+    }
+    flushLobbySilence()
+    expect(requestSpeech).toHaveBeenCalledTimes(2)
+
+    transport.receive({ type: 'pause', clientId: 'guest-client', authToken: 'guest-token' })
+    expect(statePath(actor.getSnapshot().value)).toBe('paused')
+    expect(lastSnapshot(transport)?.lobbyPaused).toBe(true)
+
+    // На паузе ни напоминаний ожидания, ни реакции на смену состава.
+    requestSpeech.mockClear()
+    vi.advanceTimersByTime(LOBBY_IDLE_INTERVAL_MS * 3)
+    flushLobbySilence()
+    transport.receive({ type: 'hello', clientId: 'guest2-client', authToken: 'guest2-token', name: 'Второй' })
+    transport.receive({ type: 'packVerified', clientId: 'guest2-client', authToken: 'guest2-token', hash: 'hash' })
+    vi.advanceTimersByTime(LOBBY_IDLE_INTERVAL_MS * 3)
+    flushLobbySilence()
+    expect(requestSpeech).not.toHaveBeenCalled()
+
+    transport.receive({ type: 'pause', clientId: 'guest-client', authToken: 'guest-token' })
+    expect(statePath(actor.getSnapshot().value)).toBe('startMenu')
+    expect(lastSnapshot(transport)?.lobbyPaused).toBeFalsy()
+
+    session.dispose()
+    actor.stop()
+  })
+
+  it('паузу в лобби ставит только сверивший пакет гость; старт партии снимает паузу', () => {
+    const actor = createActor(gameMachine)
+    actor.start()
+    const transport = new MemoryTransport()
+    const requestSpeech = vi.fn()
+    const session = new MasterSession({
+      transport,
+      client: { requestSpeech } as unknown as GameVoice,
+      actor,
+      masterClientId: 'master-client',
+      masterName: 'Мастер',
+      pack: demoPack,
+      packBytes: new Uint8Array([1, 2, 3]),
+      packHash: 'hash',
+      authorityToken: 'master-token',
+      onRoster: () => {},
+    })
+
+    transport.receive({ type: 'hello', clientId: 'guest-client', authToken: 'guest-token', name: 'Гость' })
+    transport.receive({ type: 'pause', clientId: 'guest-client', authToken: 'guest-token' })
+    expect(statePath(actor.getSnapshot().value)).toBe('startMenu')
+    expect(lastSnapshot(transport)?.lobbyPaused).toBeFalsy()
+
+    transport.receive({ type: 'packVerified', clientId: 'guest-client', authToken: 'guest-token', hash: 'hash' })
+    transport.receive({ type: 'pause', clientId: 'guest-client', authToken: 'guest-token' })
+    expect(statePath(actor.getSnapshot().value)).toBe('paused')
+
+    session.startGame(() => {
+      actor.send({
+        type: 'START_GAME',
+        pack: demoPack,
+        players: [{ id: 1, name: 'Мастер', score: 0, clientId: 'master-client' }],
+      })
+    })
+    expect(statePath(actor.getSnapshot().value)).toBe('connecting')
+    expect(lastSnapshot(transport)?.lobbyPaused).toBeFalsy()
+
+    session.dispose()
+    actor.stop()
+  })
+
   it('в лобби не говорит, пока в комнате есть речь, и ждёт короткую тишину', () => {
     const actor = createActor(gameMachine)
     actor.start()
@@ -815,7 +908,7 @@ describe('MasterSession resume', () => {
     actor.stop()
   })
 
-  it('игрок toggle-ит паузу: ставит и снимает, а до начала игры toggle игнорируется', () => {
+  it('игрок toggle-ит паузу: ставит и снимает, в лобби и в партии одинаково', () => {
     const actor = createActor(gameMachine)
     actor.start()
     const transport = new MemoryTransport()
@@ -834,9 +927,11 @@ describe('MasterSession resume', () => {
     transport.receive({ type: 'hello', clientId: 'guest-client', authToken: 'guest-token', name: 'Гость' })
     transport.receive({ type: 'packVerified', clientId: 'guest-client', authToken: 'guest-token', hash: 'hash' })
     transport.receive({ type: 'ready', clientId: 'guest-client', authToken: 'guest-token' })
-    // До начала партии toggle не проходит (gameStarted = false).
+    // Пауза в лобби работает так же, как в партии: toggle ставит машину на паузу до старта.
     transport.receive({ type: 'pause', clientId: 'guest-client', authToken: 'guest-token' })
-    expect(statePath(actor.getSnapshot().value)).toBe('startMenu')
+    expect(statePath(actor.getSnapshot().value)).toBe('paused')
+    expect(actor.getSnapshot().context.resumePath).toBe('startMenu')
+    // Старт партии сам снимает лобби-паузу.
     session.startGame(() => {
       actor.send({ type: 'START_GAME', pack: demoPack })
       actor.send({ type: 'CONNECTED' })

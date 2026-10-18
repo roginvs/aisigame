@@ -623,6 +623,12 @@ export function attachController(options: {
         connectToken += 1
         client.stopSession()
       }
+      // «Дальше» в лобби: контроллер глушил модель на паузе — возвращаем и вход, и голос.
+      // micOpen('startMenu') намеренно false для игровых фаз, поэтому здесь явно true.
+      if (path === 'startMenu' && from === 'paused' && keepVoiceSession?.()) {
+        client.setOutputMuted(false)
+        client.setMicEnabled(true)
+      }
       return
     }
     if (path === 'paused') {
@@ -638,7 +644,7 @@ export function attachController(options: {
       client.setOutputMuted(false)
       if (buzzerChimeLive(path)) armBuzzerWarning(context.phaseDurationMs ?? gameConfig.buzzerMs)
       // Кот/аукцион: RESUME сворачивает подсостояние (cat.picking → cat.announcing, staking.listening → staking.asking…).
-      // Узел ждёт конец реплики, которой ещё не было, — как при обычном входе заказываем её заново.
+      // Узел ждёт конец реплики, которой ещё не было — как при обычном входе заказываем её заново.
       const rerouted = (path.startsWith('cat.') || path.startsWith('auction.')) && path !== context.resumePath
       const skipped =
         (path === 'bridging' && context.roundIndex !== fromRound) ||

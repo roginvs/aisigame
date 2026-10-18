@@ -131,6 +131,8 @@ export type ConferenceSnapshot = AppealFields & {
   /** Состояние ведущей у мастера: говорит ли, открыт ли микрофон модели. Настроение карточки у всех из него. */
   /** «Меньше слышать» у мастера: подсказка карточки ведущей у всех одна. */
   hearTurnOnly?: boolean
+  /** Пауза в лобби: в модель ничего не шлётся, машина контроллера стоит на паузе. */
+  lobbyPaused?: boolean
   hostLink?: { host: 'idle' | 'speaking' | 'blocked'; mic: 'idle' | 'requesting' | 'live' | 'muted' | 'error' }
 } & ConferenceMessageRing
 
@@ -553,6 +555,7 @@ const stateValidators = {
   resumeStatus: (value: unknown) => value === undefined || validText(value),
   error: (value: unknown) => value === undefined || value === null || (typeof value === 'string' && value.length <= 2_000),
   hearTurnOnly: (value: unknown) => value === undefined || typeof value === 'boolean',
+  lobbyPaused: (value: unknown) => value === undefined || typeof value === 'boolean',
   hostLink: (value: unknown) => value === undefined || (isRecord(value) &&
     ['idle', 'speaking', 'blocked'].includes(value.host as string) &&
     ['idle', 'requesting', 'live', 'muted', 'error'].includes(value.mic as string)),
