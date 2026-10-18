@@ -10,7 +10,18 @@ import { diag } from '../debug/diag.ts'
 export type MicCompression = {
   /** Поток с обработанной дорожкой — публикация в комнату именно его. */
   stream: MediaStream
+  /**
+   * RMS выходного сигнала (что уходит в комнату, 0..1) — источник собственного
+   * уровня на плитке и «ячейки» уровней, независимый от уровней Jitsi по себе.
+   */
+  level: () => number
   /** Отдать устройство назад: глушит обработанную дорожку и закрывает контекст. */
+  stop: () => void
+}
+
+/** Мониторинг уровня без обработки — публикация сырой дорожки (iOS, не удался граф). */
+export type MicLevelMonitor = {
+  level: () => number
   stop: () => void
 }
 
@@ -47,6 +58,8 @@ export function compressMic(rawTrack: MediaStreamTrack): MicCompression | null {
   let ctx: AudioContext | null = null
   let processed: MediaStreamTrack | null = null
   let gateTimer: number | null = null
+  let outAnalyser: AnalyserNode | null = null
+  let outAnalyserSamples: Float32Array<ArrayBuffer> | null = null
   try {
     ctx = new Ctx()
     const source = ctx.createMediaStreamSource(new MediaStream([rawTrack]))
@@ -63,6 +76,11 @@ export function compressMic(rawTrack: MediaStreamTrack): MicCompression | null {
     // Лёгкий шумодав: гейт с гистерезисом мягко приглушает комнатный фон, речь не режет.
     const gate = ctx.createGain()
     gate.gain.value = 1
+    // Анализатор выхода: уровень ровно того сигнала, что уходит в комнату.
+    outAnalyser = ctx.createAnalyser()
+    outAnalyser.fftSize = 512
+    outAnalyserSamples = new Float32Array(outAnalyser.fftSize) as Float32Array<ArrayBuffer>
+    makeup.connect(outAnalyser)
     const gateAnalyser = ctx.createAnalyser()
     gateAnalyser.fftSize = 512
     source.connect(gateAnalyser)
@@ -99,6 +117,10 @@ export function compressMic(rawTrack: MediaStreamTrack): MicCompression | null {
   const track = processed!
   return {
     stream: new MediaStream([track]),
+    level: () => {
+      if (context.state === 'closed' || !outAnalyser || !outAnalyserSamples) return 0
+      return analyserRms(outAnalyser, outAnalyserSamples)
+    },
     stop() {
       window.clearInterval(gateTimer)
       try {
@@ -107,6 +129,37 @@ export function compressMic(rawTrack: MediaStreamTrack): MicCompression | null {
         // дорожка уже остановлена
       }
       void context.close().catch(() => undefined)
+    },
+  }
+}
+
+/**
+ * Анализатор уровня сырой дорожки без обработки: публикация без компрессора
+ * (iOS или не удался граф) всё равно держит собственный уровень на плитке.
+ */
+export function monitorMicLevel(rawTrack: MediaStreamTrack): MicLevelMonitor | null {
+  const Ctx = typeof window === 'undefined' ? undefined : window.AudioContext
+  if (!Ctx || rawTrack.readyState === 'ended') return null
+  let context: AudioContext | null = null
+  let analyser: AnalyserNode | null = null
+  try {
+    context = new Ctx()
+    const source = context.createMediaStreamSource(new MediaStream([rawTrack]))
+    analyser = context.createAnalyser()
+    analyser.fftSize = 512
+    source.connect(analyser)
+    void context.resume().catch(() => undefined)
+  } catch {
+    if (context) void context.close().catch(() => undefined)
+    return null
+  }
+  const samples = new Float32Array(analyser!.fftSize) as Float32Array<ArrayBuffer>
+  const node = analyser!
+  const ctx = context
+  return {
+    level: () => (ctx.state === 'closed' ? 0 : analyserRms(node, samples)),
+    stop() {
+      void ctx.close().catch(() => undefined)
     },
   }
 }

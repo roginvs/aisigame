@@ -2282,8 +2282,8 @@ button.buzzer.chooser:disabled {
 
 .topbar .pills > button { display: inline-flex; align-items: center; justify-content: center; gap: 6px; }
 
-/* Полоска внизу кадра: что от участника реально уходит в модель (после микшера мастера). */
-.video-model-level {
+/* Полоска внизу кадра: уровень речи участника — свой из своего графа микрофона, чужие из уровней Jitsi. */
+.video-level {
   position: absolute;
   left: 0;
   right: 0;

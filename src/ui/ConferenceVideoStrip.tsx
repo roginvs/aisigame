@@ -1,13 +1,13 @@
 import { pingLabel } from './pingLabel.ts'
 import { useEffect, useRef, useState, type ReactNode } from 'react'
 import type { ConferenceTile } from '../conference/media.ts'
-import { getModelLevels, subscribeModelLevels } from '../conference/modelLevels.ts'
+import { getTileLevels, subscribeTileLevels } from '../conference/tileLevels.ts'
 import { useSyncExternalStore } from 'react'
 
-/** Вклад участника в поток модели (после микшера мастера), 0..1. Одинаково у всех. */
-function useModelLevel(participantId: string): number {
-  const read = () => getModelLevels().byParticipant[participantId] ?? 0
-  return useSyncExternalStore(subscribeModelLevels, read, read)
+/** Уровень речи участника (0..1): свой — из своего микрофона, чужие — из уровней Jitsi. */
+function useTileLevel(participantId: string): number {
+  const read = () => getTileLevels().byParticipant[participantId] ?? 0
+  return useSyncExternalStore(subscribeTileLevels, read, read)
 }
 
 /** Кадр участника без кнопок mic/cam — они в подвале чата. */
@@ -30,7 +30,7 @@ export function ConferenceVideoTile(props: {
   const showNameInMeta = !hideName && tile.cameraOn
   const showMicOff = !tile.micLive
   const showMeta = showNameInMeta || Boolean(masterBadge) || showMicOff
-  const modelLevel = useModelLevel(tile.id)
+  const speechLevel = useTileLevel(tile.id)
 
   useEffect(() => {
     bindVideoRef.current = bindVideo
@@ -64,10 +64,10 @@ export function ConferenceVideoTile(props: {
           <span className="video-placeholder">{name}</span>
         )}
         <span
-          className="video-model-level"
-          data-testid="tile-model-level"
-          title="Что от этого участника слышит модель"
-          style={{ transform: `scaleX(${modelLevel})` }}
+          className="video-level"
+          data-testid="tile-level"
+          title="Уровень речи"
+          style={{ transform: `scaleX(${speechLevel})` }}
           aria-hidden="true"
         />
         {pingLabel(pingMs) ? <span className="video-ping" aria-label={`Пинг ${pingLabel(pingMs)}`}>{pingLabel(pingMs)}</span> : null}

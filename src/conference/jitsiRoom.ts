@@ -16,14 +16,15 @@ import type { ConferenceMessage } from './messages.ts'
 import { isConferenceMessage } from './messages.ts'
 import type { ConferenceTransport } from './transport.ts'
 import { createHearWindow } from './hearWindow.ts'
-import { hearWindowSampleMs, modelLevelsUpdateMs } from '../options.ts'
+import { hearWindowSampleMs, modelLevelsUpdateMs, tileLevelSampleMs } from '../options.ts'
 import { displayLevel, resetModelLevels, setModelLevels } from './modelLevels.ts'
 import { createMicMixer, type MicMixer, type MixerRemote } from './audioMix.ts'
 import { cameraFacing, isMobileCameraDevice, nextCameraDeviceId, shouldMirrorVideo, switchFacingCamera, type CameraFacing } from './camera.ts'
 import { createSpeakerActivity } from './speakerActivity.ts'
 import { conferenceAudioStream, createConferenceAudioOutput } from './conferenceAudio.ts'
-import { compressMic, compressMicEligible, type MicCompression } from './micCompression.ts'
+import { compressMic, compressMicEligible, monitorMicLevel, type MicCompression, type MicLevelMonitor } from './micCompression.ts'
 import { createSpeechLevels } from './speechLevel.ts'
+import { noteTileLevel, resetTileLevels } from './tileLevels.ts'
 import { PACK_CHANNEL_HIGH_WATER_BYTES, PACK_CHANNEL_LOW_WATER_BYTES } from './chunks.ts'
 import { jitsiVideoLive, mediaStreamTrackFromJitsi, micTrackIsDead } from './micTrack.ts'
 import { pushTrace } from '../debug/trace.ts'
@@ -450,6 +451,8 @@ export async function connectJitsiConference(input: {
   /** Компрессор опубликованного микрофона: сырую дорожку не трогаем, в комнату уходит сжатая. */
   let micCompress: MicCompression | null = null
   let micCompressTrack: JitsiTrack | null = null
+  /** Свой уровень без компрессора (публикация сырой дорожкой) — для полоски собственной плитки. */
+  let ownLevelMonitor: MicLevelMonitor | null = null
   /** Пользователь хочет микрофон включённым — даже если дорожка оборвалась на телефоне. */
   let wantMicLive = false
   let recoveringMic = false
@@ -541,6 +544,49 @@ export async function connectJitsiConference(input: {
   )
   let lastHostSpeaking = false
   const localId = () => conference.myUserId() || 'local'
+
+  // Собственный уровень: у Jitsi локальная дорожка уровней может не давать
+  // (уровни Jitsi считаются по приёмным SSRC), поэтому свою полоску и рамку
+  // питает собственный граф микрофона. Так уровень и подсветка своей карточки
+  // работают всегда — и у мастера, и у игроков, от фаз не зависят.
+  let ownLevelTimer: number | null = null
+  /** Пришёл ли хоть один свой уровень от Jitsi: тогда свой speechLevels (реплики, запасной commit) питает он. */
+  let ownJitsiLevelSeen = false
+  function stopOwnLevelFeed(): void {
+    if (ownLevelTimer !== null) window.clearInterval(ownLevelTimer)
+    ownLevelTimer = null
+  }
+  function noteOwnLevel(): void {
+    const id = localId()
+    if (!id) return
+    const raw = micCompress?.level?.() ?? ownLevelMonitor?.level() ?? 0
+    // Уровни Jitsi усилены ×2.5 — свой приводим к той же шкале, чтобы своя и чужие полоски
+    // показывали одинаковую речь одинаково.
+    const level = Math.min(1, raw * 2.5)
+    if (!micLive) {
+      // Микрофон выключен: полоска на нуле, рамку не подогреваем, реплика закрывается.
+      noteTileLevel(id, 0)
+      speechLevels.clear(id)
+      return
+    }
+    noteTileLevel(id, level)
+    if (raw > 0) speakerActivity.note(id, level)
+    if (!ownJitsiLevelSeen) speechLevels.note(id, level)
+  }
+  function startOwnLevelFeed(): void {
+    stopOwnLevelFeed()
+    ownLevelTimer = window.setInterval(noteOwnLevel, tileLevelSampleMs)
+    noteOwnLevel()
+  }
+  /** Уровень своей дорожки: у компрессора — его граф, иначе монитор сырой дорожки. */
+  function attachOwnLevelSource(rawFallback: JitsiTrack | null): void {
+    ownLevelMonitor?.stop()
+    ownLevelMonitor = null
+    if (!rawFallback) return
+    const browserTrack = mediaStreamTrackFromJitsi(rawFallback)
+    if (browserTrack) ownLevelMonitor = monitorMicLevel(browserTrack)
+  }
+
   let botHandle: ConferenceHandle | null = null
   let soundsHandle: ConferenceHandle | null = null
   let soundsStream: MediaStream | null = null
@@ -769,8 +815,10 @@ export async function connectJitsiConference(input: {
 
   async function dropLocalAudioTrack(): Promise<void> {
     stopWatchingLocalMic()
+    stopOwnLevelFeed()
     micCompress?.stop()
     micCompress = null
+    attachOwnLevelSource(null)
     const compressed = micCompressTrack
     micCompressTrack = null
     const previous = localAudio
@@ -818,6 +866,9 @@ export async function connectJitsiConference(input: {
     await Promise.resolve(published.unmute())
     reopenAudioOutputs()
     micLive = true
+    // Свой источник уровня: у компрессора — его выход, иначе монитор сырой дорожки.
+    attachOwnLevelSource(published === next ? next : null)
+    startOwnLevelFeed()
     syncModelMixer()
     conferenceAudio.resume()
     emitTiles()
@@ -941,6 +992,11 @@ export async function connectJitsiConference(input: {
   conference.on(confEvents.audioLevel, (id: unknown, level: unknown) => {
     if (input.bot || typeof id !== 'string' || typeof level !== 'number') return
     jitsiLevels.set(id, level)
+    if (id === localId()) {
+      // Jitsi сам прислал уровень своей дорожки — свой speechLevels питает он, наш граф молчит.
+      ownJitsiLevelSeen = true
+    }
+    noteTileLevel(id, level)
     speakerActivity.note(id, level)
     speechLevels.note(id, level)
   })
@@ -1251,6 +1307,10 @@ export async function connectJitsiConference(input: {
       closeHearWindow()
       if (levelsTimer !== null) window.clearInterval(levelsTimer)
       resetModelLevels()
+      stopOwnLevelFeed()
+      ownLevelMonitor?.stop()
+      ownLevelMonitor = null
+      resetTileLevels()
       modelMixer?.dispose()
       modelMixer = null
       speakerActivity.dispose()

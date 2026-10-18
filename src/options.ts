@@ -173,6 +173,9 @@ export const silentClonePeak = 0.003
 /** Как часто мастер обновляет уровни «что слышит модель» (после микшера) для своего индикатора. */
 export const modelLevelsUpdateMs = 75
 
+/** Кадр собственного уровня речи (свой граф микрофона) для полоски своей плитки — как у уровней Jitsi. */
+export const tileLevelSampleMs = 200
+
 /**
  * Темп речи ведущей после приветствия: OpenAI/Grok `session.audio.output.speed` (0.25–1.5).
  * У Gemini Live параметра нет — там просьба о темпе в systemInstruction (`geminiTempoRule`).
