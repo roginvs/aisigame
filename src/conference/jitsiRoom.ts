@@ -16,7 +16,8 @@ import type { ConferenceMessage } from './messages.ts'
 import { isConferenceMessage } from './messages.ts'
 import type { ConferenceTransport } from './transport.ts'
 import { createHearWindow } from './hearWindow.ts'
-import { hearWindowSampleMs, tileLevelSampleMs } from '../options.ts'
+import { hearWindowSampleMs, silentClonePeak, tileLevelSampleMs } from '../options.ts'
+import { SPEAKING_LEVEL } from './speakerActivity.ts'
 import { createMicMixer, type MicMixer, type MixerRemote } from './audioMix.ts'
 import { cameraFacing, isMobileCameraDevice, nextCameraDeviceId, shouldMirrorVideo, switchFacingCamera, type CameraFacing } from './camera.ts'
 import { createSpeakerActivity } from './speakerActivity.ts'
@@ -481,12 +482,34 @@ export async function connectJitsiConference(input: {
   const mixerOwners = new Map<string, string>()
   let hearWindow: ReturnType<typeof createHearWindow> | null = null
   let hearTimer: number | null = null
+  /**
+   * Аварийный слух: у фокуса долго тишина, а в комнате говорят другие — модель слушает всех,
+   * пока у фокуса не появится речь. Лечение «машина судит молчание, потому что фокус смотрит
+   * не туда» (устаревшая пара [jitsiId, clientId] после перезахода участника).
+   */
+  let focusFailOpen = false
+  let focusQuietRun = 0
+
+  function participantName(participantId: string): string {
+    return remoteNames.get(participantId) ?? ''
+  }
+
+  function namesOf(participantIds: readonly string[]): Record<string, string> {
+    const names: Record<string, string> = {}
+    for (const id of participantIds) {
+      const name = participantName(id)
+      if (name) names[id] = name
+    }
+    return names
+  }
 
   function closeHearWindow(): void {
     if (hearTimer !== null) window.clearInterval(hearTimer)
     hearTimer = null
     if (!hearWindow) return
-    pushTrace('note', 'Модель: окно слушания (уровни микса)', hearWindow.summary(performance.now()))
+    const summary = hearWindow.summary(performance.now())
+    const names = namesOf(summary.sources.map((src) => src.participantId))
+    pushTrace('note', 'Модель: окно слушания (уровни микса)', names && Object.keys(names).length ? { ...summary, names } : summary)
     hearWindow = null
   }
 
@@ -503,8 +526,71 @@ export async function connectJitsiConference(input: {
         pushTrace('note', 'Модель: Jitsi слышит речь, а в миксе тишина', { key })
         continue
       }
-      pushTrace('note', 'Модель: немой клон дорожки — пересоздаём', { key, participantId: mixerOwners.get(key) ?? '' })
+      pushTrace('note', 'Модель: немой клон дорожки — пересоздаём', {
+        key,
+        participantId: mixerOwners.get(key) ?? '',
+        name: participantName(mixerOwners.get(key) ?? ''),
+      })
       modelMixer.reattach(key)
+      syncModelMixer()
+    }
+    const summary = hearWindow.summary(performance.now())
+    trackFocusFailOpen(summary)
+  }
+
+  /** Сколько замеров тишины у фокуса (по 250 мс) терпим, пока в комнате говорят другие. */
+  const focusQuietSamplesToOpen = 12
+  /** Столько миллисекунд чужой речи в окне — «говорит кто-то, но не фокус». */
+  const otherSpeakingMsToOpen = 800
+
+  type HearSummarySources = Array<{
+    participantId: string
+    rms: number
+    jitsiPeak: number | null
+    jitsiSpeakingMs: number
+  }>
+
+  /** Стержень сторожки: тишина у фокуса — счётчик; появление речи у фокуса — возвращаем узкий фокус. */
+  function trackFocusFailOpen(summary: { sources: HearSummarySources }): void {
+    const focus = typeof modelHearOnlyId === 'string' ? modelHearOnlyId : null
+    if (focus === null) {
+      focusQuietRun = 0
+      return
+    }
+    const focusStats = summary.sources.find((src) => src.participantId === focus) ?? null
+    const silence = focusStats === null || (focusStats.rms < silentClonePeak && (focusStats.jitsiPeak === null || focusStats.jitsiPeak < SPEAKING_LEVEL))
+    const speechAtFocus = focusStats !== null && (focusStats.rms >= silentClonePeak || (focusStats.jitsiPeak !== null && focusStats.jitsiPeak >= SPEAKING_LEVEL))
+    if (focusFailOpen) {
+      if (speechAtFocus) {
+        focusFailOpen = false
+        focusQuietRun = 0
+        pushTrace('note', 'Модель: у фокуса снова слышна речь — возвращаю узкий фокус', {
+          participantId: focus,
+          name: participantName(focus),
+        })
+      }
+      return
+    }
+    if (!silence) {
+      focusQuietRun = 0
+      return
+    }
+    focusQuietRun += 1
+    const otherSpeaking = summary.sources.some(
+      (src) => src.participantId && src.participantId !== focus && src.participantId !== 'модель' && src.jitsiSpeakingMs >= otherSpeakingMsToOpen,
+    )
+    if (focusQuietRun >= focusQuietSamplesToOpen && otherSpeaking) {
+      focusFailOpen = true
+      focusQuietRun = 0
+      pushTrace('note', 'Модель: у фокуса давно тишина при чужой речи — слушаю всех, пока он не заговорит', {
+        participantId: focus,
+        name: participantName(focus),
+        sources: summary.sources.map((src) => ({
+          participantId: src.participantId,
+          name: participantName(src.participantId),
+          jitsiSpeakingMs: src.jitsiSpeakingMs,
+        })),
+      })
       syncModelMixer()
     }
   }
@@ -713,8 +799,11 @@ export async function connectJitsiConference(input: {
       if (!remoteAudioTracks.has(jitsiTrack)) {
         const key = `t${++remoteTrackSeq}`
         const onOwner = () => {
+          const owner = trackOwner(jitsiTrack)
           pushTrace('note', 'Удалённая аудиодорожка сменила владельца', {
-            track: key, participantId: trackOwner(jitsiTrack),
+            track: key,
+            participantId: owner,
+            name: participantName(owner),
           })
           ensureRemoteAudio(jitsiTrack)
           emitTiles()
@@ -768,14 +857,18 @@ export async function connectJitsiConference(input: {
     const result = modelMixer.update({
       remotes,
       local: { participantId: localId(), stream: localMicMedia, live: micLive },
-      focus: modelHearOnlyId,
+      // Аварийный слух может перешибить фокус: тишина у фокуса при чужой речи — слушаем всех.
+      focus: focusFailOpen ? null : modelHearOnlyId,
     })
     const focus = modelHearOnlyId
     const fallbackKey = typeof focus === 'string' ? focus : ''
     if (result.fallback && fallbackKey !== lastFallbackFocus) {
       pushTrace('note', 'Модель: у фокуса нет живой дорожки, слушаем всех', {
         participantId: fallbackKey,
-        owners: remotes.map((item) => `${item.participantId}${item.muted ? '(muted)' : ''}`).join(','),
+        name: participantName(fallbackKey),
+        owners: remotes
+          .map((item) => `${item.participantId}${participantName(item.participantId) ? ` ${participantName(item.participantId)}` : ''}${item.muted ? '(muted)' : ''}`)
+          .join(','),
       })
     }
     lastFallbackFocus = result.fallback ? fallbackKey : ''
@@ -1007,6 +1100,7 @@ export async function connectJitsiConference(input: {
       if (userId && !jitsiTrack.isLocal()) {
         pushTrace('note', muted ? 'Удалённый микрофон выключен' : 'Удалённый микрофон включён', {
           participantId: userId,
+          name: remoteNames.get(userId) ?? '',
         })
       }
       syncModelMixer()
@@ -1123,9 +1217,14 @@ export async function connectJitsiConference(input: {
     setModelHearOnly(participantId) {
       const changed = participantId !== modelHearOnlyId
       modelHearOnlyId = participantId
+      if (changed) {
+        // Новый фокус — сторожка тишины начинает с нуля.
+        focusFailOpen = false
+        focusQuietRun = 0
+      }
       syncModelMixer()
       if (changed) {
-        pushTrace('note', 'Модель: фокус микшера', { focus: participantId })
+        pushTrace('note', 'Модель: фокус микшера', { focus: participantId, name: participantName(String(participantId ?? '')) })
         openHearWindow(participantId)
       }
     },
