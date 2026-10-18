@@ -48,6 +48,8 @@ type AnswerUtterance = {
   itemId: string | null
   durationMs: number
   state: 'pending' | 'judged' | 'failed'
+  /** Сообщение из чата конференции вместо речи: оценка по тексту, без аудио-судьи. */
+  chatText?: string
   /** Модель: answer — разборчивая попытка ответа; stall — заминка/«щас»/смех; noise — не речь. */
   speech?: 'answer' | 'stall' | 'noise'
   /** Модель почти уверена: игрок перебирает варианты наугад. */
@@ -61,6 +63,7 @@ let audioRequestSequence = 0
 type GameActor = Actor<typeof gameMachine>
 
 export type GameControllerActions = {
+  chatAnswer: (playerName: string, text: string) => void
   remindMutedAnswerer: (playerName: string) => void
   /** Выбор вопроса: модель сама формулирует короткую фразу, каждый раз новую. */
   /** Мастер: микрофон выбирающего стабильно выключен (true) или включился (false). */
@@ -1464,7 +1467,7 @@ export function attachController(options: {
     // Глобальные поля попытки — на время оценки этой реплики (оценки идут по одной, по порядку).
     answerItemId = utterance.itemId
     answerDurationMs = utterance.durationMs
-    answerTranscript = ''
+    answerTranscript = utterance.chatText ?? ''
     answerConfidence = null
     answerSource = 'text'
     const abort = new AbortController()
@@ -1488,15 +1491,20 @@ export function attachController(options: {
   async function requestTextJudgment(run: NonNullable<typeof judgeRun>): Promise<void> {
     const { context, itemId } = run
     // Та же формула, что везде (transcriptWaitMs), но не дольше оставшегося окна оценки.
+    // Чат-реплика: текст уже известен, транскриптора не ждём.
     const answerWait = Math.min(transcriptWaitMs(answerDurationMs), run.clock.remaining())
-    const heard = itemId
-      ? await run.clock.within(() => client.waitForTranscript(itemId, answerWait), answerWait)
-      : { text: '', arrived: false, confidence: null as number | null }
+    const heard = run.utterance.chatText != null
+      ? { text: run.utterance.chatText, arrived: true, confidence: null as number | null }
+      : itemId
+        ? await run.clock.within(() => client.waitForTranscript(itemId, answerWait), answerWait)
+        : { text: '', arrived: false, confidence: null as number | null }
     await run.clock.active()
     if (!judgeLive(run) || run.clock.remaining() <= 0) return
+    // Чат-реплика напечатана игроком вручную: эхо подсказок и фантом Whisper к ней неприменимы.
+    const chatTyped = run.utterance.chatText != null
     const answerPrompt = answerPromptFor(context)
-    const echo = echoesAnswerPrompt(heard.text, answerPrompt)
-    const phantom = !echo && phantomListedAnswer(heard.text, answerPrompt, answerDurationMs, heard.confidence)
+    const echo = chatTyped ? false : echoesAnswerPrompt(heard.text, answerPrompt)
+    const phantom = !chatTyped && !echo && phantomListedAnswer(heard.text, answerPrompt, answerDurationMs, heard.confidence)
     if (phantom && run.mode !== 'audio' && run.itemId && client.judgmentCapabilities().isolatedAudioReference) {
       // Эталон в подсказке нужен для выдуманных слов, но короткая или неуверенная расшифровка, равная эталону,
       // может быть подстановкой распознавателя: перепроверяем по самому аудио, тексту не верим вслепую.
@@ -1931,7 +1939,35 @@ export function attachController(options: {
     actor.send({ type: 'ANSWER_JUDGED', judgment: decision.judgment })
   }
 
+  /** Ответ текстом из чата конференции: только тот, чей ход; реплики хода — как речь. */
+  function chatAnswer(playerName: string, text: string): void {
+    const clean = text.replace(/\s+/g, ' ').trim()
+    if (!clean) return
+    const path = statePath(actor.getSnapshot().value)
+    if (path !== 'answering.waiting' && path !== 'answering.hearing' && path !== 'answering.settling') return
+    const context = actor.getSnapshot().context
+    const player = context.players.find((item) => item.id === context.activePlayerId)
+    if (!player || player.name !== playerName) {
+      pushTrace('note', `чат-ответ: не ход ${playerName || '—'} (ход ${player?.name ?? '—'}), сообщение игнорю`)
+      return
+    }
+    if (answerTurn.some((u) => u.state === 'pending' && u.chatText === clean)) return
+    // Приблизительная длительность — для формул ожидания и подсказки распознавания, как у короткой речи.
+    const durationMs = Math.max(600, Math.min(6000, Math.round((clean.length * 1000) / 12)))
+    const utterance: AnswerUtterance = { order: ++answerSeq, itemId: null, durationMs, state: 'pending', heard: '', chatText: clean }
+    answerTurn.push(utterance)
+    pushTrace('note', `ответ: реплика #${utterance.order} из чата (${player.name}) — в оценку`, { attemptId: context.attemptId })
+    lastAnswerSpeechAt = Date.now()
+    answerSpeechEndAt = Date.now()
+    if (path !== 'answering.settling') actor.send({ type: 'PLAYER_SPEECH_FINISHED' })
+    answerQueue.push(utterance)
+    runNextAnswerJudgment()
+    settleAnswer()
+  }
+
+
   onActions?.({
+    chatAnswer,
     remindMutedAnswerer(playerName) {
       if (statePath(actor.getSnapshot().value) !== 'answering.waiting') return
       if (Date.now() - lastAnswerSpeechAt < gameConfig.mutedAnswerReminderMs) {
@@ -2215,12 +2251,13 @@ export function buzzCallCue(playerName: string): string {
   })
 }
 
+
 /** Подсказка отвечающему: один раз за попытку, формулировку модель выбирает сама. */
 export function mutedAnswerMicCue(playerName: string): string {
   const name = playerName.trim() || 'Игрок'
   return hostCue({
-    situation: `Отвечает после кнопки игрок: ${name}. Микрофон выключен — ведущая реплику не слышит.`,
-    goal: `Обратись к отвечающему по имени и напомни, что микрофон выключен.`,
+    situation: `Отвечает после кнопки игрок: ${name}. Микрофон выключен, реплику не распознать.`,
+    goal: `Обратись к отвечающему по имени: спроси, не выключен ли микрофон, и напомни, что ответ можно написать текстом в чат.`,
     constraints: [
       boardSecrets,
       'Одна короткая фраза. Таймер ответа словами не останавливай и попытку не закрывай. Правильный ответ не произноси.',

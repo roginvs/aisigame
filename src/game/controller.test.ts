@@ -366,7 +366,8 @@ describe('attachController answer listening', () => {
     expect(cue).toContain('Игрок 1')
     expect(cue).toContain('Ситуация:')
     expect(cue).toContain('Отвечает после кнопки')
-    expect(cue).toContain('микрофон выключен')
+    expect(cue).toContain('микрофон')
+    expect(cue).toContain('чат')
     expect(cue).not.toContain('микрофон-то выключен')
     await vi.advanceTimersByTimeAsync(80)
     expect(statePath(actor.getSnapshot().value)).toBe('answering.waiting')
@@ -459,6 +460,36 @@ describe('attachController answer listening', () => {
     )
     expect(statePath(actor.getSnapshot().value)).toBe('choosing.listening')
     expect(actor.getSnapshot().context.activeQuestionId).toBeNull()
+
+    stop()
+    actor.stop()
+  })
+
+  it('ответ сообщением в чат: реплика того, чей ход, идёт в оценку, чужое — игнорируется', async () => {
+    const client = new MockRealtimeClient()
+    const requestTool = vi.spyOn(client, 'requestTool')
+    const { actor, stop, actions } = await boot(client)
+    actor.send({ type: 'QUESTION_SELECTED', themeId: 'p', value: 400 })
+    await vi.advanceTimersByTimeAsync(gameConfig.cellFlashMs + 80)
+    actor.send({ type: 'BUZZER_PRESSED', playerId: 1 })
+    expect(statePath(actor.getSnapshot().value)).toBe('answering.waiting')
+
+    // Сообщение не отвечающего — не трогает попытку.
+    const judgeBefore = judgeLines().length
+    actions().chatAnswer('Игрок 2', 'ответ')
+    await vi.advanceTimersByTimeAsync(100)
+    expect(statePath(actor.getSnapshot().value)).toBe('answering.waiting')
+    expect(requestTool).not.toHaveBeenCalledWith('judge', expect.anything(), 'submitAnswerJudgment', expect.anything(), expect.anything())
+    expect(judgeLines().length).toBe(judgeBefore)
+
+    // Сообщение отвечающего — реплика попытки, эталон засчитывается локально без модели.
+    actions().chatAnswer('Игрок 1', 'ответ')
+    await vi.advanceTimersByTimeAsync(100)
+    expect(statePath(actor.getSnapshot().value)).toBe('answering.settling')
+    expect(getTrace().some((entry) => entry.kind === 'note' && entry.title.includes('из чата'))).toBe(true)
+    await vi.advanceTimersByTimeAsync(answerSilenceDecideMs + 400)
+    expect(actor.getSnapshot().context.players[0]?.score).toBe(400)
+    expect(statePath(actor.getSnapshot().value)).toBe('choosing.listening')
 
     stop()
     actor.stop()

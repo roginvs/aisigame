@@ -879,10 +879,13 @@ export default function App() {
           const persisted = persistConferenceHistory(roomId, next)
           if (persisted) setSavedGame(persisted)
         },
+        onChatLine: (name, text) => controllerActionsRef.current?.chatAnswer(name, text),
         isRoomSpeaking: () => conferenceHandleRef.current?.anyoneSpeaking() ?? false,
         resumePlayers: restoringGame ? resume?.saved.players : undefined,
         usePackPipe: !useBroadcast,
-        onSnapshot: setMasterSnapshot,
+        onSnapshot: (snapshot) => {
+          setMasterSnapshot(snapshot)
+        },
         // Кто есть кто в Jitsi — в снимок всем (пары и служебные id), не по именам.
         conferenceIds: () => ({ self: handle.localParticipantId(), ...handle.serviceIds() }),
       })

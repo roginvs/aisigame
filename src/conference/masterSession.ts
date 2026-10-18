@@ -60,6 +60,8 @@ export type MasterSessionOptions = {
   onRoster: () => void
   messageRing?: ConferenceMessageRing
   onHistory?: (history: ConferenceMessageRing) => void
+  /** Участник написал в чат: мастер-имя и текст. Контроллер сам решит, ответ ли это в попытке. */
+  onChatLine?: (name: string, text: string) => void
   /** Игроки сохранённой партии. Если переданы, лобби не объявляется и не рассылается. */
   resumePlayers?: readonly Player[]
   /** Речь людей в комнате (без «Ведущей»): лобби ждёт тишину перед репликой. */
@@ -111,6 +113,7 @@ export class MasterSession {
   private onRosterCb: () => void
   private initialHistory: ConferenceMessageRing
   private onHistory: (history: ConferenceMessageRing) => void
+  private onChatLineCb: ((name: string, text: string) => void) | null = null
   private isRoomSpeaking: () => boolean
   private machineSub: { unsubscribe: () => void } | null = null
   private masterClientId: string
@@ -160,6 +163,7 @@ export class MasterSession {
     }
     this.initialHistory = options.messageRing ?? emptyMessageRing()
     this.onHistory = options.onHistory ?? (() => {})
+    this.onChatLineCb = options.onChatLine ?? null
     this.isRoomSpeaking = options.isRoomSpeaking ?? (() => false)
     this.roster = new ConferenceRoster(options.masterClientId, options.masterName)
     this.verified.add(options.masterClientId)
@@ -341,6 +345,7 @@ export class MasterSession {
     const clean = text.trim()
     if (!clean) return
     this.broadcastMessage({ kind: 'chat', name, text: clean, at: new Date().toISOString() })
+    this.onChatLineCb?.(name, clean)
   }
 
   dispose(): void {
