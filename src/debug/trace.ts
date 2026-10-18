@@ -1,5 +1,6 @@
 import { stageWordsIn } from './stageWords.ts'
 import { buildCommit, pageOrigin } from '../buildInfo.ts'
+import { perfWatchSummary } from './perfWatch.ts'
 import type { JudgmentStatus } from '../game/types.ts'
 
 export type TraceKind = 'in' | 'out' | 'state' | 'chat' | 'note'
@@ -415,6 +416,8 @@ export function formatDebugDump(extra: { path: string; context: unknown }, store
   }
   lines.push(`origin: ${pageOrigin() || '—'}`)
   lines.push(`commit: ${buildCommit()}`)
+  const perf = perfWatchSummary()
+  if (perf) lines.push(perf)
   return lines.join('\n')
 }
 

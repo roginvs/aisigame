@@ -4,6 +4,7 @@ import { setAppealScale } from './game/appeals.ts'
 import { useMachine } from '@xstate/react'
 import { gameSoundRoute, gameSoundStream, markGameSoundsBroken, playAuctionDing, playCatMeow, playTimeoutBeep, setGameSoundRoute, unlockAudio } from './audio/beep.ts'
 import { debugLogGame, joinDebugLogFor, noteSession, pushErrorLine, pushSystemLine, pushTrace, startDebugLogFor, wipeDebugLog } from './debug/trace.ts'
+import { startPerfWatch } from './debug/perfWatch.ts'
 import { gameSoundsErrorText, gameSoundsRestoredText } from './conference/media.ts'
 import { buildInviteUrl, parseInvite } from './conference/invite.ts'
 import { JoinerSession } from './conference/joinerSession.ts'
@@ -154,6 +155,10 @@ export default function App() {
   const masterSessionRef = useRef<MasterSession | null>(null)
   const joinerSessionRef = useRef<JoinerSession | null>(null)
   // Кончились заготовленные <audio>: мастер пишет строку в чат сам, игрок шлёт мастеру — у всех одна строка.
+  useEffect(() => {
+    // Наблюдение за главным потоком (longtask): следующий дамп покажет, что грузит страницу.
+    startPerfWatch()
+  }, [])
   useEffect(() => subscribeConferenceSinkCreated(({ owner }) => {
     const joiner = joinerSessionRef.current
     if (joiner) joiner.sendAudioSinkNote(owner)

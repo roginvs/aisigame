@@ -16,8 +16,7 @@ import type { ConferenceMessage } from './messages.ts'
 import { isConferenceMessage } from './messages.ts'
 import type { ConferenceTransport } from './transport.ts'
 import { createHearWindow } from './hearWindow.ts'
-import { hearWindowSampleMs, modelLevelsUpdateMs, tileLevelSampleMs } from '../options.ts'
-import { displayLevel, resetModelLevels, setModelLevels } from './modelLevels.ts'
+import { hearWindowSampleMs, tileLevelSampleMs } from '../options.ts'
 import { createMicMixer, type MicMixer, type MixerRemote } from './audioMix.ts'
 import { cameraFacing, isMobileCameraDevice, nextCameraDeviceId, shouldMirrorVideo, switchFacingCamera, type CameraFacing } from './camera.ts'
 import { createSpeakerActivity } from './speakerActivity.ts'
@@ -508,19 +507,6 @@ export async function connectJitsiConference(input: {
       modelMixer.reattach(key)
       syncModelMixer()
     }
-  }
-
-  let levelsTimer: number | null = null
-  /** Уровни после микшера → индикатор мастера (игрокам не рассылаются). */
-  function publishModelLevels(): void {
-    if (!modelMixer) return
-    const byParticipant: Record<string, number> = {}
-    for (const item of modelMixer.levels()) {
-      const id = item.key === 'local' ? localId() : mixerOwners.get(item.key) ?? ''
-      if (!id) continue
-      byParticipant[id] = Math.max(byParticipant[id] ?? 0, displayLevel(item.postRms))
-    }
-    setModelLevels({ total: displayLevel(modelMixer.busLevel().rms), byParticipant })
   }
 
   function openHearWindow(focus: string | false | null): void {
@@ -1123,7 +1109,6 @@ export async function connectJitsiConference(input: {
     localMicStream: () => localMicMedia,
     modelInputStream: () => {
       if (!modelMixer) {
-        levelsTimer = window.setInterval(publishModelLevels, modelLevelsUpdateMs)
         modelMixer = createMicMixer((event) => {
           pushTrace('note', 'Модель: источник микса', {
             ...event,
@@ -1305,8 +1290,6 @@ export async function connectJitsiConference(input: {
       soundsHandle = null
       transport.close()
       closeHearWindow()
-      if (levelsTimer !== null) window.clearInterval(levelsTimer)
-      resetModelLevels()
       stopOwnLevelFeed()
       ownLevelMonitor?.stop()
       ownLevelMonitor = null
