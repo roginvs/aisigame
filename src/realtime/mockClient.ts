@@ -420,6 +420,10 @@ function hostLine(purpose: string, instructions = ''): string {
   if (purpose === 'finished') return 'Игра окончена.'
   if (purpose === 'bet') return 'Назовите ставку.'
   if (purpose === 'turn') return 'Ваш ответ.'
+  if (purpose === 'finalIntro') return 'Ответ вводим на табло: короткий ответ, 30 секунд.'
+  if (purpose === 'finalTyped') return 'Напечатайте короткий ответ на табло.'
+  if (purpose === 'stake') return 'Смотрим ставку.'
+  if (purpose === 'score') return 'Ставка раскрыта.'
   if (purpose === 'appeal') return 'Повторите ответ, пожалуйста.'
   if (purpose === 'roundSummary') return 'Раунд окончен. Впереди следующий раунд.'
   if (purpose === 'buzzCall') {

@@ -158,43 +158,6 @@ describe('запасной разбор моделью в коте и аукци
   })
 })
 
-describe('ставка финала: тот же запасной путь', () => {
-  it('parseBet не понял — finalBet с пределом денег в схеме, ва-банк принимается', async () => {
-    const finalPack: QuestionPack = {
-      name: 'Ф',
-      rounds: [{ index: 0, name: 'Р', kind: 'normal' }, { index: 1, name: 'Финал', kind: 'final' }],
-      questions: [
-        { ...base, id: 'n100', themeId: 't', themeName: 'Обычная', value: 100 },
-        { ...base, roundIndex: 1, id: 'f1', themeId: 'f', themeName: 'Финальная', value: 0 },
-      ],
-      warnings: [],
-    }
-    const client = new SpyClient()
-    vi.useFakeTimers()
-    vi.stubGlobal('window', {
-      setTimeout: (handler: TimerHandler, timeout?: number) => globalThis.setTimeout(handler, timeout),
-      clearTimeout: (id: number) => globalThis.clearTimeout(id),
-    })
-    const actor = createActor(gameMachine).start()
-    const stop = attachController({ actor, client, getApiKey: () => 'k', setLink: () => {}, onActions: () => {} })
-    actor.send({ type: 'START_GAME', pack: finalPack, players: [{ id: 1, name: 'Анна', score: 800 }] })
-    await vi.advanceTimersByTimeAsync(2000)
-    actor.send({ type: 'NEXT_ROUND' })
-    for (let i = 0; i < 100 && !statePath(actor.getSnapshot().value).startsWith('finalBets.hearing'); i += 1) {
-      if (statePath(actor.getSnapshot().value) === 'choosing.listening') actor.send({ type: 'QUESTION_SELECTED', themeId: 'f', value: 0 })
-      await vi.advanceTimersByTimeAsync(100)
-    }
-    expect(statePath(actor.getSnapshot().value)).toBe('finalBets.hearing')
-    client.hear('ну я иду до конца', 1200)
-    for (let i = 0; i < 40 && actor.getSnapshot().context.bets.length === 0; i += 1) await vi.advanceTimersByTimeAsync(100)
-    const tool = client.tools.find((item) => item.name === 'finalBet')!
-    expect(tool.instructions).toContain('от 0 до 800')
-    expect(tool.schema).toMatchObject({ parameters: { properties: { amount: { minimum: 0, maximum: 800 } } } })
-    expect(actor.getSnapshot().context.bets).toEqual([expect.objectContaining({ playerId: 1, amount: 800 })])
-    stop(); actor.stop()
-  })
-})
-
 describe('ранний слух: запрос уже на табло, ведущая ещё говорит', () => {
   it('кот: получатель и ставка голосом до конца речи ведущей', async () => {
     const client = new SpyClient()

@@ -35,7 +35,7 @@ import { messageRingEntries } from './conference/messageRing.ts'
 import { attachController, specialListenerId, type GameControllerActions } from './game/controller.ts'
 import { defaultPlayerNames, playersFromNames } from './game/players.ts'
 import { appealRequestError } from './game/appeals.ts'
-import { gameMachine, statePath } from './game/machine.ts'
+import { finalStrikerTurnOpen, gameMachine, statePath } from './game/machine.ts'
 import {
   clearSavedGame,
   confirmNewGame,
@@ -1317,6 +1317,7 @@ export default function App() {
               falseStartIds: [],
               falseStarts: {},
               bets: {},
+              stakedIds: [],
               betMisses: 0,
               activeStake: null,
               attemptId: 0,
@@ -1380,6 +1381,28 @@ export default function App() {
         else if (pick.target === 'stake') send({ type: 'CAT_STAKE', playerId, amount: pick.amount })
         else send({ type: 'AUCTION_BID', playerId, option: pick.option })
       }}
+      onFinalStake={(playerId, amount) => {
+        if (conferenceRole === 'joiner') {
+          joinerSessionRef.current?.sendFinalStake(amount)
+          return
+        }
+        if (conferenceRole === 'master') {
+          const player = actor.getSnapshot().context.players.find((item) => item.id === playerId)
+          if (player?.clientId !== masterClientId) return
+        }
+        send({ type: 'FINAL_STAKE', playerId, amount })
+      }}
+      onFinalAnswer={(playerId, text) => {
+        if (conferenceRole === 'joiner') {
+          joinerSessionRef.current?.sendFinalAnswer(text)
+          return
+        }
+        if (conferenceRole === 'master') {
+          const player = actor.getSnapshot().context.players.find((item) => item.id === playerId)
+          if (player?.clientId !== masterClientId) return
+        }
+        send({ type: 'FINAL_TYPED', playerId, text })
+      }}
       onBuzz={(playerId: PlayerId) => {
         if (conferenceRole === 'joiner') {
           joinerSessionRef.current?.sendBuzz()
@@ -1398,8 +1421,10 @@ export default function App() {
         }
         if (conferenceRole === 'master') {
           const current = actor.getSnapshot().context
-          const chooser = current.players.find((player) => player.id === current.chooserId)
-          if (chooser?.clientId !== masterClientId) return
+          const allowed = current.players.find((player) => player.id === current.chooserId)?.clientId === masterClientId ||
+            (finalStrikerTurnOpen(current) && current.finalStriker !== undefined &&
+              current.players.find((player) => player.id === current.finalStriker)?.clientId === masterClientId)
+          if (!allowed) return
         }
         send({ type: 'QUESTION_SELECTED', themeId, value })
       }}

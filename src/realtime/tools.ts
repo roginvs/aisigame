@@ -116,24 +116,6 @@ export const auctionBidTool = {
   },
 } as const
 
-/** Ставка финала: сумма от 0 до денег игрока или ва-банк; предел подставляется в схему на каждый запрос. */
-export const finalBetTool = {
-  type: 'function',
-  name: 'finalBet',
-  description: 'Какую ставку в финале назвал игрок. Если неясно — unclear=true.',
-  parameters: {
-    type: 'object',
-    additionalProperties: false,
-    properties: {
-      amount: { type: 'integer', minimum: 0, description: 'Названная сумма; при ва-банке или неясности 0.' },
-      allIn: { type: 'boolean', description: 'true, если игрок идёт ва-банк.' },
-      unclear: { type: 'boolean', description: 'true, если ставку не разобрать.' },
-      heard: { type: 'string', description: 'Дословно, что сказал игрок.' },
-    },
-    required: ['amount', 'allIn', 'unclear', 'heard'],
-  },
-} as const
-
 type ToolSchema = { name: string; parameters: { properties: Record<string, object> } }
 
 function narrow<T extends ToolSchema>(tool: T, patch: Record<string, object>): T {
@@ -160,12 +142,7 @@ export function auctionBidToolFor(options: Array<{ kind: 'pass' | 'stake' | 'all
   })
 }
 
-/** finalBet с потолком — деньги игрока. */
-export function finalBetToolFor(max: number): typeof finalBetTool {
-  return narrow(finalBetTool, { amount: { minimum: 0, maximum: Math.max(0, max) } })
-}
-
-export const sessionTools = [selectQuestionTool, submitAnswerJudgmentTool, selectCatRecipientTool, pickCatStakeTool, auctionBidTool, finalBetTool]
+export const sessionTools = [selectQuestionTool, submitAnswerJudgmentTool, selectCatRecipientTool, pickCatStakeTool, auctionBidTool]
 
 /** Назначение tool-вызова по имени: так controller узнаёт, кому ответ. */
 export const toolPurposes: Record<string, string> = {
@@ -174,5 +151,4 @@ export const toolPurposes: Record<string, string> = {
   selectCatRecipient: 'catPick',
   pickCatStake: 'specialBid',
   auctionBid: 'specialBid',
-  finalBet: 'specialBid',
 }

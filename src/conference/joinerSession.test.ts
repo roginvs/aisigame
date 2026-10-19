@@ -121,6 +121,7 @@ function snapshot(phase = 'lobby', commit = buildCommit()): SnapshotMessage {
     falseStartIds: [],
     falseStarts: {},
     bets: {},
+    stakedIds: [],
     betMisses: 0,
     activeStake: null,
     attemptId: 0,

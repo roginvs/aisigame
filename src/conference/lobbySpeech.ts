@@ -21,7 +21,7 @@ export type LobbySpeechFacts = {
   publicContext?: string
 }
 
-/** Видимые гости (не мастер): все скачали и нажали «готов». */
+/** Видимые гости (не мастер): все скачали и нажали кнопку готовности. */
 export function lobbyEveryoneReady(roster: RosterEntry[]): boolean {
   const guests = roster.filter((entry) => !entry.hidden && !entry.isMaster)
   return guests.length > 0 && guests.every((entry) => entry.hashOk && entry.ready)
@@ -35,7 +35,7 @@ export function lobbyRosterStatusLine(entry: RosterEntry): string {
     const eta = formatEta(entry.etaSeconds)
     load = eta ? `качает, ${entry.percent}%, ещё ${eta}` : `качает, ${entry.percent}%`
   }
-  const ready = entry.ready ? ', готов' : entry.hashOk ? ', ещё не нажал «готов»' : ''
+  const ready = entry.ready ? ', кнопка нажата' : entry.hashOk ? ', кнопка ещё не нажата' : ''
   return `- ${entry.name}: ${load}${ready}`
 }
 
@@ -45,7 +45,7 @@ export function lobbySpeechInstructions(facts: LobbySpeechFacts): string {
   const waiting = visible.filter((entry) => !entry.isMaster && !(entry.hashOk && entry.ready))
   const lines: string[] = [
     'Лобби до старта партии. Статусы ниже — источник правды.',
-    'Скажи бодро и коротко, одно-два предложения, что видишь и что происходит: кто в комнате, кого ждём и что у них — загрузка с оценкой времени, если она есть, сверка пакета или ещё не нажали «готов».',
+    'Скажи бодро и коротко, одно-два предложения, что видишь и что происходит: кто в комнате, кого ждём и что у них — загрузка с оценкой времени, если она есть, сверка пакета или ещё без кнопки готовности.',
     'Игроков называй только по имени, без ролей; поручений не давай.',
     everyoneReady ? 'Все готовы: скажи, что можно начинать; кнопку сама не жми.' : 'Ещё не все готовы: старт не обещай.',
     'Проценты по одному и скорость загрузки не называй; время без оценки не выдумывай. Можно подхватить недавний разговор.',

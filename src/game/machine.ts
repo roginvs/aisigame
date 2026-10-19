@@ -3,11 +3,12 @@ import { auctionOptions, nextAuctionBidder, sameOption } from './auction.ts'
 import { autoCatRecipient, nextInCircle } from './cat.ts'
 import { appealMsLeft, appealRequestError, appealStake, appealWindowMs, eligibleAppealPlayers, settleOutcome } from './appeals.ts'
 import { gameConfig } from '../config.ts'
-import { answerOverrunSafetyMs, answerUtteranceJudgeMs, catAwayWaitMs } from '../options.ts'
+import { answerOverrunSafetyMs, answerUtteranceJudgeMs, catAwayWaitMs, finalStakeMs, finalTypedMs } from '../options.ts'
 import { advanceIdle, enterIdle, idleDelay, idleIsFinal, idleThresholds, pauseIdle, type IdleKind } from './idle.ts'
 import { questionSpeech } from './choices.ts'
+import { exactAnswer } from './judgment.ts'
 import { earlyBuzzerMsFor } from './earlyBuzzer.ts'
-import { findQuestion, nextPlayableRound, questionById, questionsInRound } from './pack.ts'
+import { findQuestion, nextPlayableRound, questionById, questionsInRound, roundThemes } from './pack.ts'
 import { answererStatus, defaultPlayers, openingChooser } from './players.ts'
 import { demoPack } from './questions.ts'
 import { answerHasClip, publicAnswerHasPlayable } from './reveal.ts'
@@ -50,6 +51,11 @@ function blankMatch(pack: QuestionPack, players?: Player[]): GameContext {
     finalCursor: 0,
     bets: [],
     betMisses: 0,
+    finalStriker: openingChooser(roster, 0),
+    struckThemes: [],
+    typedAnswers: {},
+    revealedIds: [],
+    stakeShownIds: [],
     activeStake: null,
     activeQuestionId: null,
     activePlayerId: null,
@@ -199,14 +205,91 @@ function changeScore(context: GameContext, playerId: PlayerId | null, delta: num
   )
 }
 
+/** Темы финала, ещё не вычеркнутые игроками. */
+function openFinalThemes(context: GameContext): { id: string; name: string }[] {
+  if (!isFinal(context)) return []
+  return roundThemes(context.questions, context.roundIndex).filter((theme) => !(context.struckThemes ?? []).includes(theme.id))
+}
+
+/** Клик по табло в финале = удар, пока тем открыто больше одной; в остальном выбор закрыт до finalDraft. */
+function strikeThemeOf(context: GameContext, event: GameEvent): string | null {
+  if (event.type === 'STRIKE_THEME') return event.themeId
+  if (event.type === 'QUESTION_SELECTED' && isFinal(context) && openFinalThemes(context).length > 1) {
+    return event.themeId
+  }
+  return null
+}
+
+/** Вычеркнуть тему может только тот, чей сейчас ход вычёркивания, и только открытую тему финала. */
+function strikeValid(context: GameContext, event: GameEvent): boolean {
+  const themeId = strikeThemeOf(context, event)
+  if (!themeId || !isFinal(context)) return false
+  if (event.type === 'STRIKE_THEME' && event.playerId !== context.finalStriker) return false
+  return openFinalThemes(context).some((theme) => theme.id === themeId)
+}
+
+/** Вычеркнута последняя из двух открытых тем — после этого удара остаётся одна. */
+function strikeCloses(context: GameContext, event: GameEvent): boolean {
+  if (!strikeValid(context, event)) return false
+  const struckId = strikeThemeOf(context, event) ?? ''
+  return openFinalThemes(context).filter((theme) => theme.id !== struckId).length <= 1
+}
+
+/** Темы финала, которые открыты больше одной — идёт круг вычёркивания. */ 
+export function finalStrikerTurnOpen(context: GameContext): boolean {
+  return isFinal(context) && openFinalThemes(context).length > 1 && context.finalStriker !== undefined
+}
+
+/** Финал: напечатанный ответ, который решается без модели — пусто (неверно) или точное совпадение с эталоном. */
+function typedInstantVerdict(context: GameContext): { status: JudgmentStatus; heard: string } | null {
+  const playerId = context.activePlayerId
+  const question = questionById(context.questions, context.activeQuestionId)
+  if (!playerId || !question) return null
+  const text = (context.typedAnswers?.[playerId] ?? '').replace(/\s+/g, ' ').trim()
+  if (!text) return { status: 'incorrect', heard: '' }
+  if (exactAnswer(text, question.answers)) return { status: 'correct', heard: text }
+  return null
+}
+
+/** Вердикт финала — по статусу оценки: counter correct/incorrect, спорное — unclear. */
+function verdictKind(event: GameEvent): AnnounceKind | null {
+  if (event.type !== 'ANSWER_JUDGED') return null
+  if (event.judgment.status === 'correct') return 'correct'
+  if (event.judgment.status === 'incorrect') return 'incorrect'
+  return 'unclear'
+}
+
+function verdictLabel(status: JudgmentStatus): string {
+  if (status === 'correct') return 'Верно'
+  if (status === 'incorrect') return 'Неверно'
+  return 'Ответ спорный'
+}
+
+/** Итоговая строка финала: победитель — лучший счёт; при равенстве — все лидеры. */
+function finalResultLine(context: GameContext): string {
+  const best = Math.max(...context.players.map((player) => player.score))
+  const winners = context.players.filter((player) => player.score === best).map((player) => player.name)
+  const winnerName = winners[0] ?? ''
+  return winners.length === 1 ? `Победитель: ${winnerName}` : `Победители: ${winners.join(', ')}`
+}
+
 function showsClock(path: string): boolean {
-  return path === 'buzzing' || path === 'buzzing.open' || path === 'buzzing.reminding' || path === 'answering.waiting'
+  return (
+    path === 'buzzing' ||
+    path === 'buzzing.open' ||
+    path === 'buzzing.reminding' ||
+    path === 'answering.waiting' ||
+    path === 'finalBets.collecting' ||
+    path === 'finalTyped'
+  )
 }
 
 function clockMs(path: string, missedIds: readonly PlayerId[] = [], clarifications = 0): number | null {
   if (path === 'buzzing' || path === 'buzzing.open' || path === 'buzzing.reminding') {
     return missedIds.length > 0 ? gameConfig.stealBuzzerMs : gameConfig.buzzerMs
   }
+  if (path === 'finalBets.collecting') return finalStakeMs
+  if (path === 'finalTyped') return finalTypedMs
   if (path === 'answering.waiting') return clarifications > 0 ? gameConfig.clarifyMs : gameConfig.answerMs
   return null
 }
@@ -364,6 +447,8 @@ export const gameMachine = setup({
     judgeMs: gameConfig.judgeMs,
     answerSettleSafetyMs: answerOverrunSafetyMs + answerUtteranceJudgeMs,
     cellFlashMs: gameConfig.cellFlashMs,
+    deadlineFinalStake: finalStakeMs,
+    deadlineFinalTyped: finalTypedMs,
     earlyLeft: ({ context }) => context.earlyLeftMs ?? gameConfig.earlyBuzzerMs,
     // С момента показа: пока играет звук/ролик — до max; потом (или без клипа) — добрать до min.
     answerHoldLeft: ({ context }) => answerHoldLeft(context, Date.now()),
@@ -881,7 +966,8 @@ export const gameMachine = setup({
         const stake = stakeOf(context)
         const delta = status === 'correct' ? stake : status === 'incorrect' ? -stake : 0
         if (status === 'near_miss') return context.players
-        return isFinal(context) ? changeScore(context, event.judgment.playerId, delta) : settleOutcome(context, delta, status === 'correct').players
+        // В финале очки уходят публично, только при раскрытии ставки (revealFinalStake).
+        return isFinal(context) ? context.players : settleOutcome(context, delta, status === 'correct').players
       },
       missedIds: ({ context, event }) => {
         const status = outcomeStatus(context, event)
@@ -1006,9 +1092,21 @@ export const gameMachine = setup({
       },
       activeQuestionId: () => null,
       activePlayerId: () => null,
-      chooserId: ({ context }) => openingChooser(context.players, context.roundIndex),
+      chooserId: ({ context }) => {
+        // assign применяет все присваивания к исходному контексту: следующий индекс считаем здесь.
+        const next = nextPlayableRound(context.rounds, context.questions, context.roundIndex)
+        return openingChooser(context.players, next === -1 ? context.roundIndex : next)
+      },
       missedIds: () => [],
       activeStake: () => null,
+      finalStriker: ({ context }) => {
+        const next = nextPlayableRound(context.rounds, context.questions, context.roundIndex)
+        return openingChooser(context.players, next === -1 ? context.roundIndex : next)
+      },
+      struckThemes: () => [],
+      typedAnswers: () => ({}),
+      revealedIds: () => [],
+      stakeShownIds: () => [],
       finalists: () => [],
       finalCursor: () => 0,
       bets: () => [],
@@ -1062,41 +1160,149 @@ export const gameMachine = setup({
       pauseStartedAt: () => null,
     }),
     prepareFinalists: assign({
+      // В финале играют все: у игроков с нулём или минусом ставка 0. Разбор идёт по возрастанию счёта.
       finalists: ({ context }) =>
-        context.players
-          .filter((player) => player.score > 0)
+        [...context.players]
           .sort((left, right) => left.score - right.score || left.id - right.id)
           .map((player) => player.id),
       finalCursor: () => 0,
       bets: () => [],
       betMisses: () => 0,
     }),
-    placeBet: assign({
-      bets: ({ context, event }) =>
-        event.type === 'BET_PLACED' ? [...context.bets, { playerId: event.playerId, amount: event.amount }] : context.bets,
-      betMisses: () => 0,
+    /** Финал: готовим круг вычёркивания тем — начинает выбирающий финального раунда. */
+    prepareFinalDraft: assign({
+      // Темы/ставки чистятся в advanceRound при входе в финальный раунд; удар уже учтён.
+      statusLine: () => 'Тема вычеркнута — объявляю финал',
+      phaseStartedAt: () => null,
+      phaseDurationMs: () => null,
     }),
-    placeMinimumBet: assign({
-      bets: ({ context }) => {
-        const playerId = currentFinalist(context)
-        if (!playerId) return context.bets
-        return [...context.bets, { playerId, amount: 1 }]
+    applyStrike: assign({
+      struckThemes: ({ context, event }) => {
+        const themeId = strikeThemeOf(context, event)
+        if (!themeId || (context.struckThemes ?? []).includes(themeId)) return context.struckThemes
+        return [...(context.struckThemes ?? []), themeId]
       },
-      betMisses: () => 0,
-      statusLine: () => 'Ставка 1',
+      finalStriker: ({ context }) => nextInCircle(context.players, context.finalStriker ?? 1) ?? context.finalStriker,
+      statusLine: ({ context }) =>
+        context.finalStriker ? `${playerName(context, context.finalStriker)} вычеркнул тему` : 'Тема вычеркнута',
     }),
-    noteBetRetry: assign({
-      betMisses: ({ context }) => context.betMisses + 1,
-      statusLine: () => 'Назовите ставку ещё раз',
+    openFinalQuestion: assign({
+      // Осталась одна открытая тема — играем её; в финале с единственной темой остаётся вычеркнутая.
+      activeQuestionId: ({ context }) => {
+        const themes = roundThemes(context.questions, context.roundIndex)
+        const open = openFinalThemes(context)
+        const theme = open[0] ?? themes.find((item) => (context.struckThemes ?? []).includes(item.id)) ?? null
+        if (!theme) return context.activeQuestionId
+        const question = findQuestion(context.questions, context.roundIndex, theme.id, 0, 'final', context.playedIds)
+        return question?.id ?? context.activeQuestionId
+      },
+      statusLine: () => 'Открываю вопрос',
     }),
-    nextBettor: assign({
-      finalCursor: ({ context }) => context.finalCursor + 1,
-      betMisses: () => 0,
+    placeTypedStake: assign({
+      bets: ({ context, event }) => {
+        if (event.type !== 'FINAL_STAKE') return context.bets
+        return [...context.bets.filter((bet) => bet.playerId !== event.playerId), { playerId: event.playerId, amount: event.amount }]
+      },
     }),
-    armFinalAnswers: assign({
-      finalCursor: () => 0,
-      betMisses: () => 0,
-      activePlayerId: () => null,
+    startFinalStakeTimer: assign({
+      statusLine: () => 'Ставки скрыты: введите ставку',
+      phaseStartedAt: () => Date.now(),
+      phaseDurationMs: () => finalStakeMs,
+    }),
+    stopPhaseClock: assign({
+      phaseStartedAt: () => null,
+      phaseDurationMs: () => null,
+    }),
+    fillMissingStakes: assign({
+      // Кто не успел — ставка 0: счёт не меняется.
+      bets: ({ context }) => [
+        ...context.bets,
+        ...context.finalists
+          .filter((id) => !context.bets.some((bet) => bet.playerId === id))
+          .map((id) => ({ playerId: id, amount: 0 })),
+      ],
+    }),
+    resetTypedAnswers: assign({
+      typedAnswers: () => ({}),
+      revealedIds: () => [],
+    }),
+    startFinalTypedTimer: assign({
+      statusLine: () => 'Отвечайте на табло',
+      phaseStartedAt: () => Date.now(),
+      phaseDurationMs: () => finalTypedMs,
+    }),
+    storeTypedAnswer: assign({
+      typedAnswers: ({ context, event }) => {
+        if (event.type !== 'FINAL_TYPED') return context.typedAnswers
+        return { ...(context.typedAnswers ?? {}), [event.playerId]: event.text }
+      },
+    }),
+    fillMissingTypedAnswers: assign({
+      // Пустой ответ — минус ставки, как честно напечатанный неверный.
+      typedAnswers: ({ context }) => {
+        const answers: Partial<Record<PlayerId, string>> = { ...(context.typedAnswers ?? {}) }
+        for (const id of context.finalists) answers[id] ??= ''
+        return answers
+      },
+    }),
+    showTypedAnswer: assign({
+      revealedIds: ({ context }) =>
+        context.activePlayerId && !(context.revealedIds ?? []).includes(context.activePlayerId)
+          ? [...(context.revealedIds ?? []), context.activePlayerId]
+          : context.revealedIds,
+      statusLine: ({ context }) => `Смотрим ответ: ${playerName(context, context.activePlayerId)}`,
+    }),
+    applyFinalVerdict: assign({
+      judgmentStatus: ({ event }) => (event.type === 'ANSWER_JUDGED' ? event.judgment.status : null),
+      judgmentReason: ({ event }) => (event.type === 'ANSWER_JUDGED' ? event.judgment.reason : ''),
+      heard: ({ event }) => (event.type === 'ANSWER_JUDGED' ? event.judgment.heard : ''),
+      announceKind: ({ event }) => verdictKind(event),
+      statusLine: ({ event }) => (event.type === 'ANSWER_JUDGED' ? verdictLabel(event.judgment.status) : 'Ведущая оценивает ответ'),
+      phaseStartedAt: () => null,
+      phaseDurationMs: () => null,
+    }),
+    finalJudgeFailed: assign({
+      // Оценка не пришла: счёт не меняем, но ход объявляем.
+      announceKind: () => 'unclear' as AnnounceKind,
+      statusLine: () => 'Оценка не успела — счёт без изменений',
+      phaseStartedAt: () => null,
+      phaseDurationMs: () => null,
+    }),
+    applyTypedVerdict: assign({
+      // Мгновенный вердикт напечатанного ответа — модель не участвует.
+      judgmentStatus: ({ context }) => typedInstantVerdict(context)?.status ?? null,
+      heard: ({ context }) => typedInstantVerdict(context)?.heard ?? '',
+      statusLine: ({ context }) => verdictLabel(typedInstantVerdict(context)?.status ?? 'incorrect'),
+      phaseStartedAt: () => null,
+      phaseDurationMs: () => null,
+    }),
+    revealFinalStake: assign({
+      // Очки меняются открыто, в момент разбора ставки.
+      players: ({ context }) => {
+        const playerId = context.activePlayerId
+        const stake = context.activeStake ?? 0
+        if (!playerId) return context.players
+        const delta = context.judgmentStatus === 'correct' ? stake : context.judgmentStatus === 'incorrect' ? -stake : 0
+        return changeScore(context, playerId, delta)
+      },
+      stakeShownIds: ({ context }) =>
+        context.activePlayerId && !(context.stakeShownIds ?? []).includes(context.activePlayerId)
+          ? [...(context.stakeShownIds ?? []), context.activePlayerId]
+          : context.stakeShownIds,
+      statusLine: ({ context }) => `Ставка ${playerName(context, context.activePlayerId)} — ${context.activeStake ?? 0}`,
+      phaseStartedAt: () => null,
+      phaseDurationMs: () => null,
+    }),
+    clearJudgment: assign({
+      judgmentStatus: () => null,
+      judgmentReason: () => '',
+      announceKind: () => null,
+      heard: () => '',
+    }),
+    closeFinalQuestion: assign({
+      // Финальный вопрос сыгран целиком, только когда разобраны все финалисты.
+      playedIds: ({ context }) => withPlayed(context.playedIds, context.activeQuestionId),
+      statusLine: ({ context }) => finalResultLine(context),
     }),
     addPlayer: assign({
       players: ({ context, event }) => {
@@ -1150,8 +1356,10 @@ export const gameMachine = setup({
     purposeAnnounce: ({ event }) => event.type === 'HOST_AUDIO_FINISHED' && event.purpose === 'announce',
     purposeFinished: ({ event }) => event.type === 'HOST_AUDIO_FINISHED' && event.purpose === 'finished',
     purposeBridge: ({ event }) => event.type === 'HOST_AUDIO_FINISHED' && event.purpose === 'bridge',
-    purposeBet: ({ event }) => event.type === 'HOST_AUDIO_FINISHED' && event.purpose === 'bet',
     purposeTurn: ({ event }) => event.type === 'HOST_AUDIO_FINISHED' && event.purpose === 'turn',
+    purposeFinalIntro: ({ event }) => event.type === 'HOST_AUDIO_FINISHED' && event.purpose === 'finalIntro',
+    purposeStake: ({ event }) => event.type === 'HOST_AUDIO_FINISHED' && event.purpose === 'stake',
+    purposeScore: ({ event }) => event.type === 'HOST_AUDIO_FINISHED' && event.purpose === 'score',
     purposeChooserHandoff: ({ event }) =>
       event.type === 'HOST_AUDIO_FINISHED' && event.purpose === 'chooserHandoff',
     purposeFalseStart: ({ event }) => event.type === 'HOST_AUDIO_FINISHED' && event.purpose === 'falseStart',
@@ -1197,7 +1405,7 @@ export const gameMachine = setup({
       roundFinished(context) &&
       nextPlayableRound(context.rounds, context.questions, context.roundIndex) === -1,
     questionAvailable: ({ context, event }) => {
-      if (event.type !== 'QUESTION_SELECTED') return false
+      if (event.type !== 'QUESTION_SELECTED' || isFinal(context)) return false
       const question = findQuestion(
         context.questions,
         context.roundIndex,
@@ -1208,37 +1416,27 @@ export const gameMachine = setup({
       )
       return Boolean(question && !context.playedIds.includes(question.id))
     },
-    finalQuestion: ({ context, event }) => {
-      if (event.type !== 'QUESTION_SELECTED' || !isFinal(context)) return false
-      const question = findQuestion(
-        context.questions,
-        context.roundIndex,
-        event.themeId,
-        event.value,
-        'final',
-        context.playedIds,
-      )
-      return Boolean(question && !context.playedIds.includes(question.id) && context.players.some((player) => player.score > 0))
+    validFinalStrike: ({ context, event }) => strikeValid(context, event),
+    strikeClosesThemes: ({ context, event }) => strikeCloses(context, event),
+    moreReveals: ({ context }) => context.finalCursor < context.finalists.length - 1,
+    validFinalStake: ({ context, event }) => {
+      if (event.type !== 'FINAL_STAKE') return false
+      if (!context.players.some((player) => player.id === event.playerId)) return false
+      if (context.bets.some((bet) => bet.playerId === event.playerId)) return false
+      const score = playerScore(context, event.playerId)
+      return Number.isFinite(event.amount) && Number.isInteger(event.amount) && event.amount >= 0 && event.amount <= score
     },
-    finalWithoutPlayers: ({ context, event }) => {
-      if (event.type !== 'QUESTION_SELECTED' || !isFinal(context)) return false
-      const question = findQuestion(
-        context.questions,
-        context.roundIndex,
-        event.themeId,
-        event.value,
-        'final',
-        context.playedIds,
-      )
-      return Boolean(question && context.players.every((player) => player.score <= 0))
+    finalAllStaked: ({ context }) =>
+      context.finalists.length > 0 && context.finalists.every((id) => context.bets.some((bet) => bet.playerId === id)),
+    validFinalTyped: ({ context, event }) => {
+      if (event.type !== 'FINAL_TYPED') return false
+      if (!context.players.some((player) => player.id === event.playerId)) return false
+      if (context.typedAnswers?.[event.playerId] !== undefined) return false
+      return typeof event.text === 'string' && event.text.length <= 200
     },
-    betMatches: ({ context, event }) => {
-      if (event.type !== 'BET_PLACED') return false
-      const playerId = currentFinalist(context)
-      return event.playerId === playerId && event.amount >= 1 && event.amount <= playerScore(context, playerId)
-    },
-    betGiveUp: ({ context }) => context.betMisses >= 1,
-    moreBets: ({ context }) => context.finalCursor < context.finalists.length - 1,
+    finalAllTyped: ({ context }) =>
+      context.finalists.length > 0 &&
+      context.finalists.every((id) => context.typedAnswers?.[id] !== undefined),
     validPlayer: ({ context, event }) =>
       event.type === 'BUZZER_PRESSED' &&
       inRoster(context, event.playerId) &&
@@ -1250,6 +1448,9 @@ export const gameMachine = setup({
       !isFinal(context) &&
       !isSpecial(context) &&
       !falseStartCooling(context.falseStarts[event.playerId], Date.now()),
+    typedInstantVerdict: ({ context }) =>
+      // Пустой ответ или точный эталон решает машина: модель звать не нужно.
+      Boolean(typedInstantVerdict(context)),
     othersCanAnswer: ({ context, event }) =>
       event.type === 'HOST_AUDIO_FINISHED' &&
       event.purpose === 'announce' &&
@@ -1309,7 +1510,7 @@ export const gameMachine = setup({
       { guard: and([not(stateIn('paused')), not(stateIn('stopped')), not(stateIn('failed')), 'closedAppeal', 'validAppeal']), actions: 'queueAppeal' },
       // До раскрытия ответа (ячейка открыта): игрок повторяет ответ.
       { guard: and([not(stateIn('paused')), 'validAppeal', 'openStageAppeal', or([stateIn('buzzing'), stateIn('announcing')])]), target: '.appealCue', actions: 'acceptAppeal' },
-      // После раскрытия (ячейка закрыта): без повтора — игрок подтвердил «я ответил правильно».
+      // После раскрытия (ячейка закрыта): без повтора — игрок подтвердил кнопку апелляции.
       { guard: and([not(stateIn('paused')), 'validAppeal', 'closedStageAppeal', or([stateIn('choosing'), stateIn('roundSummaryWindow'), stateIn('announcing')])]), target: '.appealConfirm', actions: ['acceptAppeal', 'confirmClosedAppeal'] },
     ],
     SPECIAL_PLAYER_OFFLINE: [
@@ -1392,7 +1593,14 @@ export const gameMachine = setup({
         },
         { guard: ({ context }) => context.resumePath === 'bridging', target: 'bridging', actions: 'clearResume' },
         { guard: ({ context }) => context.resumePath === 'turnCue', target: 'turnCue', actions: 'clearResume' },
-        { guard: ({ context }) => context.resumePath === 'finalBets.asking', target: 'finalBets.asking', actions: 'clearResume' },
+        { guard: ({ context }) => context.resumePath === 'finalDraft', target: 'finalDraft', actions: 'clearResume' },
+        { guard: ({ context }) => context.resumePath === 'finalBets.collecting', target: 'finalBets.collecting', actions: 'clearResume' },
+        { guard: ({ context }) => context.resumePath === 'finalTyped', target: 'finalTyped', actions: 'clearResume' },
+        { guard: ({ context }) => context.resumePath === 'finalReveal.look', target: 'finalReveal.look', actions: 'clearResume' },
+        { guard: ({ context }) => context.resumePath === 'finalReveal.verdict', target: 'finalReveal.verdict', actions: 'clearResume' },
+        { guard: ({ context }) => context.resumePath === 'finalReveal.stakeCue', target: 'finalReveal.stakeCue', actions: 'clearResume' },
+        { guard: ({ context }) => context.resumePath === 'finalReveal.scoreCue', target: 'finalReveal.scoreCue', actions: 'clearResume' },
+        { guard: ({ context }) => context.resumePath === 'wrapUp', target: 'wrapUp', actions: 'clearResume' },
         { guard: ({ context }) => context.resumePath === 'finished', target: 'finished', actions: 'clearResume' },
         { target: 'choosing.listening', actions: 'clearResume' },
       ],
@@ -1413,6 +1621,11 @@ export const gameMachine = setup({
           target: '#game.chooserHandoff',
           actions: 'handoffChooser',
         },
+        // Финал: игроки по кругу вычёркивают темы, пока не останется одна.
+        STRIKE_THEME: [
+          { guard: 'strikeClosesThemes', target: 'finalDraft', actions: 'applyStrike' },
+          { guard: 'validFinalStrike', target: 'choosing.listening', reenter: true, actions: 'applyStrike' },
+        ],
       },
       states: {
         listening: {
@@ -1423,10 +1636,11 @@ export const gameMachine = setup({
             HOST_TALKING: { target: 'listening', reenter: true, actions: ['idleTalk', 'noteTalk'] },
             PLAYER_SPEECH_FINISHED: 'resolving',
             QUESTION_SELECTED: [
-              { guard: 'finalWithoutPlayers', target: '#game.finished' },
-              { guard: 'finalQuestion', target: '#game.finalBets', actions: ['openQuestion', 'prepareFinalists'] },
               { guard: 'selectedCat', target: '#game.cat', actions: ['openQuestion', 'startCat'] },
               { guard: 'selectedAuction', target: '#game.auction', actions: ['openQuestion', 'startAuction'] },
+              // Финал: клик по таблицу тем — вычеркнуть тему (голос или кнопка).
+              { guard: 'strikeClosesThemes', target: '#game.finalDraft', actions: 'applyStrike' },
+              { guard: 'validFinalStrike', target: 'listening', reenter: true, actions: 'applyStrike' },
               { guard: 'questionAvailable', target: '#game.flashing', actions: 'openQuestion' },
               { target: 'clarifying', actions: 'noteUnavailable' },
             ],
@@ -1438,14 +1652,15 @@ export const gameMachine = setup({
           after: { judgeMs: { target: 'listening', actions: 'selectionTimeout' } },
           on: {
             QUESTION_SELECTED: [
-              { guard: 'finalWithoutPlayers', target: '#game.finished' },
-              { guard: 'finalQuestion', target: '#game.finalBets', actions: ['openQuestion', 'prepareFinalists'] },
               { guard: 'selectedCat', target: '#game.cat', actions: ['openQuestion', 'startCat'] },
               { guard: 'selectedAuction', target: '#game.auction', actions: ['openQuestion', 'startAuction'] },
+              // Финал: клик по таблице тем — вычеркнуть (голос разбирается моделью так же, как выбор).
+              { guard: 'strikeClosesThemes', target: '#game.finalDraft', actions: 'applyStrike' },
+              { guard: 'validFinalStrike', target: 'listening', reenter: true, actions: 'applyStrike' },
               { guard: 'questionAvailable', target: '#game.flashing', actions: 'openQuestion' },
               { target: 'clarifying', actions: 'noteUnavailable' },
             ],
-            QUESTION_UNCLEAR: { target: 'clarifying', actions: 'noteUnclear' },
+            QUESTION_UNCLEAR: { target: 'listening', actions: 'noteUnclear' },
             SELECTION_FAILED: { target: 'listening', actions: 'noteUnclear' },
           },
         },
@@ -1459,10 +1674,10 @@ export const gameMachine = setup({
             PLAYER_SPEECH_STARTED: { target: 'listening', actions: 'setChoosingStatus' },
             // Табло кликабельно и во время уточнения ведущей.
             QUESTION_SELECTED: [
-              { guard: 'finalWithoutPlayers', target: '#game.finished' },
-              { guard: 'finalQuestion', target: '#game.finalBets', actions: ['openQuestion', 'prepareFinalists'] },
               { guard: 'selectedCat', target: '#game.cat', actions: ['openQuestion', 'startCat'] },
               { guard: 'selectedAuction', target: '#game.auction', actions: ['openQuestion', 'startAuction'] },
+              { guard: 'strikeClosesThemes', target: '#game.finalDraft', actions: 'applyStrike' },
+              { guard: 'validFinalStrike', target: 'listening', reenter: true, actions: 'applyStrike' },
               { guard: 'questionAvailable', target: '#game.flashing', actions: 'openQuestion' },
             ],
           },
@@ -1474,12 +1689,16 @@ export const gameMachine = setup({
         HOST_AUDIO_FINISHED: { guard: 'purposeChooserHandoff', target: 'choosing' },
         // Новый выбирающий может говорить, пока ведущая ещё объявляет передачу хода.
         PLAYER_SPEECH_STARTED: 'choosing',
+        STRIKE_THEME: [
+          { guard: 'strikeClosesThemes', target: '#game.finalDraft', actions: 'applyStrike' },
+          { guard: 'validFinalStrike', actions: 'applyStrike' },
+        ],
         // …и кликнуть ячейку.
         QUESTION_SELECTED: [
-          { guard: 'finalWithoutPlayers', target: '#game.finished' },
-          { guard: 'finalQuestion', target: '#game.finalBets', actions: ['openQuestion', 'prepareFinalists'] },
           { guard: 'selectedCat', target: '#game.cat', actions: ['openQuestion', 'startCat'] },
           { guard: 'selectedAuction', target: '#game.auction', actions: ['openQuestion', 'startAuction'] },
+          { guard: 'strikeClosesThemes', target: '#game.finalDraft', actions: 'applyStrike' },
+          { guard: 'validFinalStrike', actions: 'applyStrike' },
           { guard: 'questionAvailable', target: '#game.flashing', actions: 'openQuestion' },
         ],
       },
@@ -1787,54 +2006,103 @@ export const gameMachine = setup({
         HOST_AUDIO_FINISHED: { guard: 'purposeBridge', target: 'choosing' },
       },
     },
-    finalBets: {
-      initial: 'asking',
-      states: {
-        asking: {
-          on: {
-            HOST_AUDIO_FINISHED: { guard: 'purposeBet', target: 'hearing' },
-            PLAYER_SPEECH_FINISHED: 'resolving',
-          },
-        },
-        hearing: {
-          after: {
-            answerMs: [
-              { guard: 'betGiveUp', target: 'placed', actions: 'placeMinimumBet' },
-              { target: 'asking', actions: 'noteBetRetry', reenter: true },
-            ],
-          },
-          on: {
-            PLAYER_SPEECH_FINISHED: 'resolving',
-          },
-        },
-        resolving: {
-          after: {
-            judgeMs: [
-              { guard: 'betGiveUp', target: 'placed', actions: 'placeMinimumBet' },
-              { target: 'asking', actions: 'noteBetRetry', reenter: true },
-            ],
-          },
-          on: {
-            BET_PLACED: { guard: 'betMatches', target: 'placed', actions: 'placeBet' },
-            BET_UNCLEAR: [
-              { guard: 'betGiveUp', target: 'placed', actions: 'placeMinimumBet' },
-              { target: 'asking', actions: 'noteBetRetry', reenter: true },
-            ],
-          },
-        },
-        placed: {
-          always: [
-            { guard: 'moreBets', target: 'asking', actions: 'nextBettor', reenter: true },
-            { target: '#game.flashing', actions: 'armFinalAnswers' },
-          ],
+    /** Финал: ведущая объясняет скрытые ставки; темы уже вычеркнуты, осталась одна. */
+    finalDraft: {
+      entry: 'prepareFinalDraft',
+      on: {
+        HOST_AUDIO_FINISHED: {
+          guard: 'purposeFinalIntro',
+          target: '#game.finalBets',
+          actions: 'prepareFinalists',
         },
       },
     },
-    turnCue: {
-      entry: 'assignFinalAnswerer',
+    /** Финал: скрытые ставки на табло (печатают сами игроки, машина их не показывает до разбора). */
+    finalBets: {
+      initial: 'collecting',
+      states: {
+        collecting: {
+          entry: 'startFinalStakeTimer',
+          always: { guard: 'finalAllStaked', target: '#game.flashing', actions: ['openFinalQuestion', 'stopPhaseClock'] },
+          after: {
+            deadlineFinalStake: {
+              target: '#game.flashing',
+              actions: ['fillMissingStakes', 'openFinalQuestion', 'stopPhaseClock'],
+            },
+          },
+          on: {
+            FINAL_STAKE: {
+              guard: 'validFinalStake',
+              target: 'collecting',
+              reenter: true,
+              actions: 'placeTypedStake',
+            },
+          },
+        },
+      },
+    },
+    /** Финал: ответы печатают на табло, скрыто; после окна — последовательный разбор. */
+    finalTyped: {
+      entry: ['startFinalTypedTimer'],
+      always: { guard: 'finalAllTyped', target: '#game.finalReveal', actions: 'stopPhaseClock' },
+      after: {
+        deadlineFinalTyped: { target: '#game.finalReveal', actions: ['fillMissingTypedAnswers', 'stopPhaseClock'] },
+      },
       on: {
-        HOST_AUDIO_FINISHED: { guard: 'purposeTurn', target: 'answering' },
-        PLAYER_SPEECH_STARTED: 'answering',
+        FINAL_TYPED: {
+          guard: 'validFinalTyped',
+          target: 'finalTyped',
+          reenter: true,
+          actions: 'storeTypedAnswer',
+        },
+      },
+    },
+    /** Финал: последовательный разбор — ответ, вердикт, ставка, финальный счёт; от меньшего счёта вверх. */
+    finalReveal: {
+      initial: 'look',
+      states: {
+        look: {
+          entry: ['assignFinalAnswerer', 'showTypedAnswer'],
+          // Пустой ответ или точное совпадение с эталоном решает машина, модель только для остального.
+          always: [{ guard: 'typedInstantVerdict', target: 'verdict', actions: 'applyTypedVerdict' }],
+          after: { judgeMs: { target: 'verdict', actions: 'finalJudgeFailed' } },
+          on: {
+            ANSWER_JUDGED: { guard: 'judgmentMatches', target: 'verdict', actions: 'applyFinalVerdict' },
+            ANSWER_JUDGE_FAILED: { target: 'verdict', actions: 'finalJudgeFailed' },
+          },
+        },
+        verdict: {
+          on: {
+            HOST_AUDIO_FINISHED: { guard: 'purposeAnnounce', target: 'stakeCue' },
+          },
+        },
+        stakeCue: {
+          on: {
+            HOST_AUDIO_FINISHED: { guard: 'purposeStake', target: 'scoreCue', actions: 'revealFinalStake' },
+          },
+        },
+        scoreCue: {
+          on: {
+            HOST_AUDIO_FINISHED: [
+              { guard: and(['moreReveals', 'purposeScore']), target: 'look', actions: ['nextFinalist', 'clearJudgment'], reenter: true },
+              { guard: 'purposeScore', target: '#game.wrapUp' },
+            ],
+          },
+        },
+      },
+    },
+    /** Финал: все ответы разобраны — ведущая называет финальный счёт и победителя. */
+    wrapUp: {
+      entry: 'closeFinalQuestion',
+      on: {
+        HOST_AUDIO_FINISHED: { guard: 'purposeBridge', target: '#game.finished' },
+      },
+    },
+    turnCue: {
+      // Ход финалиста: ответы финала начинаем с пустого набора.
+      entry: ['assignFinalAnswerer', 'resetTypedAnswers'],
+      on: {
+        HOST_AUDIO_FINISHED: { guard: 'purposeTurn', target: '#game.finalTyped' },
       },
     },
     buzzing: {
@@ -1988,9 +2256,14 @@ export const gameMachine = setup({
             actions: 'resumeClock',
           },
           { guard: ({ context }) => context.resumePath === 'turnCue', target: 'turnCue', actions: 'resumeClock' },
-          { guard: ({ context }) => context.resumePath === 'finalBets.asking', target: 'finalBets.asking', actions: 'resumeClock' },
-          { guard: ({ context }) => context.resumePath === 'finalBets.hearing', target: 'finalBets.hearing', actions: 'resumeClock' },
-          { guard: ({ context }) => context.resumePath === 'finalBets.resolving', target: 'finalBets.resolving', actions: 'resumeClock' },
+          { guard: ({ context }) => context.resumePath === 'finalDraft', target: 'finalDraft', actions: 'clearResume' },
+          { guard: ({ context }) => context.resumePath === 'finalBets.collecting', target: 'finalBets.collecting', actions: 'resumeClock' },
+          { guard: ({ context }) => context.resumePath === 'finalTyped', target: 'finalTyped', actions: 'resumeClock' },
+          { guard: ({ context }) => context.resumePath === 'finalReveal.look', target: 'finalReveal.look', actions: 'clearResume' },
+          { guard: ({ context }) => context.resumePath === 'finalReveal.verdict', target: 'finalReveal.verdict', actions: 'clearResume' },
+          { guard: ({ context }) => context.resumePath === 'finalReveal.stakeCue', target: 'finalReveal.stakeCue', actions: 'clearResume' },
+          { guard: ({ context }) => context.resumePath === 'finalReveal.scoreCue', target: 'finalReveal.scoreCue', actions: 'clearResume' },
+          { guard: ({ context }) => context.resumePath === 'wrapUp', target: 'wrapUp', actions: 'clearResume' },
           { guard: ({ context }) => context.resumePath === 'finished', target: 'finished', actions: 'resumeClock' },
         ],
       },

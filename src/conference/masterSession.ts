@@ -7,7 +7,8 @@ import { appealRequestError } from '../game/appeals.ts'
 import type { Actor, SnapshotFrom } from 'xstate'
 import type { GameVoice } from '../realtime/client.ts'
 import { gameMachine } from '../game/machine.ts'
-import { pickOpen, statePath } from '../game/machine.ts'
+import { finalStrikerTurnOpen, pickOpen, statePath } from '../game/machine.ts'
+import { roundThemes } from '../game/pack.ts'
 import type { GameContext, Player, QuestionPack } from '../game/types.ts'
 import { buildConferenceSnapshot, jitsiPairs, timerRemainingMs, type ConferenceJitsiIds } from './buildSnapshot.ts'
 import { createPackPipeHub, type PackPipeLinkState } from './packPipe.ts'
@@ -549,12 +550,31 @@ export class MasterSession {
       if (!this.gameStarted) this.broadcastCurrentSnapshot()
       return
     }
+    if (message.type === 'finalStake') {
+      if (!this.gameStarted || !this.verified.has(message.clientId)) return
+      const sender = this.roster.get(message.clientId)?.playerId
+      if (!sender) return
+      this.actor.send({ type: 'FINAL_STAKE', playerId: sender, amount: message.amount })
+      return
+    }
+    if (message.type === 'finalAnswer') {
+      if (!this.gameStarted || !this.verified.has(message.clientId)) return
+      const sender = this.roster.get(message.clientId)?.playerId
+      if (!sender) return
+      this.actor.send({ type: 'FINAL_TYPED', playerId: sender, text: message.text })
+      return
+    }
     if (message.type === 'pick') {
       if (!this.gameStarted || !this.verified.has(message.clientId)) return
       const snap = this.actor.getSnapshot()
       const path = statePath(snap.value)
       if (!pickOpen(path, snap.context)) return
-      if (snap.context.chooserId !== this.roster.get(message.clientId)?.playerId) return
+      const sender = this.roster.get(message.clientId)?.playerId
+      if (sender === undefined) return
+      // В финале темы вычёркивает тот, чей удар по кругу, а не всегда выбирающий раунда.
+      const allowed = snap.context.chooserId === sender ||
+        (finalStrikerTurnOpen(snap.context) && snap.context.finalStriker === sender && roundThemes(snap.context.questions, snap.context.roundIndex).some((theme) => theme.id === message.themeId))
+      if (!allowed) return
       this.actor.send({ type: 'QUESTION_SELECTED', themeId: message.themeId, value: message.value })
       return
     }
@@ -935,6 +955,11 @@ function lobbyContext(pack: QuestionPack, masterName: string): GameContext {
     finalCursor: 0,
     bets: [],
     betMisses: 0,
+    finalStriker: 1,
+    struckThemes: [],
+    typedAnswers: {},
+    revealedIds: [],
+    stakeShownIds: [],
     chooserId: 1,
     activeQuestionId: null,
     activePlayerId: null,

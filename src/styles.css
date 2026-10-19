@@ -2269,6 +2269,88 @@ button.buzzer.chooser:disabled {
   font-size: 0.9rem;
 }
 
+/* Финал: скрытые ставки и ответы, печатают на табло. */
+.final-entry-list {
+  flex-direction: column;
+  align-items: stretch;
+}
+.final-entry-done,
+.final-entry-wait {
+  margin: 2px 0;
+  font-size: 1rem;
+  opacity: 0.8;
+}
+.final-entry-field {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+  width: 100%;
+}
+.final-entry-field label {
+  font-weight: 700;
+}
+.final-entry-hint {
+  font-weight: 400;
+  opacity: 0.7;
+}
+.final-entry-field input {
+  flex: 1 1 120px;
+  min-height: 44px;
+  padding: 0 10px;
+  font-size: 1.05rem;
+  border: 2px solid currentColor;
+  border-radius: 8px;
+  background: transparent;
+  color: inherit;
+}
+.final-entry-field button {
+  min-height: 44px;
+  flex: 0 0 auto;
+  font-weight: 800;
+}
+
+/* Разбор финала: список ответов с вердиктом и ставкой. */
+.final-reveal {
+  list-style: none;
+  padding: 0;
+  margin: 8px auto 0;
+  width: min(100%, 640px);
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  font-size: 1rem;
+}
+.final-reveal li {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: baseline;
+  padding: 4px 8px;
+  border: 1px solid rgb(128 148 166 / 30%);
+  border-radius: 8px;
+}
+.final-reveal li.is-current {
+  border-color: currentColor;
+  border-width: 2px;
+}
+.final-reveal-name {
+  font-weight: 800;
+}
+.final-reveal-answer {
+  flex: 1 1 auto;
+  min-width: 120px;
+}
+.final-reveal-mark {
+  font-weight: 800;
+}
+.final-reveal-mark.incorrect { color: #e05a4f; }
+.final-reveal-mark.correct { color: #3aa55c; }
+.final-reveal-stake {
+  font-variant-numeric: tabular-nums;
+  opacity: 0.85;
+}
+
 .bubble.from-error {
   border-left: 3px solid #e05a4f;
   background: rgb(224 90 79 / 14%);

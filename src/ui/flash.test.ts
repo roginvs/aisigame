@@ -22,6 +22,6 @@ describe('вспышки', () => {
   })
   it('Countdown перемонтируется по ключу окна', () => {
     const src = readFileSync(join(process.cwd(), 'src/ui/GameScreen.tsx'), 'utf8')
-    expect(src.match(/<Countdown key=\{timerKey\}/g)?.length).toBe(2)
+    expect(src.match(/<Countdown key=\{timerKey\}/g)?.length).toBe(3)
   })
 })

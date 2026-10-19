@@ -31,9 +31,10 @@ export function anchoredPhaseStart(snapshot: ConferenceSnapshot, renderNow = Dat
 }
 
 export function contextFromSnapshot(snapshot: ConferenceSnapshot, pack: QuestionPack): GameContext {
-  const bets = Object.entries(snapshot.bets).map(([playerId, amount]) => ({
-    playerId: Number(playerId),
-    amount,
+  // Скрытые ставки: в комнату уходит только факт ставки, суммы раскрываются при разборе.
+  const bets = (snapshot.stakedIds ?? []).map((playerId) => ({
+    playerId,
+    amount: snapshot.bets?.[String(playerId)] ?? 0,
   }))
   const falseStarts: GameContext['falseStarts'] = {}
   for (const [id, stamp] of Object.entries(snapshot.falseStarts)) falseStarts[Number(id)] = stamp
@@ -60,6 +61,17 @@ export function contextFromSnapshot(snapshot: ConferenceSnapshot, pack: Question
     finalCursor: snapshot.finalCursor,
     bets,
     betMisses: snapshot.betMisses,
+    finalStriker: snapshot.finalStriker ?? snapshot.chooserId ?? snapshot.players[0]?.id ?? 1,
+    struckThemes: [...(snapshot.struckThemes ?? [])],
+    typedAnswers: Object.fromEntries(
+      Object.entries(snapshot.typedAnswers ?? {}).map(([id, text]) => [Number(id), text]),
+    ),
+    revealedIds: [...(snapshot.revealedIds ?? [])],
+    stakeShownIds: [...(snapshot.stakeShownIds ?? [])],
+    typedIds: snapshot.typedIds ?? [],
+    stakes: Object.fromEntries(
+      Object.entries(snapshot.stakes ?? {}).map(([id, amount]) => [Number(id), amount]),
+    ),
     chooserId: snapshot.chooserId ?? snapshot.players[0]?.id ?? 1,
     activeQuestionId: snapshot.activeQuestionId,
     activePlayerId: snapshot.answererId,

@@ -22,6 +22,11 @@ export type SpeechPurpose =
   | 'chooserHandoff'
   | 'micWarning'
   | 'buzzCall'
+  | 'strike'
+  | 'finalIntro'
+  | 'finalTyped'
+  | 'stake'
+  | 'score'
   | 'noBuzzer'
   | 'falseStart'
   | 'appeal'
@@ -215,6 +220,13 @@ export type SavedMatch = AppealFields & {
 }
 
 export type GameEvent =
+  | {
+      type: 'STRIKE_THEME'
+      playerId: PlayerId
+      themeId: string
+    }
+  | { type: 'FINAL_STAKE'; playerId: PlayerId; amount: number }
+  | { type: 'FINAL_TYPED'; playerId: PlayerId; text: string }
   | ({ type: 'APPEAL_REQUESTED' } & AppealRequest)
   | { type: 'START_GAME'; pack: QuestionPack; players?: Player[] }
   | { type: 'CONTINUE_GAME'; pack: QuestionPack; saved: SavedMatch }
@@ -272,6 +284,20 @@ export type GameContext = AppealFields & {
   finalCursor: number
   bets: Bet[]
   betMisses: number
+  /** Кто вычеркнул темы в финале: идёт по кругу от выбирающего раунда, до одной открытой темы. */
+  finalStriker?: PlayerId
+  /** Темы финала, которые игроки вычеркнули по очереди. */
+  struckThemes?: string[]
+  /** Скрытые напечатанные ответы финала (по playerId); видны на табло только после разбора. */
+  typedAnswers?: Partial<Record<PlayerId, string>>
+  /** Финал: кто уже напечатал ответ (обо всех, суммы и текст не раскрываются до разбора). */
+  typedIds?: PlayerId[]
+  /** Финал: уже раскрытые ставки (только для stakeShownIds). */
+  stakes?: Partial<Record<PlayerId, number>>
+  /** Ответы финала, уже раскрытые на табло (порядок = порядок разбора). */
+  revealedIds?: PlayerId[]
+  /** Ставки финала, уже названные на табло ведущей, и их вердикты: id в порядке разбора. */
+  stakeShownIds?: PlayerId[]
   activeStake: number | null
   activeQuestionId: string | null
   activePlayerId: PlayerId | null

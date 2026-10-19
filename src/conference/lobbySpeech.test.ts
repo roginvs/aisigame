@@ -98,7 +98,7 @@ describe('lobbySpeechInstructions', () => {
     expect(lobbyEveryoneReady(roster)).toBe(true)
     expect(instructions).toContain('Все готовы')
     expect(instructions).toContain('можно начинать')
-    expect(lobbyRosterStatusLine(roster[1]!)).toContain('пакет сверен, готов')
+    expect(lobbyRosterStatusLine(roster[1]!)).toContain('пакет сверен, кнопка нажата')
   })
 })
 

@@ -189,15 +189,24 @@ describe('ручные апелляции', () => {
     expect(path(second)).toBe('appealConfirm')
   })
 
-  it('последний вопрос ждёт апелляции, успех меняет право входа в финал', () => {
+  it('последний вопрос ждёт апелляции; в финал идут все, ставки начинают с меньшего счёта', () => {
     const input: QuestionPack = { ...pack, rounds: [...pack.rounds, { index: 1, name: 'Финал', kind: 'final' }],
       questions: [pack.questions[0]!, { ...pack.questions[1]!, id: 'final', roundIndex: 1 }] }
-    const actor = start(input, [1]); normal(actor, 1, 'incorrect')
+    const actor = start(input, [1, 2]); normal(actor, 1, 'incorrect'); normal(actor, 2, 'incorrect')
     expect(path(actor)).toBe('roundSummaryWindow'); expect(actor.getSnapshot().context.roundIndex).toBe(0)
-    request(actor, 1); confirm(actor); say(actor)
-    expect(path(actor)).toBe('bridging'); actor.send({ type: 'HOST_AUDIO_FINISHED', purpose: 'bridge' })
-    actor.send({ type: 'QUESTION_SELECTED', themeId: 't', value: 200 })
-    expect(actor.getSnapshot().context.finalists).toEqual([1]); expect(actor.getSnapshot().context.appeal).toBeNull()
+    request(actor, 2); confirm(actor); say(actor)
+    // Подтверждённая апелляция обслуживается в том же окне итогов.
+    expect(path(actor)).toBe('roundSummaryWindow'); expect(actor.getSnapshot().context.appeal?.summary).toBe('pending')
+    actor.send({ type: 'HOST_AUDIO_FINISHED', purpose: 'roundSummary' })
+    vi.advanceTimersByTime(appealWindowMs())
+    expect(path(actor)).toBe('choosing.listening'); expect(actor.getSnapshot().context.roundIndex).toBe(1)
+    // Круг выбирающего при двух игроках: финальный раунд открывает первый.
+    expect(actor.getSnapshot().context.finalStriker).toBe(1)
+    actor.send({ type: 'STRIKE_THEME', playerId: 1, themeId: 't' })
+    expect(path(actor)).toBe('finalDraft')
+    actor.send({ type: 'HOST_AUDIO_FINISHED', purpose: 'finalIntro' })
+    // В финале играют все независимо от счёта.
+    expect(actor.getSnapshot().context.finalists).toEqual([1, 2]); expect(actor.getSnapshot().context.appeal).toBeNull()
   })
 
   it('последний вопрос без финала не объявляет победителя до конца окна', () => {

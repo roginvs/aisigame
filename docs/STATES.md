@@ -16,7 +16,9 @@
 | --- | ---: | --- |
 | `buzzerMs` | 13 000 | первое окно кнопки: вход в `reading.armed`, старт `buzzing` после чтения, восстановление, если на этом вопросе ещё никто не ошибся |
 | `stealBuzzerMs` | 5 000 | окно перехвата после чужой ошибки или молчания (`missedIds` не пуст) |
-| `answerMs` | 15 000 | молчание в `answering.waiting`, если повтор не просили; тишина ставки в `finalBets.hearing` |
+| `answerMs` | 15 000 | молчание в `answering.waiting`, если повтор не просили |
+| `finalStakeMs` | 30 000 | окно скрытых ставок в `finalBets` |
+| `finalTypedMs` | 30 000 | окно скрытых ответов в `finalTyped` |
 | `mutedAnswerReminderMs` | 3 000 | конференция: сколько микрофон должен оставаться выключенным до первой подсказки ведущей |
 | `mutedMicStableMs` | 2 500 | конференция: микрофон выбирающего считается выключенным, только если выключен столько подряд |
 | `mutedChooserMaxReminders` | 2 | сколько раз за ход выбирающего обычное напоминание говорит про микрофон |
@@ -38,11 +40,11 @@
 
 Рядом, не в `options.ts`: `maxClarifications` в `src/config.ts` равен 1. Столько раз `near_miss` просит повтор; следующий такой статус машина превращает в `incorrect`.
 
-Очки меняет ставка финала (`activeStake`), а в обычном раунде — номинал ячейки. Игроков, которые уже ошиблись или промолчали на этом вопросе, машина держит в `missedIds`: их кнопка на этом вопросе больше не принимается.
+Очки в обычном раунде меняет номинал ячейки, в финале — скрытая ставка, которую ведущая называет в `finalReveal.stakeCue`. Игроков, которые уже ошиблись или промолчали на этом вопросе, машина держит в `missedIds`: их кнопка на этом вопросе больше не принимается.
 
 ## Схемы
 
-Узлы ожидания описаны ниже. `restoring`, `afterReading` и `finalBets.placed` проходят без ожидания; `choosing`, `reading`, `finalBets`, `buzzing`, `answering`, `announcing` — составные узлы. Число узлов не является контрактом: ориентир — код машины и именованные ветки ниже. Состояния `buzzing.reminding` в машине нет: так назван только один из путей, с которых «Дальше» возвращает в `buzzing`.
+Узлы ожидания описаны ниже. `restoring`, `afterReading`, `finalBets`, `turnCue` и `finalTyped` ждут по таймеру фазы; `choosing`, `reading`, `finalReveal`, `buzzing`, `answering`, `announcing` — составные узлы. Число узлов не является контрактом: ориентир — код машины и именованные ветки ниже. Состояния `buzzing.reminding` в машине нет: так назван только один из путей, с которых «Дальше» возвращает в `buzzing`.
 
 ```mermaid
 stateDiagram-v2
@@ -57,12 +59,15 @@ stateDiagram-v2
   choosing --> chooserHandoff: выбирающий stale 10 с
   chooserHandoff --> choosing: объявила замену
   choosing --> flashing: ячейка обычного раунда
-  choosing --> finalBets: тема финала, есть кому играть
-  choosing --> finished: тема финала, все при нуле или ниже
+  choosing --> finalDraft: в финале осталась одна тема (последний удар)
+  finalDraft --> finalBets: объявила финал
   flashing --> reading: моргание кончилось
-  finalBets --> flashing: ставки собраны
+  finalBets --> flashing: ставки собраны (или 30 с)
   reading --> turnCue: финал, дочитала
-  turnCue --> answering: назвала, чей ход
+  turnCue --> finalTyped: назвала, чей ход
+  finalTyped --> finalReveal: ответы собраны (или 30 с)
+  finalReveal --> wrapUp: все разобраны
+  wrapUp --> finished: финальную речь договорила
   announcing --> bridging: раунд кончился, дальше есть раунд
   announcing --> finished: дальше раунда нет
   announcing --> choosing: ячейка закрыта, раунд ещё идёт
@@ -108,17 +113,15 @@ stateDiagram-v2
 
 ```mermaid
 stateDiagram-v2
-  state finalBets {
-    [*] --> asking
-    asking --> hearing: попросила ставку
-    hearing --> resolving: игрок договорил
-    hearing --> placed: тишина и повтор уже был
-    hearing --> asking: тишина, первый промах
-    resolving --> placed: ставка принята или сдались
-    resolving --> asking: неясно, ещё можно повторить
-    placed --> asking: есть следующий игрок
+  state finalReveal {
+    [*] --> look
+    look --> verdict: вердикт получен (мгновенно за пусто и слово-в-слово, иначе модель `finalJudge`)
+    verdict --> stakeCue: вердикт кончился
+    stakeCue --> scoreCue: назвала ставку
+    scoreCue --> look: есть следующий финалист
   }
-  finalBets --> flashing: ставки кончились
+  finalBets --> flashing: ставки собраны
+  finalTyped --> finalReveal: ответы собраны
 ```
 
 ## Узлы
@@ -131,7 +134,7 @@ stateDiagram-v2
 
 **welcoming.** Ведущая коротко здоровается и зовёт выбрать вопрос. Темы и цены не называет. Табло раунда уже есть, текст вопроса нет. Кнопки закрыты, полоски нет. Микрофон выключен, пока она говорит.
 
-**choosing.** Родитель. На входе гасит вопрос, игрока ответа, услышанное и часы. В финале статус «Выберите тему финала», иначе «назовите тему и стоимость». Кнопка выбирающего подсвечена. Дальше всегда один из детей.
+**choosing.** Родитель. На входе гасит вопрос, игрока ответа, услышанное и часы. В финале статус «Выберите тему финала», иначе «назовите тему и стоимость». В финале темы вычёркивают по кругу: удар — это `STRIKE_THEME` от текущего игрока круга (`finalStriker`) или любой `QUESTION_SELECTED` с открытой темой (клик по табло или голос): тема уходит в `struckThemes`, удар переходит по кругу всем игрокам, после удара, оставившего одну тему, — `finalDraft`. Право клика в конференции: `chooserId` или текущий `finalStriker` (мастер проверяет по `clientId`, `canPickCell` — по снимку). Кнопка… нет — подсветка табло остаётся у выбирающего; в финале кнопок нет. Дальше всегда один из детей.
 
 **choosing.listening.** Слушает выбор. Микрофон открыт. Кнопки ответа закрыты, полоски нет. Кашель ячейку не открывает: это решает контроллер и либо молчит, либо шлёт `QUESTION_UNCLEAR` или `QUESTION_SELECTED`. На входе контроллер бампит `choiceEpoch`: запоздавший транскрипт прошлой реплики или выбор до `CHOOSER_OFFLINE` ячейку не открывают. В конференции кликать поле может только `chooserId`; микс для модели сужается до выбирающего (если Jitsi id ещё нет — fail open на всех). Подсказка про выключенный микрофон и уточнение выбора идут с `conversation: none`. Если микрофон выбирающего выключен стабильно (`mutedMicStableMs`), обычное напоминание выбора (каждые 20 с) говорит не про темы, а про микрофон: ведущая сама придумывает фразу с именем. Так не больше `mutedChooserMaxReminders` раз за ход; счётчик не сбрасывается при уточнении и возврате в listening, а только при смене выбирающего или включении микрофона. Отдельного цикла нет. Неясный выбор пишет в «Оценку» «Услышала: …» и что нужны тема и стоимость. Это дополнительная реплика: состояние не меняется, часы выбора не появляются. У мастера галка «Меньше слышать» сужает микс модели до выбора/ответа/ставки (вне них — глухо; в лобби — все); статус «Слушаю Имя» / «Ничего не слышу» / «Слушаю всех». На всех конференционных экранах карточка подписана полным именем: «Вася выбирает вопрос» или «Вася выбирает тему финала».
 
@@ -157,17 +160,25 @@ stateDiagram-v2
 
 **bridging.** Между раундами. Ведущая называет имя и счёт каждого и объявляет следующий раунд или финал. Раунд уже переключён, выбирает снова игрок 2, если игроков хотя бы двое, иначе первый. Кнопки закрыты, полоски нет.
 
-**finalBets.** Родитель ставок. Сюда попадают только если тема финала выбрана и у кого-то счёт больше нуля. Список — игроки со счётом больше нуля, от меньшего к большему. Кнопок нет.
+**finalDraft.** Ведущая объясняет финал и скрытые ставки. Темы уже вычеркнуты до одной (последний удар переводил сюда через `applyStrike`); круг удара: `finalStriker` начинается от выбирающего финального раунда и крутится по всем игрокам. Полоски нет. `purposeFinalIntro` → `finalBets` (`prepareFinalists`).
 
-**finalBets.asking.** Ведущая просит текущего игрока назвать ставку от 1 до его счёта. Микрофон закрыт, пока она говорит. На входе контроллер бампит `betEpoch`.
+**finalBets.** Скрытые ставки, 30 секунд (`deadlineFinalStake`). Финалисты — все игроки, порядок разбора — счёт вверх (при равенстве — по номеру). Каждый финалист печатает ставку на табло (`FinalEntry`, событие `FINAL_STAKE`): целое от 0 до своего счёта, одной ставки достаточно — повторно ставка не принимается. В снимок конференции сумма не идёт: там только `stakedIds`, суммы раскрываются при разборе (`stakes`). Когда напечатали все (`finalAllStaked`) или истёк таймер (`fillMissingStakes` — неуспевшим 0) — `flashing`, тема моргает, на входе `openFinalQuestion` открывает единственную тему. В конференции ставка уходит сообщением `finalStake`, право проверяет мастер. На табло панель «Скрытые ставки»: свои поля ввода, у уже поставивших «Ставка принята», у чужих — «решает ставку».
 
-**finalBets.hearing.** Слушает ставку. Молчание `answerMs`: первый раз просит ещё раз, второй ставит 1. Полоски на табло нет, таймер машины есть. На входе снова `betEpoch`: запоздавшая речь прошлого финалиста ставку текущего не пишет. В конференции карточка показывает «Вася делает ставку».
+**turnCue.** Финал. На входе `assignFinalAnswerer` берёт курсор разбора (`finalCursor`) и ставку текущего финалиста в `activeStake` (ставки нет — 1). Ведущая говорит, что отвечает `<имя>` и что ответы — на табло. Кнопок нет, полоски нет. Вопрос заново не читает. `purposeTurn` → `finalTyped`.
 
-**finalBets.resolving.** Разбирает ставку, потолок `judgeMs`. Принятая ставка — целое от 1 до счёта именно этого игрока. In-flight разбор с чужим `betEpoch` отбрасывается.
+**finalTyped.** Скрытые ответы, 30 секунд (`deadlineFinalTyped`). Каждый финалист печатает ответ (`FINAL_TYPED`, до 200 символов, одного хватает). Текст в снимок не идёт до разбора — только факт `typedIds`. Все напечатали (`finalAllTyped`) или истёк таймер (`fillMissingTypedAnswers` — пустые) → `finalReveal`. Кнопок нет.
 
-**finalBets.placed.** Узел не ждёт: либо следующий игрок, либо моргание вопроса финала.
+**finalReveal.** Родитель разбора. От меньшего счёта вверх: `look` → `verdict` → `stakeCue` → `scoreCue` → следующий `look`; последний `scoreCue` → `wrapUp`.
 
-**turnCue.** Финал. На входе назначает отвечающего по курсору и его ставку (если ставки нет — 1). Ведущая говорит, чей ход. Кнопок нет, полоски нет. Вопрос заново не читает.
+**finalReveal.look.** На входе `assignFinalAnswerer` (текущий финалист) и `showTypedAnswer` (ответ раскрывается в снимке, табло печатает его в полосе разбора); статус — «Смотрим ответ <имя>», без рода. Вердикт: пустой ответ или слово-в-слово совпавший с эталоном (`typedInstantVerdict`, с нормализацией) — машина сама ставит вердикт и сразу уходит в `verdict` (`typedInstantVerdict` guard, `applyTypedVerdict`), модель не звалась; остальное судит контроллер отдельным изолированным текстовым ходом `finalJudge`; не успела модель за `judgeMs` — `verdict` c итогом «счёт не меняется» (`finalJudgeFailed`). Полоса разбора на табло (`FinalRevealStrip`) показывает по каждому финалисту имя, раскрытый ответ, вердикт и названную ставку.
+
+**finalReveal.verdict.** Ведущая коротко вердиктирует по имени (`finalVerdictCue` — только вердикт, без эталона и ставки). `purposeAnnounce` → `stakeCue`.
+
+**finalReveal.stakeCue.** «Смотрим ставку». `purposeStake` → `scoreCue` с `revealFinalStake`: очки меняются открыто в момент разбора (плюс ставки за верный, минус ставки за неверный; ставка 0 счёт не меняет), в снимок уходят `stakeShownIds` и суммы названных ставок (`stakes`).
+
+**finalReveal.scoreCue.** Новый счёт назван. `score` — дальше `look` (`nextFinalist`, `clearJudgment`), если есть кто; последний — `wrapUp`.
+
+**wrapUp.** Финальный счёт и победитель. Полоски нет. `purposeBridge` → `finished`.
 
 **buzzing.** Родитель окна кнопки. Сейчас единственный ребёнок — `open`. Кнопки открыты. Речь без кнопки часы не останавливает и не продлевает.
 
@@ -201,7 +212,7 @@ stateDiagram-v2
 
 ## Переходы
 
-**Ранний слух.** Слух открывается в момент, когда табло показало запрос игроку, а не после речи ведущей: `cat.announcing`, `cat.staking.asking`, `auction.announcing` (при автоставке `special.autoStake` реплики при объявлении — не заявки: контроллер их не разбирает), `auction.asking`, `finalBets.asking` (`PLAYER_SPEECH_FINISHED` → `resolving`) и `chooserHandoff` (`PLAYER_SPEECH_STARTED` → `choosing.listening`). Ведущая обрывается только валидным ответом (или началом речи в `chooserHandoff`/`finalBets.asking`); эхо её реплики отбрасывается через `literalRepeat`. Ответ одного игрока по просьбе ведущей тоже слушается сразу: просьба повторить (`announcing.speaking` при `announceKind = repeat`), ход финалиста (`turnCue`) и повтор при апелляции (`appealCue`) идут при открытом микрофоне; речь игрока дольше 600 мс (не эхо её реплики) обрывает ведущую и шлёт `PLAYER_SPEECH_STARTED` → `answering`, новая попытка подхватывает ту же фразу. Чтение вопроса и правила кнопки не менялись (речь во время чтения — эхо, если ≥60% слов расшифровки из вопроса или совпала с репликой ведущей; иначе `TALKED_OVER`); hearTurnOnly сохраняется (микс модели сфокусирован на игроке для всего корня фазы).
+**Ранний слух.** Слух открывается в момент, когда табло показало запрос игроку, а не после речи ведущей: `cat.announcing`, `cat.staking.asking`, `auction.announcing` (при автоставке `special.autoStake` реплики при объявлении — не заявки: контроллер их не разбирает), `auction.asking` и `chooserHandoff` (`PLAYER_SPEECH_STARTED` → `choosing.listening`). Ведущая обрывается только валидным ответом; эхо её реплики отбрасывается через `literalRepeat`. Ответ одного игрока по просьбе ведущей тоже слушается сразу: просьба повторить (`announcing.speaking` при `announceKind = repeat`), ход финалиста (`turnCue`) и повтор при апелляции (`appealCue`) идут при открытом микрофоне; речь игрока дольше 600 мс (не эхо её реплики) обрывает ведущую и шлёт `PLAYER_SPEECH_STARTED` → `answering`, новая попытка подхватывает ту же фразу. В финале ставки и ответы печатные — ранний слух там не нужен: реплики при `finalBets` и `finalTyped` просто пишутся в разговор. Чтение вопроса и правила кнопки не менялись (речь во время чтения — эхо, если ≥60% слов расшифровки из вопроса или совпала с репликой ведущей; иначе `TALKED_OVER`); hearTurnOnly сохраняется (микс модели сфокусирован на игроке для всего корня фазы).
 
 Один и тот же `HOST_AUDIO_FINISHED` с чужим `purpose` состояние не меняет. Ниже — только то, что машина принимает. Нумерация ниже — ссылки внутри документа, не подсчёт переходов: есть пункты с буквами и несколько guard в одном пункте.
 
@@ -242,7 +253,7 @@ stateDiagram-v2
 23а. `announcing.holding` → `announcing.holding`.
 24. `bridging` → `bridging`.
 25. `turnCue` → `turnCue`.
-26. `finalBets.asking` → `finalBets.asking`.
+26. `finalBets` → `finalBets`.
 27. `finished` → `finished`.
 28. Любой другой путь → `choosing.listening`.
 
@@ -251,8 +262,8 @@ stateDiagram-v2
 `QUESTION_SELECTED` смотрится сверху вниз.
 
 29. `choosing.listening` + `PLAYER_SPEECH_FINISHED` → `choosing.resolving`.
-30. Тот же выбор, финал, вопрос есть, у всех счёт не больше нуля → `finished`. Вопрос не открывается.
-31. Тот же выбор, финал, вопрос ещё не сыгран, у кого-то счёт больше нуля → `finalBets`. Вопрос открыт, финалисты собраны, курсор ставок на меньшем положительном счёте.
+30. Тот же выбор, финал, тем открыто больше одной → удар: тема в `struckThemes`, ход удара по кругу; если осталась одна — `finalDraft` (`prepareFinalDraft`).
+31. Тот же выбор, финал, вопроса нет или он уже сыгран → `choosing.clarifying`. «Этот вопрос недоступен».
 32. Тот же выбор, вопрос этого раунда ещё не сыгран → `flashing`. Вопрос открыт, промахи и фальстарты пустые.
 33. Тот же выбор, но вопроса нет или он уже сыгран → `choosing.clarifying`. «Этот вопрос недоступен».
 34. `QUESTION_UNCLEAR` → `choosing.clarifying`. Текст причины становится статусом.
@@ -339,19 +350,22 @@ stateDiagram-v2
 
 `bridging` + `HOST_AUDIO_FINISHED` purpose `bridge` → `choosing`.
 
-### Ставки финала
+### Финал: скрытые ставки, ответы и разбор
 
-75. `finalBets.asking` + `HOST_AUDIO_FINISHED` purpose `bet` → `finalBets.hearing`.
-76. `finalBets.hearing`, прошло `answerMs`, повтор ставки уже был (`betMisses >= 1`) → `finalBets.placed`. Ставка 1.
-77. `finalBets.hearing`, прошло `answerMs`, повтора ещё не было → `finalBets.asking` заново. «Назовите ставку ещё раз».
-78. `finalBets.hearing` + `PLAYER_SPEECH_FINISHED` → `finalBets.resolving`.
-79. `finalBets.resolving`, прошло `judgeMs`, повтор уже был → `finalBets.placed`, ставка 1.
-80. `finalBets.resolving`, прошло `judgeMs`, повтора не было → `finalBets.asking` заново.
-81. `finalBets.resolving` + `BET_PLACED`, игрок — текущий финалист, сумма от 1 до его счёта → `finalBets.placed`. Ставка записана.
-82. `finalBets.resolving` + `BET_UNCLEAR`, повтор уже был → `finalBets.placed`, ставка 1.
-83. `finalBets.resolving` + `BET_UNCLEAR`, повтора не было → `finalBets.asking` заново.
-84. `finalBets.placed`, курсор не на последнем финалисте → `finalBets.asking`. Курсор дальше, счётчик повторов сброшен.
-85. `finalBets.placed`, ставки кончились → `flashing`. Курсор ответов снова на первом финалисте. Дальше моргание и чтение, без кнопок.
+75. `finalBets` + `FINAL_STAKE`, финалист, целое от 0 до его счёта, ставки у него ещё нет → остаётся. Ставка записана скрыто; в снимок конференции уходит только `stakedIds`, суммы — при разборе. В конференции ставка приходит сообщением `finalStake`, право проверяет мастер.
+76. `finalBets`, у всех есть ставка (`finalAllStaked`) → `flashing` с `openFinalQuestion`. Дальше моргание и чтение, без кнопок.
+77. `finalBets`, истёкшее `deadlineFinalStake` → то же, неуспевшим ставки 0 (`fillMissingStakes`).
+78. `turnCue` + `HOST_AUDIO_FINISHED` purpose `turn` → `finalTyped`. Отвечает-печатает текущий финалист, курсор не меняется.
+79. `finalTyped` + `FINAL_TYPED`, финалист, не длиннее 200 символов, ответа у него ещё нет → остаётся, ответ скрыт записан. Только факт: `typedIds`.
+80. `finalTyped`, у всех ответы (`finalAllTyped`) → `finalReveal.look`.
+81. `finalTyped`, истёкшее `deadlineFinalTyped` → то же, неуспевшим пустые ответы (`fillMissingTypedAnswers`).
+82. `finalReveal.look`, пустой ответ или слово-в-слово с эталоном → `verdict` с мгновенным вердиктом (`applyTypedVerdict`). Модель не звалась.
+83. `finalReveal.look` + `ANSWER_JUDGED` с текущим вопросом и попыткой → `verdict`. Модельный вердикт `finalJudge` или поздний ответ.
+84. `finalReveal.look`, прошло `judgeMs` или `ANSWER_JUDGE_FAILED` → `verdict` без изменения счёта (`finalJudgeFailed`).
+85. `finalReveal.verdict` + `HOST_AUDIO_FINISHED` purpose `announce` → `finalReveal.stakeCue`.
+86. `finalReveal.stakeCue` + `HOST_AUDIO_FINISHED` purpose `stake` → `finalReveal.scoreCue` с `revealFinalStake`: очки открыто меняются на плюс/минус ставки (ставка 0 не меняет), суммы названных ставок идут в снимок.
+87. `finalReveal.scoreCue` + `HOST_AUDIO_FINISHED` purpose `score` → `finalReveal.look` (курсор дальше, `clearJudgment`), если есть ещё финалисты; иначе → `wrapUp`.
+88. `wrapUp` + `HOST_AUDIO_FINISHED` purpose `bridge` → `finished`.
 
 ### Пауза, «Дальше»
 
@@ -377,12 +391,13 @@ stateDiagram-v2
 99. `announcing` или `announcing.speaking` → `announcing` (сразу `speaking`).
 99а. `announcing.holding` → `announcing.holding`.
 100. `turnCue` → `turnCue`.
-101. `finalBets.asking` → `finalBets.asking`.
-102. `finalBets.hearing` → `finalBets.hearing`.
-103. `finalBets.resolving` → `finalBets.resolving`.
-104. `finished` → `finished`.
+101. `finalBets` → `finalBets`.
+102. `finalTyped` → `finalTyped`.
+103. `finalReveal.look`, `finalReveal.verdict`, `finalReveal.stakeCue` или `finalReveal.scoreCue` → тот же узел.
+104. `wrapUp` → `wrapUp`.
+105. `finished` → `finished`.
 
-Другой `resumePath` команду `RESUME` не принимает: партия остаётся в `paused`. Отдельного узла `finalBets.placed` среди целей нет: этот узел и так не ждёт.
+Другой `resumePath` команду `RESUME` не принимает: партия остаётся в `paused`.
 
 Пока пауза, контроллер копит конец фразы ведущей и вызовы выбора и оценки. «Дальше» сначала выпускает накопленное, если фаза та же и это не новый раунд и не конец, на который ушли кнопкой «Пропустить раунд». Если после выпуска фаза не сменилась, микрофон для слушающей фазы снова включают.
 
@@ -431,7 +446,7 @@ choosing ──QUESTION_SELECTED [selectedAuction]─▶ auction.announcing → 
 - `CHOOSER_OFFLINE` в коте до выбора получателя → `handoffCatGiver` (право отдать следующему, снова `cat.announcing`); на аукционе до первой ставки → `auctionAutoOpen` (номинал за выбравшего). Автоставка (`special.autoStake`: денег ≤ номинала или открывший отключился) помечает торги: пока в `auction.announcing` идёт объявление, реплика игрока — не заявка, контроллер её не разбирает (`considerSpecial` выходит сразу), а машинальные `PLAYER_SPEECH_FINISHED`/`AUCTION_UNCLEAR` отбрасывает гвардой `auctionAutoStake`; после объявления перекупка идёт как обычно. Реплика при объявлении до фикса (18 окт) затягивала торги в цикл `resolving/clarifying/listening` с пустым набором вариантов.
 - Пауза и восстановление: пути `cat.*`, `auction.*`, `specialAway` в снимке канонизируются; `RESUME`/restore идут в узлы `cat.resume`/`auction.resume`, которые по `special` выбирают нужный узел (и перезапускают часы ожидания).
 - Апелляции: `hasAppeals`/`openAppealNow` работают и для кота/аукциона. Ячейка уже закрыта, поэтому окно сразу `closed` (подтверждение). `settleOutcome` пишет `stake` (= `activeStake`) в итог, `acceptAppeal` возвращает её в `activeStake`, `confirmClosedAppeal` начисляет `appealStake` (ставка или номинал).
-- Голос — по образцу `choosing.listening → resolving → clarifying`: `cat.picking → cat.resolving`, `cat.staking.listening → cat.staking.resolving`, `auction.listening → auction.resolving` по `PLAYER_SPEECH_FINISHED` (локально не узнали). В `resolving` микрофон закрыт, контроллер шлёт изолированный `selectCatRecipient` / `resolveSpecialBid`; ответ — то же событие, что и клик, `*_UNCLEAR` → `clarifying`, `SELECTION_FAILED` или `judgeMs` → обратно слушать. Подсказка распознаванию — варианты (`playersPrompt` / `optionsPrompt` в `choicePrompt.ts`), эхо отсекает `echoesChoicePrompt`. Сохранение/RESUME сводит `*.resolving` к `cat.resume` / `auction.resume`. Ставка финала (`finalBets.resolving`): если `parseBet` не понял, тот же `resolveSpecialBid` с пределом 0…деньги игрока; подсказка `{0 ноль; ва-банк N}`. Ответ на вопрос с вариантами: подсказка распознаванию — все варианты (буква и текст), не только эталон.
+- Голос — по образцу `choosing.listening → resolving → clarifying`: `cat.picking → cat.resolving`, `cat.staking.listening → cat.staking.resolving`, `auction.listening → auction.resolving` по `PLAYER_SPEECH_FINISHED` (локально не узнали). В `resolving` микрофон закрыт, контроллер шлёт изолированный `selectCatRecipient` / `resolveSpecialBid`; ответ — то же событие, что и клик, `*_UNCLEAR` → `clarifying`, `SELECTION_FAILED` или `judgeMs` → обратно слушать. Подсказка распознаванию — варианты (`playersPrompt` / `optionsPrompt` в `choicePrompt.ts`), эхо отсекает `echoesChoicePrompt`. Сохранение/RESUME сводит `*.resolving` к `cat.resume` / `auction.resume`. Финал голосового разбора не имеет: ставки и ответы печатные. Ответ на вопрос с вариантами: подсказка распознаванию — все варианты (буква и текст), не только эталон.
 - Конференция: клик гостя — сообщение `specialPick` (`player`/`stake`/`auction`). Мастер принимает `player` только от дарителя, ставку — с `playerId` отправителя, вариант аукциона ищет в своём `special.options`.
 
 ### Апелляции обычного вопроса (13 октября 2026)

@@ -54,8 +54,12 @@ export function buildConferenceSnapshot(input: {
   /** Кто есть кто в Jitsi (ведёт мастер, см. `masterSession.conferenceIds`). */
   jitsi?: ConferenceJitsiIds
 }): ConferenceSnapshot {
-  const bets: Record<string, number> = {}
-  for (const bet of input.context.bets) bets[String(bet.playerId)] = bet.amount
+  // Ответ раскрываем по одному: в снимок попадают только уже разобранные ответы.
+  const typedAnswers: Record<string, string> = {}
+  for (const id of (input.context.revealedIds ?? [])) {
+    const text = input.context.typedAnswers?.[id]
+    if (text !== undefined) typedAnswers[String(id)] = text
+  }
 
   const presence: ConferenceSnapshotPresence[] = input.roster.map((entry) => ({
     clientId: entry.clientId,
@@ -103,8 +107,25 @@ export function buildConferenceSnapshot(input: {
     falseStarts: Object.fromEntries(
       Object.entries(input.context.falseStarts).filter((entry): entry is [string, number] => entry[1] !== undefined),
     ),
-    bets,
+    /** Финал: скрытые ставки — суммы остаются у контроллера; в комнату уходит только факт. */
+    stakedIds: input.context.bets.map((bet) => bet.playerId),
+    /** Финал: кто уже напечатал ответ (текст уходит на разбор, не сразу). */
+    typedIds: Object.keys(input.context.typedAnswers ?? {}).map((key) => Number(key)),
+    /** Финал: раскрытые ставки — только у тех, кого ведущая уже назвала. */
+    stakes: Object.fromEntries(
+      (input.context.stakeShownIds ?? [])
+        .map((id) => {
+          const bet = input.context.bets.find((item) => item.playerId === id)
+          return bet ? [String(id), bet.amount] : null
+        })
+        .filter((entry): entry is [string, number] => entry !== null),
+    ),
     betMisses: input.context.betMisses,
+    finalStriker: input.context.finalStriker ?? null,
+    struckThemes: [...(input.context.struckThemes ?? [])],
+    typedAnswers,
+    revealedIds: [...(input.context.revealedIds ?? [])],
+    stakeShownIds: [...(input.context.stakeShownIds ?? [])],
     activeStake: input.context.activeStake,
     attemptId: input.context.attemptId,
     clarifications: input.context.clarifications,

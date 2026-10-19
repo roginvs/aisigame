@@ -1,7 +1,7 @@
 import { diag } from '../debug/diag.ts'
 import { setLeakTarget, failedAttempts, resetFailedAttempts, suspiciousOnce } from '../debug/suspicious.ts'
 import { jokeCoin } from './jokeCoin.ts'
-import { auctionBidToolFor, finalBetToolFor, selectQuestionToolFor } from '../realtime/tools.ts'
+import { auctionBidToolFor, selectQuestionToolFor } from '../realtime/tools.ts'
 import type { Actor, SnapshotFrom } from 'xstate'
 import { clearHostEar, getHostEar, subscribeHostEar, hostEarHearing, hostEarHostSpoke, hostEarMicClosed, hostEarProcessing, hostEarShown, hostEarSurvives, settleHostEar } from './hostEar.ts'
 import { playTimeoutBeep } from '../audio/beep.ts'
@@ -22,7 +22,6 @@ import type { ConferenceHistoryMessage } from '../conference/messages.ts'
 import { conversationLineFromTrace } from '../conference/traceConversation.ts'
 import { getLivePlayerLine, getTrace } from '../debug/trace.ts'
 import { withCommentary } from './commentary.ts'
-import { parseBet } from './bet.ts'
 import { amountWords } from './appealSpeech.ts'
 import { questionSpeech, spokenChoiceForms } from './choices.ts'
 import { matchSpokenCell, selectionChatText } from './choiceMatch.ts'
@@ -193,6 +192,8 @@ export function attachController(options: {
   /** Решение по попытке — перебор вариантов: ведущая своими словами подмечает это в вердикте. */
   let decisionGuessing: { attemptId: number; questionId: string } | null = null
   let shadowRun: { context: GameContext; abort: AbortController; clock: JudgmentClock; text?: ReturnType<typeof settleJudgment>; audio?: ReturnType<typeof settleJudgment> } | null = null
+  /** Финал: открытый вызов оценки напечатанного ответа (toolTurn). */
+  let finalJudgeTurn: number | null = null
 
   function modeFor(context: GameContext): JudgmentInputMode {
     const requested = options.getJudgmentMode?.() ?? options.judgmentMode ?? 'text'
@@ -360,11 +361,6 @@ export function attachController(options: {
       armBargeIn(itemId, () => statePath(actor.getSnapshot().value) === path, 'переспрос', () => actor.send({ type: 'PLAYER_SPEECH_STARTED' }), bargeInSustainMs)
       return
     }
-    if (path === 'finalBets.asking') {
-      // Речь началась во время объявления ставки — обрываем ведущую, ждём конец фразы как в hearing.
-      client.interruptSpeech('речь на объявлении ставки')
-      return
-    }
     if (path === 'answering.waiting' || path === 'answering.hearing' || path === 'answering.settling') {
       // Игрок снова говорит — вердикт ждёт, таймер тишины начнётся заново с конца этой реплики.
       window.clearTimeout(answerSilenceTimer)
@@ -414,11 +410,6 @@ export function attachController(options: {
       settle(considerTalkover(durationMs, itemId))
       return
     }
-    if (path === 'finalBets.asking' || path === 'finalBets.hearing') {
-      actor.send({ type: 'PLAYER_SPEECH_FINISHED' })
-      settle(considerBet(itemId, durationMs))
-      return
-    }
     if (specialListening(path)) {
       settle(considerSpecial(path, durationMs, itemId))
       return
@@ -463,6 +454,22 @@ export function attachController(options: {
   client.onToolCall = (call, purpose, turn) => {
     const path = statePath(actor.getSnapshot().value)
     if (path === 'stopped') return
+    // Финальная оценка несёт свою очередь (finalJudgeTurn), общей expectingToolTurn её не проверяем.
+    if (purpose === 'finalJudge') {
+      const finishFinal = () => {
+        if (finalJudgeTurn === null || turn !== finalJudgeTurn) {
+          if (call) client.sendToolOutput(call.callId, { accepted: false, reason: 'Вызов уже не актуален' })
+          return
+        }
+        handleFinalJudgment(call, turn)
+      }
+      if (path === 'paused') {
+        held.push(finishFinal)
+        return
+      }
+      finishFinal()
+      return
+    }
     if (expectingToolTurn === null || turn !== expectingToolTurn) {
       if (call) client.sendToolOutput(call.callId, { accepted: false, reason: 'Вызов уже не актуален' })
       return
@@ -478,7 +485,76 @@ export function attachController(options: {
     }
     if (purpose === 'select') handleSelection(call, turn)
     if (purpose === 'judge') handleJudgment(call, turn)
+    if (purpose === 'finalJudge') handleFinalJudgment(call, turn)
     if (purpose === 'catPick' || purpose === 'specialBid') handleSpecialTool(call, turn)
+  }
+
+  /** Финал: ответ напечатан на табло. Пусто и точный эталон решает машина — модель звать не нужно. */
+  function judgeFinalTyped(): void {
+    const context = actor.getSnapshot().context
+    const playerId = context.activePlayerId
+    const question = questionById(context.questions, context.activeQuestionId)
+    if (!playerId || !question) return
+    const text = (context.typedAnswers?.[playerId] ?? '').replace(/\s+/g, ' ').trim()
+    if (!text) return
+    if (exactAnswer(text, question.answers)) return
+    pushTrace('note', 'финал: напечатанный ответ решает модель', { chars: text.length })
+    toolTurn += 1
+    finalJudgeTurn = toolTurn
+    client.requestTool('finalJudge', toolTurn, 'submitAnswerJudgment', judgmentInstructions(context, text, 'text', [], ''), true)
+  }
+
+  function deliverFinalVerdict(judgment: { status: JudgmentStatus; heard: string; reason: string }): void {
+    finalJudgeTurn = null
+    const context = actor.getSnapshot().context
+    const playerId = context.activePlayerId
+    const questionId = context.activeQuestionId
+    if (!playerId || !questionId) return
+    // Повтор невозможен: напечатанный ответ не переспросить — всё, что не correct, минусом.
+    const status: JudgmentStatus = judgment.status === 'correct' ? 'correct' : 'incorrect'
+    pushJudgeLine(judgmentChatText(status, judgment.heard))
+    if (status === 'correct') resetFailedAttempts()
+    else {
+      failedAttempts(questionId, playerId, `вердикт ${status} (финал)`, { attemptId: context.attemptId, heard: judgment.heard })
+    }
+    actor.send({
+      type: 'ANSWER_JUDGED',
+      judgment: { questionId, playerId, attemptId: context.attemptId, status, heard: judgment.heard, reason: judgment.reason },
+    })
+  }
+
+  function handleFinalJudgment(call: ToolCall | null, turn: number): void {
+    if (finalJudgeTurn === null || turn !== finalJudgeTurn) {
+      if (call) client.sendToolOutput(call.callId, { accepted: false, reason: 'Попытка уже закрыта' })
+      return
+    }
+    finalJudgeTurn = null
+    const context = actor.getSnapshot().context
+    const args = asRecord(call?.arguments)
+    const reported = judgmentStatuses.find((item) => item === args.status) ?? 'ambiguous'
+    const heard = typeof args.heard === 'string' ? args.heard : ''
+    const reason = typeof args.reason === 'string' && args.reason ? args.reason : 'Оценка пришла без пояснения'
+    const questionId = context.activeQuestionId
+    const question = questionById(context.questions, questionId)
+    if (!questionId || !context.activePlayerId) return
+    const settled = settleJudgment({
+      activeQuestionId: questionId,
+      activePlayerId: context.activePlayerId,
+      attemptId: context.attemptId,
+      questionText: question ? questionSpeech(question) : '',
+      answers: question?.answers ?? [],
+      reportedQuestionId: questionId,
+      reportedPlayerId: context.activePlayerId,
+      reportedAttemptId: context.attemptId,
+      status: reported,
+      heard,
+      transcript: '',
+      confidence: null,
+      source: 'text',
+      reason,
+    })
+    if (call) client.sendToolOutput(call.callId, { accepted: true, status: settled.status })
+    deliverFinalVerdict({ status: settled.status, heard: settled.heard, reason: settled.reason })
   }
 
   /** Ответ начат поверх просьбы ведущей (повтор, ход финалиста, апелляция): попытка подхватывает ту же речь. */
@@ -862,15 +938,40 @@ export function attachController(options: {
       client.setMicEnabled(false)
       applyAnswerDecision()
     }
-    if (path === 'finalBets.asking') {
+    if (path === 'finalDraft') {
       betEpoch += 1
-      client.setTranscriptionPrompt(finalBetPrompt(context))
-      speakWhileListening('bet', betInstructions(context))
+      client.setTranscriptionPrompt('')
+      speakWhileListening('finalIntro', finalIntroCue(context))
     }
-    if (path === 'finalBets.hearing') {
-      betEpoch += 1
-      client.setTranscriptionPrompt(finalBetPrompt(context))
+    if (path === 'finalBets.collecting') {
+      client.setTranscriptionPrompt('')
       client.setMicEnabled(true)
+    }
+    if (path === 'finalTyped') {
+      client.setTranscriptionPrompt('')
+      client.setMicEnabled(true)
+      speakWhileListening('finalTyped', finalTypedCue(context))
+    }
+    if (path === 'finalReveal.look') {
+      client.setMicEnabled(false)
+      speakWhileListening('turn', finalLookCue(context))
+      judgeFinalTyped()
+    }
+    if (path === 'finalReveal.verdict') {
+      client.setMicEnabled(false)
+      speak('announce', finalVerdictCue(context), undefined, true)
+    }
+    if (path === 'finalReveal.stakeCue') {
+      client.setMicEnabled(false)
+      speakWhileListening('stake', stakeCueCue(context))
+    }
+    if (path === 'finalReveal.scoreCue') {
+      client.setMicEnabled(false)
+      speak('score', finalScoreCue(context), undefined, true)
+    }
+    if (path === 'wrapUp') {
+      client.setMicEnabled(false)
+      speak('bridge', wrapUpCue(context), undefined, true)
     }
     if (path === 'turnCue') {
       client.setTranscriptionPrompt(answerPromptFor(context))
@@ -1345,7 +1446,6 @@ export function attachController(options: {
     }
     expectingToolTurn = null
     const path = statePath(actor.getSnapshot().value)
-    if (path === 'finalBets.resolving') { handleBetTool(call); return }
     if (path !== 'cat.resolving' && path !== 'cat.staking.resolving' && path !== 'auction.resolving') {
       if (call) client.sendToolOutput(call.callId, { accepted: false, reason: 'Выбор уже не актуален' })
       return
@@ -1393,47 +1493,7 @@ export function attachController(options: {
     actor.send({ type: 'AUCTION_BID', playerId: special.recipientId, option })
   }
 
-  /** Ставка финала: локальный parseBet не справился — модель называет сумму в пределах денег игрока. */
-  function handleBetTool(call: ToolCall | null): void {
-    const snapshot = actor.getSnapshot()
-    const playerId = snapshot.context.finalists[snapshot.context.finalCursor]
-    const score = snapshot.context.players.find((player) => player.id === playerId)?.score ?? 0
-    const args = asRecord(call?.arguments)
-    const amount = args.unclear === true ? NaN : args.allIn === true ? score : Number(args.amount)
-    const ok = call?.name === 'finalBet' && playerId !== undefined &&
-      Number.isSafeInteger(amount) && amount >= 0 && amount <= Math.max(0, score)
-    if (call) client.sendToolOutput(call.callId, { accepted: ok })
-    if (!ok || playerId === undefined) {
-      actor.send({ type: 'BET_UNCLEAR' })
-      return
-    }
-    pushJudgeLine(`Ставка: ${amount}`)
-    actor.send({ type: 'BET_PLACED', playerId, amount })
-  }
 
-  async function considerBet(itemId: string | null, durationMs: number): Promise<void> {
-    const epoch = betEpoch
-    const heard = await client.waitForTranscript(itemId, transcriptWaitMs(durationMs))
-    if (epoch !== betEpoch) return
-    const snapshot = actor.getSnapshot()
-    if (statePath(snapshot.value) !== 'finalBets.resolving') return
-    if (!heard.arrived) pushPlayerLine('речь не распознана')
-    const playerId = snapshot.context.finalists[snapshot.context.finalCursor]
-    const score = snapshot.context.players.find((player) => player.id === playerId)?.score ?? 0
-    const amount = parseBet(heard.text, score)
-    if (playerId && amount === null && heard.text.trim()) {
-      // Как в выборе ячейки: локально не вышло — изолированный вызов модели, ответ проверяется по деньгам игрока.
-      toolTurn += 1
-      expectingToolTurn = toolTurn
-      client.requestTool('specialBid', toolTurn, 'finalBet', finalBetInstructions(heard.text, score), true, finalBetToolFor(score))
-      return
-    }
-    if (!playerId || amount === null) {
-      actor.send({ type: 'BET_UNCLEAR' })
-      return
-    }
-    actor.send({ type: 'BET_PLACED', playerId, amount })
-  }
 
   function judgeLive(run: NonNullable<typeof judgeRun>): boolean {
     const snapshot = actor.getSnapshot()
@@ -1755,6 +1815,7 @@ export function attachController(options: {
         ? args.reason
         : 'Оценка пришла без пояснения'
     const question = questionById(context.questions, questionId)
+    if (!questionId || !context.activePlayerId) return
     const settled = settleJudgment({
       activeQuestionId: questionId,
       activePlayerId: playerId,
@@ -2268,6 +2329,11 @@ function isSpeechPurpose(purpose: string): purpose is SpeechPurpose {
     purpose === 'chooserHandoff' ||
     purpose === 'micWarning' ||
     purpose === 'buzzCall' ||
+    purpose === 'strike' ||
+    purpose === 'finalIntro' ||
+    purpose === 'finalTyped' ||
+    purpose === 'stake' ||
+    purpose === 'score' ||
     purpose === 'noBuzzer' ||
     purpose === 'idleNudge' ||
     purpose === 'idleAuto' ||
@@ -2531,15 +2597,108 @@ export function bridgeInstructions(context: GameContext): string {
   })
 }
 
-function betInstructions(context: GameContext): string {
-  const playerId = context.finalists[context.finalCursor]
-  const player = context.players.find((item) => item.id === playerId)
-  const name = player?.name ?? 'игрока'
-  const max = player?.score ?? 0
+/** Финал: темы вычеркнуты, осталась одна — объясняем скрытые ставки на табло. */
+function finalIntroCue(context: GameContext): string {
+  const question = questionById(context.questions, context.activeQuestionId)
+  const theme = question?.themeName ?? 'тема'
+  const scores = scoreRoster(context)
   return hostCue({
-    situation: `Финал. Ставку называет игрок: ${name}. На счету ${max}.`,
-    goal: `Попроси назвать ставку от 1 до ${max}, можно по имени; формулировку выбери сама.`,
-    constraints: ['Вопрос не называй и не подсказывай. Остальных пока не спрашивай.'],
+    situation: `Финальный раунд. Тему «${theme}» и её вопрос играют все игроки, счёт: ${scores}. Вопрос на табло пока не открыт.`,
+    goal: 'Скажи, что играем финал с этой темой, и попроси ввести ставки на табло: каждый сам, вслух не называть. Напомни про 30 секунд.',
+    constraints: [
+      'Ставки скрытые: не проси называть ставки вслух.',
+      'Вопрос не зачитывай и в подробности не углубляйся.',
+    ],
+    length: 'Две-три короткие фразы.',
+    mood: true,
+  })
+}
+
+/** Финал: вопрос открыт, ставки собраны — ответы тоже печатают на табло. */
+function finalTypedCue(context: GameContext): string {
+  const question = questionById(context.questions, context.activeQuestionId)
+  const names = stakeReadyNames(context)
+  return hostCue({
+    situation: `Финал. Вопрос: ${question ? questionSpeech(question) : ''} Ставки уже сделали все${names ? `: ${names}` : ''}.`,
+    goal: 'Прочитай вопрос дословно, затем скажи, что ответ вводят на табло: короткий ответ и 30 секунд.',
+    constraints: ['Варианты и подсказки не давай. Ставки не обсуждай.'],
+    length: 'Вопрос дословно плюс одна-две фразы.',
+  })
+}
+
+/** Кто уже ввёл ставку финала — для реплики ведущей. */
+function stakeReadyNames(context: GameContext): string {
+  const staked = new Set(context.bets.map((bet) => bet.playerId))
+  return context.players
+    .filter((player) => staked.has(player.id))
+    .map((player) => player.name)
+    .join(', ')
+}
+
+/** Финал, разбор ответов: короткая реплика «смотрим ответ: имя». */
+function finalLookCue(context: GameContext): string {
+  const name = playerName(context.players, context.activePlayerId) || 'игрока'
+  return hostCue({
+    situation: `Финал, разбор по очереди от меньшего счёта. Сейчас смотрим ответ: ${name}.`,
+    goal: `Одной короткой фразой объяви, что смотрим ответ ${name} — без рода глаголов: например «Смотрим ответ: имя».`,
+    constraints: ['Вердикт и ставку пока не называй.'],
+    length: 'Одна короткая фраза.',
+  })
+}
+
+/** Финал: короткий вердикт по напечатанному ответу — верно/неверно, без эталона и без ставки. */
+function finalVerdictCue(context: GameContext): string {
+  const correct = context.judgmentStatus === 'correct'
+  const name = playerName(context.players, context.activePlayerId) || 'игрока'
+  return hostCue({
+    situation: `Финал. Ответ ${name} на табло разобран: ${correct ? 'верен' : context.judgmentStatus === 'incorrect' ? 'неверен' : 'оценка не успела'}.`,
+    goal: correct
+      ? `Одной короткой фразой скажи, что ответ ${name} верен.`
+      : context.judgmentStatus === 'incorrect'
+        ? `Одной короткой фразой скажи, что ответ ${name} неверен.`
+        : 'Скажи, что не успела оценить ответ и счёт пока без изменений.',
+    constraints: ['Оценку и ставку не называй: ставку откроет следующая реплика.', 'Эталон не произноси.'],
+    length: 'Одна короткая фраза.',
+  })
+}
+
+/** Финал: после вердикта ведущая открывает ставку. */
+function stakeCueCue(context: GameContext): string {
+  const name = playerName(context.players, context.activePlayerId) || 'игрока'
+  return hostCue({
+    situation: `Финал. Ответ ${name} уже разобран.`,
+    goal: `Скажи, что теперь смотрим ставку ${name} — гендерно-нейтрально, например «Смотрим ставку: имя».`,
+    constraints: ['Ставку и счёт пока не называй.'],
+    length: 'Одна короткая фраза.',
+  })
+}
+
+/** Финал: ставка раскрыта — назови ставку и новый финальный счёт игрока. */
+function finalScoreCue(context: GameContext): string {
+  const name = playerName(context.players, context.activePlayerId) || 'игрока'
+  const score = context.players.find((player) => player.id === context.activePlayerId)?.score ?? 0
+  const statusCorrect = context.judgmentStatus === 'correct'
+  const statusUnclear = context.judgmentStatus !== 'correct' && context.judgmentStatus !== 'incorrect'
+  return hostCue({
+    situation: `Финал. Разбор ${name}: ${statusCorrect ? 'ответ верен' : statusUnclear ? 'оценка не успела, счёт не меняется' : 'ответ неверен'}. Новая сумма на счету: ${score}.`,
+    goal: `Назови ставку ${name} и его новый финальный счёт: «ставка N, теперь VI» — по имени, гендерно-нейтрально.`,
+    constraints: ['Один игрок за реплику.'],
+    length: 'Одна-две короткие фразы.',
+  })
+}
+
+/** Финал: все ответы разобраны — итоги и победитель. */
+function wrapUpCue(context: GameContext): string {
+  const scores = context.players.map((player) => `${player.name} — ${player.score}`).join(', ')
+  const best = Math.max(...context.players.map((player) => player.score), 0)
+  const winners = context.players.filter((player) => player.score === best).map((player) => player.name)
+  const winnerName = winners[0] ?? ''
+  return hostCue({
+    situation: `Финал сыгран. Финальный счёт: ${scores}. Победитель: ${winners.length === 1 ? winnerName : winners.join(', ')}.`,
+    goal: 'Назови финальный счёт каждого и поздравь победителя.',
+    constraints: ['Не приглашай продолжать партию.'],
+    length: 'Две-три короткие фразы.',
+    mood: true,
   })
 }
 
@@ -2995,21 +3154,6 @@ export function specialPrompt(path: string, context: GameContext): string {
   }
   if (path.startsWith('cat.')) return playersPrompt(context.players.filter((player) => player.id !== special.giverId).map((player) => player.name))
   return optionsPrompt(special.options)
-}
-
-function finalBetPrompt(context: GameContext): string {
-  const playerId = context.finalists[context.finalCursor]
-  const score = context.players.find((player) => player.id === playerId)?.score ?? 0
-  return optionsPrompt([{ kind: 'stake', amount: 0 }, { kind: 'allIn', amount: Math.max(0, score) }])
-}
-
-/** Изолированный запрос ставки финала: сумма от 0 до денег игрока или ва-банк; потолок — и в схеме finalBet. */
-export function finalBetInstructions(transcript: string, score: number): string {
-  return [
-    `Финал: игрок называет ставку — сумму от 0 до ${Math.max(0, score)} или ва-банк.`,
-    `Распознанный текст: «${transcript}»`,
-    'Вызови finalBet. Сумму не выдумывай. Ва-банк — allIn=true. Если ставку не разобрать — unclear=true.',
-  ].join('\n')
 }
 
 /** Изолированный запрос: кому отдают кота. Кандидаты — только «id: имя», сам выбравший не входит. */

@@ -17,7 +17,7 @@ const pack: QuestionPack = {
 }
 let cleanups: Array<() => void> = []
 beforeEach(() => {
-  vi.useFakeTimers(); vi.stubGlobal('window', globalThis); vi.spyOn(console, 'log').mockImplementation(() => {})
+  vi.useFakeTimers(); vi.stubGlobal('window', globalThis); vi.spyOn(console, 'log').mockImplementation(() => {}); vi.spyOn(console, 'warn').mockImplementation(() => {})
 })
 afterEach(() => { for (const stop of cleanups) stop(); cleanups = []; vi.useRealTimers(); vi.unstubAllGlobals(); vi.restoreAllMocks() })
 async function boot(client: MockRealtimeClient, mode: JudgmentInputMode, questions = pack, getJudgmentMode?: () => JudgmentInputMode) {
@@ -220,7 +220,7 @@ describe('audio judging gameplay', () => {
     expect(score()).toBe(100)
     expect(notes().find((e) => e.title === 'audio judgment fallback')?.detail).toMatchObject({ reason: 'budget-timeout' })
   })
-  it('keeps final answers on text, even when ordinary questions used audio', async () => {
+  it('в финале ответы печатают на табло и аудиооценка не вызывается', async () => {
     const client = new MockRealtimeClient()
     const audio = vi.spyOn(client, 'requestAudioJudgment')
     const finalPack: QuestionPack = { ...pack,
@@ -231,15 +231,64 @@ describe('audio judging gameplay', () => {
     client.hear('пылесосел'); await vi.advanceTimersByTimeAsync(180 + quietMs)
     expect(score()).toBe(100)
     actor.send({ type: 'NEXT_ROUND' }); await vi.advanceTimersByTimeAsync(80)
-    actor.send({ type: 'QUESTION_SELECTED', themeId: 'final', value: 0 })
-    await vi.advanceTimersByTimeAsync(80)
-    expect(statePath(actor.getSnapshot().value)).toBe('finalBets.hearing')
-    client.hear('10'); await vi.advanceTimersByTimeAsync(1300)
-    expect(statePath(actor.getSnapshot().value)).toBe('answering.waiting')
+    // Вычёркиваем единственную тему финала (выбирающий по кругу — третий) → finalDraft.
+    actor.send({ type: 'STRIKE_THEME', playerId: 3, themeId: 'final' })
+    expect(statePath(actor.getSnapshot().value)).toBe('finalDraft')
+    actor.send({ type: 'HOST_AUDIO_FINISHED', purpose: 'finalIntro' })
+    // Ставки — только на табло, тайпер 30 секунд.
+    expect(statePath(actor.getSnapshot().value)).toBe('finalBets.collecting')
+    actor.send({ type: 'FINAL_STAKE', playerId: 1, amount: 10 })
+    actor.send({ type: 'FINAL_STAKE', playerId: 2, amount: 0 })
+    actor.send({ type: 'FINAL_STAKE', playerId: 3, amount: 0 })
+    expect(statePath(actor.getSnapshot().value)).toBe('flashing')
     audio.mockClear()
-    client.hearAudio('Бетельгейзе', 'Солнце'); await vi.advanceTimersByTimeAsync(180 + quietMs)
-    expect(audio).not.toHaveBeenCalled()
+    // Мок доводит чтение и вызов отвечающего сам: ждём печать ответа.
+    await vi.advanceTimersByTimeAsync(1500)
+    expect(statePath(actor.getSnapshot().value)).toBe('finalTyped')
+    actor.send({ type: 'FINAL_TYPED', playerId: 1, text: 'Солнце' })
+    actor.send({ type: 'FINAL_TYPED', playerId: 2, text: '' })
+    actor.send({ type: 'FINAL_TYPED', playerId: 3, text: '' })
+    expect(statePath(actor.getSnapshot().value)).toContain('finalReveal')
+    // Разбор от меньшего счёта вверх: тишина вдвоём — минус нуля; «Солнце» от большего счёта — верно.
+    const text = vi.spyOn(client, 'requestTool')
+    for (let i = 0; i < 12 && statePath(actor.getSnapshot().value) !== 'finished'; i++) {
+      await vi.advanceTimersByTimeAsync(12000)
+    }
     expect(score()).toBe(110)
+    expect(audio).not.toHaveBeenCalled()
+    // Точный эталон решает машина: модель не дёргаем.
+    expect(text).not.toHaveBeenCalled()
+  })
+  it('печатный ответ не слово-в-слово решает модель: неверный — минус ставки', async () => {
+    const client = new MockRealtimeClient()
+    const audio = vi.spyOn(client, 'requestAudioJudgment')
+    const finalPack: QuestionPack = { ...pack,
+      rounds: [...pack.rounds, { index: 1, kind: 'final', name: 'Финал' }],
+      questions: [...pack.questions, { ...pack.questions[1]!, id: 'final', roundIndex: 1, themeId: 'final', themeName: 'Финал', value: 0 }],
+    }
+    const { actor, score } = await boot(client, 'audio', finalPack)
+    client.hear('пылесосел'); await vi.advanceTimersByTimeAsync(180 + quietMs)
+    actor.send({ type: 'NEXT_ROUND' }); await vi.advanceTimersByTimeAsync(80)
+    audio.mockClear()
+    actor.send({ type: 'STRIKE_THEME', playerId: 3, themeId: 'final' })
+    actor.send({ type: 'HOST_AUDIO_FINISHED', purpose: 'finalIntro' })
+    actor.send({ type: 'FINAL_STAKE', playerId: 1, amount: 10 })
+    actor.send({ type: 'FINAL_STAKE', playerId: 2, amount: 0 })
+    actor.send({ type: 'FINAL_STAKE', playerId: 3, amount: 0 })
+    await vi.advanceTimersByTimeAsync(1500)
+    expect(statePath(actor.getSnapshot().value)).toBe('finalTyped')
+    actor.send({ type: 'FINAL_TYPED', playerId: 1, text: 'Пылесос' })
+    actor.send({ type: 'FINAL_TYPED', playerId: 2, text: '' })
+    actor.send({ type: 'FINAL_TYPED', playerId: 3, text: '' })
+    // Не слово-в-слово — просим модель.
+    const text = vi.spyOn(client, 'requestTool')
+    for (let i = 0; i < 12 && statePath(actor.getSnapshot().value) !== 'finished'; i++) {
+      await vi.advanceTimersByTimeAsync(12000)
+    }
+    // Модель вернула incorrect: минус ставки (10), у нулевых ставка — ноль.
+    expect(score()).toBe(90)
+    expect(audio).not.toHaveBeenCalled()
+    expect(text.mock.calls.filter((call) => call[0] === 'finalJudge')).toHaveLength(1)
   })
   it('uses text when a provider does not support isolated references', async () => {
     const client = new MockRealtimeClient()

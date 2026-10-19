@@ -61,8 +61,9 @@ describe('реплики кота и аукциона', () => {
   })
 })
 
-import { auctionBidToolFor, finalBetToolFor, selectQuestionToolFor, sessionTools, submitAnswerJudgmentTool, toolPurposes } from '../realtime/tools.ts'
+import { auctionBidToolFor, selectQuestionToolFor, sessionTools, submitAnswerJudgmentTool, toolPurposes } from '../realtime/tools.ts'
 import { auctionBidInstructions, catRecipientInstructions, catStakeInstructions } from './controller.ts'
+
 
 describe('инструменты запасного разбора', () => {
   it('у каждого инструмента сессии есть назначение', () => {
@@ -70,7 +71,6 @@ describe('инструменты запасного разбора', () => {
     expect(toolPurposes.selectCatRecipient).toBe('catPick')
     expect(toolPurposes.pickCatStake).toBe('specialBid')
     expect(toolPurposes.auctionBid).toBe('specialBid')
-    expect(toolPurposes.finalBet).toBe('specialBid')
   })
   it('инструкции: только кандидаты и варианты экрана', () => {
     const cat = catRecipientInstructions('Анюте', [{ id: 1, name: 'Анна' }, { id: 3, name: 'Вера' }])
@@ -80,13 +80,12 @@ describe('инструменты запасного разбора', () => {
     expect(bid).toContain('Варианты на экране: пас, 300, ва-банк 900.')
     expect(catStakeInstructions('максимум', [100, 500])).toContain('минимум 100 или максимум 500')
   })
-  it('схемы сужены под ход: id тем, варианты аукциона, потолок финала', () => {
+  it('схемы сужены под ход: id тем и варианты аукциона', () => {
     expect(selectQuestionToolFor(['t1', 't2', 't1'], [100, 200]).parameters.properties.themeId).toMatchObject({ enum: ['t1', 't2'] })
     expect(selectQuestionToolFor(['t1'], [100]).parameters.properties.value).toMatchObject({ enum: [0, 100] })
     const auction = auctionBidToolFor([{ kind: 'stake', amount: 300 }, { kind: 'allIn', amount: 900 }])
     expect(auction.parameters.properties.choice).toMatchObject({ enum: ['amount', 'allIn', 'unclear'] })
     expect(auction.parameters.properties.amount).toMatchObject({ enum: [0, 300] })
-    expect(finalBetToolFor(800).parameters.properties.amount).toMatchObject({ minimum: 0, maximum: 800 })
   })
   it('судья не возвращает questionId, playerId, attemptId — попытка по запросу', () => {
     expect(submitAnswerJudgmentTool.parameters.required).toEqual(['status', 'heard', 'reason', 'speech', 'guessing'])
@@ -95,7 +94,7 @@ describe('инструменты запасного разбора', () => {
 })
 
 import { echoesChoicePrompt, optionsPrompt, playersPrompt } from './choicePrompt.ts'
-import { answerPromptFor, finalBetInstructions, specialPrompt } from './controller.ts'
+import { answerPromptFor, specialPrompt } from './controller.ts'
 
 describe('подсказки распознаванию — как каталог ячеек', () => {
   it('имена кандидатов и варианты ставок в фигурных скобках, суммы со словами', () => {
@@ -124,8 +123,5 @@ describe('подсказки распознаванию — как катало�
     const prompt = answerPromptFor({ ...context, questions: [q], activeQuestionId: 'c' } as unknown as GameContext)
     expect(prompt).toContain('A Индиана')
     expect(prompt).toContain('D Звёздные войны')
-  })
-  it('ставка финала: модель получает предел денег', () => {
-    expect(finalBetInstructions('ну половину', 800)).toContain('от 0 до 800')
   })
 })

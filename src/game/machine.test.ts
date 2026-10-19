@@ -918,6 +918,15 @@ describe('game machine', () => {
           text: 'Столица Франции?',
           answers: ['Париж'],
         },
+        {
+          id: 'final-2',
+          roundIndex: 1,
+          themeId: 'flora',
+          themeName: 'Флоры',
+          value: 0,
+          text: 'Символ Франции?',
+          answers: ['Роза'],
+        },
       ],
     }
     const actor = createActor(gameMachine)
@@ -948,13 +957,24 @@ describe('game machine', () => {
     expect(actor.getSnapshot().context.roundIndex).toBe(1)
 
     actor.send({ type: 'HOST_AUDIO_FINISHED', purpose: 'bridge' })
-    actor.send({ type: 'QUESTION_SELECTED', themeId: 'Столицы', value: 0 })
-    expect(statePath(actor.getSnapshot().value)).toBe('finalBets.asking')
-    // Ранний слух: ставку можно сказать, пока ведущая ещё спрашивает.
-    actor.send({ type: 'PLAYER_SPEECH_FINISHED' })
-    actor.send({ type: 'ANSWER_SETTLED' })
-    expect(statePath(actor.getSnapshot().value)).toBe('finalBets.resolving')
-    actor.send({ type: 'BET_PLACED', playerId: 1, amount: 40 })
+    // Финал: выбирающий по кругу — третий игрок, тему вычёркивает он.
+    expect(statePath(actor.getSnapshot().value)).toBe('choosing.listening')
+    expect(actor.getSnapshot().context.chooserId).toBe(3)
+    expect(actor.getSnapshot().context.finalStriker).toBe(3)
+    // В финале кнопок нет: нажатие ничего не делает и фальстарт не записывает.
+    actor.send({ type: 'BUZZER_PRESSED', playerId: 2 })
+    expect(actor.getSnapshot().context.falseStarts).toEqual({})
+    actor.send({ type: 'STRIKE_THEME', playerId: 3, themeId: 'flora' })
+    expect(statePath(actor.getSnapshot().value)).toBe('finalDraft')
+    expect(actor.getSnapshot().context.struckThemes).toEqual(['flora'])
+    actor.send({ type: 'HOST_AUDIO_FINISHED', purpose: 'finalIntro' })
+    // Скрытые ставки на табло: 30 секунд, вслух не называем.
+    expect(statePath(actor.getSnapshot().value)).toBe('finalBets.collecting')
+    expect(actor.getSnapshot().context.phaseDurationMs).toBe(30_000)
+    actor.send({ type: 'FINAL_STAKE', playerId: 1, amount: 40 })
+    actor.send({ type: 'FINAL_STAKE', playerId: 2, amount: 0 })
+    actor.send({ type: 'FINAL_STAKE', playerId: 3, amount: 0 })
+    // Все ставки собраны → открываем вопрос; в финале кнопок нет — фальстарта не бывает.
     expect(statePath(actor.getSnapshot().value)).toBe('flashing')
     actor.send({ type: 'BUZZER_PRESSED', playerId: 2 })
     expect(statePath(actor.getSnapshot().value)).toBe('flashing')
@@ -970,26 +990,89 @@ describe('game machine', () => {
     expect(actor.getSnapshot().context.falseStarts).toEqual({})
     actor.send({ type: 'HOST_AUDIO_FINISHED', purpose: 'read' })
     expect(statePath(actor.getSnapshot().value)).toBe('turnCue')
-    expect(actor.getSnapshot().context.activeStake).toBe(40)
-    // Ранний слух: финалист заговорил, пока ведущая называет его ход.
-    actor.send({ type: 'PLAYER_SPEECH_STARTED' })
-    expect(statePath(actor.getSnapshot().value)).toBe('answering.waiting')
-    actor.send({ type: 'PLAYER_SPEECH_FINISHED' })
-    actor.send({ type: 'ANSWER_SETTLED' })
+    actor.send({ type: 'HOST_AUDIO_FINISHED', purpose: 'turn' })
+    expect(statePath(actor.getSnapshot().value)).toBe('finalTyped')
+    // Ответы печатают на табло; финальное окно ждёт всех.
+    actor.send({ type: 'FINAL_TYPED', playerId: 2, text: '' })
+    expect(statePath(actor.getSnapshot().value)).toBe('finalTyped')
+    actor.send({ type: 'FINAL_TYPED', playerId: 3, text: 'Рома' })
+    actor.send({ type: 'FINAL_TYPED', playerId: 1, text: 'Париж' })
+    // Разбор от меньшего счёта вверх; пустой ответ машина вердиктирует сама.
+    expect(statePath(actor.getSnapshot().value)).toContain('finalReveal')
+    expect(actor.getSnapshot().context.players[1]?.score).toBe(0)
+    // Пустой ответ мгновенно неверно: вердикт уже есть, модель не звалась.
+    expect(statePath(actor.getSnapshot().value)).toBe('finalReveal.verdict')
+    expect(actor.getSnapshot().context.judgmentStatus).toBe('incorrect')
+    actor.send({ type: 'HOST_AUDIO_FINISHED', purpose: 'announce' })
+    actor.send({ type: 'HOST_AUDIO_FINISHED', purpose: 'stake' })
+    expect(playerScore(actor, 2)).toBe(0)
+    actor.send({ type: 'HOST_AUDIO_FINISHED', purpose: 'score' })
+    expect(statePath(actor.getSnapshot().value)).toBe('finalReveal.look')
+    expect(actor.getSnapshot().context.activePlayerId).toBe(3)
+    expect(actor.getSnapshot().context.activeStake).toBe(0)
     actor.send({
       type: 'ANSWER_JUDGED',
-      judgment: {
-        questionId: 'final-1',
-        playerId: 1,
-        attemptId: 2,
-        status: 'correct',
-        heard: 'Париж',
-        reason: 'верно',
-      },
+      judgment: { questionId: 'final-1', playerId: 3, attemptId: 4, status: 'incorrect', heard: 'Рома', reason: 'не то' },
     })
-    expect(playerScore(actor, 1)).toBe(140)
+    expect(playerScore(actor, 3)).toBe(0)
     actor.send({ type: 'HOST_AUDIO_FINISHED', purpose: 'announce' })
+    expect(statePath(actor.getSnapshot().value)).toBe('finalReveal.stakeCue')
+    actor.send({ type: 'HOST_AUDIO_FINISHED', purpose: 'stake' })
+    expect(statePath(actor.getSnapshot().value)).toBe('finalReveal.scoreCue')
+    expect(actor.getSnapshot().context.stakeShownIds).toEqual([2, 3])
+    expect(playerScore(actor, 3)).toBe(0)
+    actor.send({ type: 'HOST_AUDIO_FINISHED', purpose: 'score' })
+    expect(actor.getSnapshot().context.activePlayerId).toBe(1)
+    expect(actor.getSnapshot().context.activeStake).toBe(40)
+    // «Париж» слово-в-слово с эталоном: машина вердиктирует сама, модель не звалась.
+    expect(statePath(actor.getSnapshot().value)).toBe('finalReveal.verdict')
+    expect(actor.getSnapshot().context.judgmentStatus).toBe('correct')
+    expect(playerScore(actor, 1)).toBe(100)
+    actor.send({ type: 'HOST_AUDIO_FINISHED', purpose: 'announce' })
+    expect(statePath(actor.getSnapshot().value)).toBe('finalReveal.stakeCue')
+    actor.send({ type: 'HOST_AUDIO_FINISHED', purpose: 'stake' })
+    expect(playerScore(actor, 1)).toBe(140)
+    actor.send({ type: 'HOST_AUDIO_FINISHED', purpose: 'score' })
+    expect(statePath(actor.getSnapshot().value)).toBe('wrapUp')
+    expect(actor.getSnapshot().context.statusLine).toContain('Победитель')
+    actor.send({ type: 'HOST_AUDIO_FINISHED', purpose: 'bridge' })
     expect(statePath(actor.getSnapshot().value)).toBe('finished')
+  })
+
+  it('в финале клик по табло — вычеркнуть тему: удар по кругу и мост к финалу', () => {
+    const pack: QuestionPack = {
+      name: 'Удар',
+      rounds: [
+        { index: 0, name: 'Первый раунд', kind: 'normal' },
+        { index: 1, name: 'Финал', kind: 'final' },
+      ],
+      warnings: [],
+      questions: [
+        { id: 'q1', roundIndex: 0, themeId: 'rivers', themeName: 'Реки', value: 100, text: 'Куда впадает Волга?', answers: ['Каспийское море'] },
+        { id: 'final-1', roundIndex: 1, themeId: 'capitals', themeName: 'Столицы', value: 0, text: 'Столица Франции?', answers: ['Париж'] },
+        { id: 'final-2', roundIndex: 1, themeId: 'flora', themeName: 'Флоры', value: 0, text: 'Символ Франции?', answers: ['Роза'] },
+      ],
+    }
+    const actor = createActor(gameMachine)
+    actor.start()
+    actor.send({ type: 'START_GAME', pack })
+    actor.send({ type: 'CONNECTED' })
+    actor.send({ type: 'HOST_AUDIO_FINISHED', purpose: 'welcome' })
+    actor.send({ type: 'QUESTION_SELECTED', themeId: 'rivers', value: 100 })
+    vi.advanceTimersByTime(gameConfig.cellFlashMs)
+    actor.send({ type: 'HOST_AUDIO_FINISHED', purpose: 'read' })
+    vi.advanceTimersByTime(gameConfig.buzzerMs)
+    expect(statePath(actor.getSnapshot().value)).toBe('announcing.speaking')
+    actor.send({ type: 'HOST_AUDIO_FINISHED', purpose: 'announce' })
+    actor.send({ type: 'HOST_AUDIO_FINISHED', purpose: 'bridge' })
+    expect(statePath(actor.getSnapshot().value)).toBe('choosing.listening')
+    expect(actor.getSnapshot().context.finalStriker).toBe(3)
+    // Клик по табло — удар, а не выбор вопроса; после последнего удара остаётся одна тема,
+    // и машина сразу уходит объявлять финал.
+    actor.send({ type: 'QUESTION_SELECTED', themeId: 'flora', value: 0 })
+    expect(statePath(actor.getSnapshot().value)).toBe('finalDraft')
+    expect(actor.getSnapshot().context.struckThemes).toEqual(['flora'])
+    expect(actor.getSnapshot().context.finalStriker).toBe(1)
   })
 
   it('вопрос выбирает второй игрок, пока в раунде никто не ответил, затем последний ответивший', () => {
@@ -1137,11 +1220,12 @@ describe('game machine', () => {
     expect(actor.getSnapshot().context.chooserId).toBe(1)
     actor.send({ type: 'HOST_AUDIO_FINISHED', purpose: 'announce' })
     expect(statePath(actor.getSnapshot().value)).toBe('bridging')
-    expect(actor.getSnapshot().context.chooserId).toBe(2)
+    // Раунды открывает по кругу: второй, третий, финал — снова первый.
+    expect(actor.getSnapshot().context.chooserId).toBe(3)
     actor.send({ type: 'HOST_AUDIO_FINISHED', purpose: 'bridge' })
     expect(statePath(actor.getSnapshot().value)).toBe('choosing.listening')
     expect(actor.getSnapshot().context.roundIndex).toBe(1)
-    expect(actor.getSnapshot().context.chooserId).toBe(2)
+    expect(actor.getSnapshot().context.chooserId).toBe(3)
     expect(actor.getSnapshot().context.statusLine).toBe('Выберите тему финала')
   })
 

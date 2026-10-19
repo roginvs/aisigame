@@ -2,7 +2,7 @@
 export function AppealConfirm({ onYes, onNo }: { onYes: () => void; onNo: () => void }) {
   return (
     <div className="appeal-confirm" role="group" aria-label="Апелляция">
-      <button type="button" className="buzzer" aria-label="Да, я ответил правильно" onClick={onYes}>Да</button>
+      <button type="button" className="buzzer" aria-label="Да, моё ответ было верным" onClick={onYes}>Да</button>
       <button type="button" className="buzzer" aria-label="Нет, не надо апелляцию" onClick={onNo}>Нет</button>
     </div>
   )

@@ -647,7 +647,7 @@ describe('MasterSession resume', () => {
     }
     flushLobbySilence()
     expect(requestSpeech).toHaveBeenCalledTimes(2)
-    expect(requestSpeech.mock.calls.at(-1)?.[2]).toContain('Гость: пакет сверен, готов')
+    expect(requestSpeech.mock.calls.at(-1)?.[2]).toContain('Гость: пакет сверен, кнопка нажата')
 
     transport.receive(verified)
     expect(session.rosterList().find((entry) => entry.clientId === 'guest-client')).toMatchObject({

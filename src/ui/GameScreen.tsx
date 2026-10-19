@@ -3,6 +3,8 @@ import { auctionDingSound, catMeowSound, preloadPublicSound } from '../audio/bee
 import { specialListenerId } from '../game/controller.ts'
 import { SpecialPanel, type SpecialPick } from './SpecialPanel.tsx'
 import { specialPanelPath } from './specialPanelPath.ts'
+import { FinalEntry, FinalRevealStrip } from './FinalEntry.tsx'
+import { finalEntryPath, finalRevealPath } from './finalPhase.ts'
 import { useCallback, useEffect, useRef, useState, useSyncExternalStore, type CSSProperties } from 'react'
 import { flushSync } from 'react-dom'
 import type { SnapshotFrom } from 'xstate'
@@ -129,6 +131,9 @@ export function GameScreen(props: {
   /** Кот/аукцион: кнопка «кому отдать», ставка или торг. */
   onSpecialPick?: (pick: SpecialPick, playerId: PlayerId) => void
   onPick: (themeId: string, value: number) => void
+  /** Финал: скрытая ставка и скрытый ответ, печатают на табло. */
+  onFinalStake?: (playerId: PlayerId, amount: number) => void
+  onFinalAnswer?: (playerId: PlayerId, text: string) => void
   onPause: () => void
   onStop: () => void
   onReset: () => void
@@ -557,6 +562,22 @@ export function GameScreen(props: {
         ) : null}
         {conference?.awaitingPack && conference.packProgress ? (
           <PackAwaitPanel progress={conference.packProgress} packName={conference.packName} />
+        ) : finalEntryPath(path, context) ? (
+          <FinalEntry
+            context={context}
+            kind={path === 'finalBets.collecting' || (path === 'paused' && context.resumePath === 'finalBets.collecting') ? 'stake' : 'answer'}
+            canAct={(playerId) => {
+              const player = context.players.find((item) => item.id === playerId)
+              return Boolean(player && props.onFinalStake && props.onFinalAnswer && canBuzzPlayer(Boolean(conference?.layout), conference?.selfClientId, player))
+            }}
+            onSubmit={(playerId, value) => {
+              if (typeof value === 'number') props.onFinalStake?.(playerId, value)
+              else props.onFinalAnswer?.(playerId, value)
+            }}
+            timer={showTimer && context.phaseStartedAt !== null && context.phaseDurationMs !== null
+              ? <Countdown key={timerKey} startedAt={context.phaseStartedAt} durationMs={context.phaseDurationMs} />
+              : null}
+          />
         ) : specialPanelPath(path, context) ? (
           <SpecialPanel
             context={context}
@@ -580,6 +601,7 @@ export function GameScreen(props: {
               {question.themeName} · {question.value}
             </p>
             <QuestionText text={question.text} />
+            {finalRevealPath(path) ? <FinalRevealStrip context={context} /> : null}
             {question.choices?.length ? (
               <ul className="choices" aria-label="Варианты ответа">
                 {question.choices.map((choice) => (
@@ -835,7 +857,7 @@ export function GameScreen(props: {
                       disabled={conference.readyDisabled}
                       onClick={conference.onReady}
                     >
-                      Я готов
+                      Я в игре
                     </button>
                   ) : null}
                   <ConferenceMediaControls

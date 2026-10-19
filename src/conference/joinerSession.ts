@@ -211,6 +211,19 @@ export class JoinerSession {
     this.transport.send({ type: 'pick', clientId: this.clientId, authToken: this.authToken, themeId, value })
   }
 
+  /** Финал: скрытая ставка. Мастер проверит счёт и право. */
+  sendFinalStake(amount: number): void {
+    if (!this.hashOk) return
+    this.transport.send({ type: 'finalStake', clientId: this.clientId, authToken: this.authToken, amount })
+  }
+
+  /** Финал: скрытый ответ. Мастер проверит право и длину. */
+  sendFinalAnswer(text: string): void {
+    const clean = text.trim()
+    if (!this.hashOk || !clean) return
+    this.transport.send({ type: 'finalAnswer', clientId: this.clientId, authToken: this.authToken, text: clean })
+  }
+
   sendChat(text: string): void {
     const clean = text.trim()
     if (!clean) return

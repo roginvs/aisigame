@@ -1,5 +1,5 @@
 import type { GameContext, Player, PlayerId } from '../game/types.ts'
-import { pickOpen } from '../game/machine.ts'
+import { finalStrikerTurnOpen, pickOpen } from '../game/machine.ts'
 
 /**
  * In conference mode only the client assigned to the chooser may use the board.
@@ -16,6 +16,11 @@ export function canPickCell(
   if (!(context ? pickOpen(path, context) : path === 'choosing.listening')) return false
   if (!conferenceLayout) return true
   if (!selfClientId || chooserId === null) return false
+  // В финале темы вычёркивает тот, чей удар по кругу: право по finalStriker, не по выбирающему.
+  if (context && finalStrikerTurnOpen(context)) {
+    const striker = context.finalStriker
+    if (striker !== undefined && players.some((player) => player.id === striker && player.clientId === selfClientId)) return true
+  }
   return players.some((player) => player.id === chooserId && player.clientId === selfClientId)
 }
 

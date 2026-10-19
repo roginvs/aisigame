@@ -39,6 +39,10 @@ export const matchTimings = {
   auctionDingMs: 1_300,
   /** Сколько ждём отключившегося получателя кота / участника торгов. */
   catAwayWaitMs: 15_000,
+  /** Финал: окно скрытых ставок на табло. */
+  finalStakeMs: 30_000,
+  /** Финал: окно напечатанных ответов на табло. */
+  finalTypedMs: 30_000,
 } as const
 
 export const {
@@ -63,6 +67,8 @@ export const {
   catMeowMs,
   auctionDingMs,
   catAwayWaitMs,
+  finalStakeMs,
+  finalTypedMs,
 } = matchTimings
 
 /**

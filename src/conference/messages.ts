@@ -99,8 +99,25 @@ export type ConferenceSnapshot = AppealFields & {
   answererId: number | null
   falseStartIds: number[]
   falseStarts: Record<string, number>
-  bets: Record<string, number>
+  /** Финал: скрытые ставки — в комнату уходят только суммы при разборе; здесь сам факт ставки. */
+  stakedIds: number[]
+  /** Финал: кто уже напечатал ответ (текст — только для revealedIds). */
+  typedIds?: number[]
+  /** Финал: раскрытые ставки (для stakeShownIds). */
+  stakes?: Record<string, number>
   betMisses: number
+  /** Встроенный снимок старой сборки: суммы ставок; в новой — только stakedIds. */
+  bets?: Record<string, number>
+  /** Финал: чей сейчас ход вычёркивания тем; `null` — вычёркивание ещё не началось. */
+  finalStriker?: number | null
+  /** Финал: вычеркнутые темы (в порядке ходов). */
+  struckThemes?: string[]
+  /** Финал: напечатанные ответы; в снимке — только уже раскрытые (по revealedIds). */
+  typedAnswers?: Record<string, string>
+  /** Финал: ответ чьей попытки уже показан на табло. */
+  revealedIds?: number[]
+  /** Финал: чья ставка уже названа ведущей. */
+  stakeShownIds?: number[]
   activeStake: number | null
   attemptId: number
   clarifications: number
@@ -294,6 +311,22 @@ export type SpecialPickMessage = {
   choice?: 'pass' | 'allIn' | number
 }
 
+/** Финал: игрок печатает скрытую часть ставки. Мастер проверяет счёт и право. */
+export type FinalStakeMessage = {
+  type: 'finalStake'
+  clientId: string
+  authToken: string
+  amount: number
+}
+
+/** Финал: игрок печатает скрытый ответ. Мастер проверяет право и длину. */
+export type FinalAnswerMessage = {
+  type: 'finalAnswer'
+  clientId: string
+  authToken: string
+  text: string
+}
+
 export type ChatMessage = {
   type: 'chat'
   clientId: string
@@ -352,6 +385,8 @@ export type ConferenceMessage =
   | PauseToggleMessage
   | PickMessage
   | SpecialPickMessage
+  | FinalStakeMessage
+  | FinalAnswerMessage
   | ChatMessage
   | AudioSinkNoteMessage
   | DebugLogMessage
@@ -424,6 +459,10 @@ export function isConferenceMessage(value: unknown): value is ConferenceMessage 
         (value.target === 'player' && integer(value.playerId, 1)) ||
         (value.target === 'stake' && integer(value.amount, 1)) ||
         (value.target === 'auction' && (value.choice === 'pass' || value.choice === 'allIn' || integer(value.choice, 1))))
+    case 'finalStake':
+      return client() && Number.isInteger(value.amount) && (value.amount as number) >= 0 && (value.amount as number) <= 1_000_000
+    case 'finalAnswer':
+      return client() && typeof value.text === 'string' && value.text.trim().length > 0 && value.text.length <= 200
     case 'chat':
       return client() && typeof value.text === 'string' && value.text.length <= 4_000
     case 'audioSinkNote':
@@ -529,8 +568,20 @@ const stateValidators = {
   answererId: nullableInteger,
   falseStartIds: (value: unknown) => numberArray(value, 10_000),
   falseStarts: numericRecord,
-  bets: numericRecord,
-  betMisses: (value: unknown) => integer(value, 0),
+  bets: (value: unknown) => value === undefined || numericRecord(value),
+  stakedIds: (value: unknown) => numberArray(value, 10_000),
+  typedIds: (value: unknown) => value === undefined || numberArray(value, 10_000),
+  stakes: (value: unknown) => value === undefined || numericRecord(value),
+  betMisses: (value: unknown) => value === undefined || integer(value, 0),
+  finalStriker: (value: unknown) => value === undefined || nullableInteger(value),
+  struckThemes: (value: unknown) => value === undefined || stringArray(value, 10_000),
+  typedAnswers: (value: unknown) => {
+    if (value === undefined) return true
+    return typeof value === 'object' && value !== null &&
+      Object.values(value).every((item) => typeof item === 'string' && item.length <= 500)
+  },
+  revealedIds: (value: unknown) => value === undefined || numberArray(value, 10_000),
+  stakeShownIds: (value: unknown) => value === undefined || numberArray(value, 10_000),
   activeStake: nullableInteger,
   attemptId: (value: unknown) => integer(value, 0),
   clarifications: (value: unknown) => integer(value, 0),
