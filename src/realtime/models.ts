@@ -1,7 +1,7 @@
 import { storageKey } from '../config.ts'
 
 /** Какая модель говорит за ведущую. Ключ провайдера лежит отдельно и не стирается при смене модели. */
-export type VoiceProvider = 'openai' | 'xai' | 'google' | 'mock'
+export type VoiceProvider = 'openai' | 'xai' | 'google' | 'qwen' | 'mock'
 
 export type VoiceModel = {
   id: string
@@ -20,6 +20,7 @@ export const providerStorageKeys = {
   openai: storageKey,
   xai: 'aisigame.xaiApiKey',
   google: 'aisigame.googleApiKey',
+  qwen: 'aisigame.qwenApiKey',
 } as const
 
 export type KeyProvider = keyof typeof providerStorageKeys
@@ -36,6 +37,7 @@ export const voiceModels: readonly VoiceModel[] = [
     provider: 'google',
     thinking: true,
   },
+  { id: 'qwen3.8-omni-flash-realtime', label: 'Qwen Omni Realtime Flash', provider: 'qwen' },
   { id: 'mock', label: 'Мок для тестов', provider: 'mock' },
 ]
 
@@ -88,6 +90,18 @@ export function writeProviderKey(provider: KeyProvider, value: string, storage: 
 export function keyFieldLabel(provider: VoiceProvider): string {
   if (provider === 'xai') return 'Ключ xAI'
   if (provider === 'google') return 'Ключ Google'
+  if (provider === 'qwen') return 'Ключ DashScope'
   if (provider === 'mock') return 'Ключ не нужен'
   return 'Ключ OpenAI'
+}
+
+/** workspace-адрес Qwen у DashScope соединение требует отдельно от ключа ({workspaceId}.{регион}.maas.aliyuncs.com). */
+export const qwenEndpointStorageKey = 'aisigame.qwenEndpoint'
+
+export function readQwenEndpoint(storage: Storage = localStorage): string {
+  return storage.getItem(qwenEndpointStorageKey) ?? ''
+}
+
+export function writeQwenEndpoint(value: string, storage: Storage = localStorage): void {
+  storage.setItem(qwenEndpointStorageKey, value)
 }

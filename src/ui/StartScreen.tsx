@@ -27,6 +27,8 @@ export function StartScreen(props: {
   playerNames: string
   onPlayerNames: (value: string) => void
   onApiKey: (value: string) => void
+  qwenEndpoint: string
+  onQwenEndpoint: (value: string) => void
   onToggleKey: () => void
   onClearKey: () => void
   onPack: (id: string) => void
@@ -65,6 +67,8 @@ export function StartScreen(props: {
     playerNames,
     onPlayerNames,
     onApiKey,
+    qwenEndpoint,
+    onQwenEndpoint,
     onToggleKey,
     onClearKey,
     onPack,
@@ -191,6 +195,24 @@ export function StartScreen(props: {
                     onChange={(event) => onApiKey(event.target.value)}
                   />
                 </label>
+                {voiceById(modelId).provider === 'qwen' ? (
+                  <>
+                    <label className="field">
+                      <span>Адрес workspace DashScope</span>
+                      <input
+                        value={qwenEndpoint}
+                        autoComplete="off"
+                        spellCheck={false}
+                        placeholder="ws-xxxx.cn-beijing.maas.aliyuncs.com"
+                        onChange={(event) => onQwenEndpoint(event.target.value)}
+                      />
+                    </label>
+                    <p className="status-line">
+                      Адрес из личного кабинета DashScope: идентификатор workspace и регион, например ws-xxxx.cn-beijing.maas.aliyuncs.com
+                      или ws-xxxx.ap-southeast-1.maas.aliyuncs.com.
+                    </p>
+                  </>
+                ) : null}
                 <div className="row">
                   <button type="button" className="ghost" onClick={onToggleKey}>
                     {showKey ? 'Скрыть ключ' : 'Показать ключ'}

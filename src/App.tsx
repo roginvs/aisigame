@@ -61,10 +61,12 @@ import {
   hrefAfterModelSwitch,
   markModelSwitch,
   readProviderKey,
+  readQwenEndpoint,
   readVoiceModelId,
   takeModelSwitchNotice,
   voiceById,
   writeProviderKey,
+  writeQwenEndpoint,
   writeVoiceModelId,
 } from './realtime/models.ts'
 import { audioJudgmentCapable, judgmentModeFromUrl, writeJudgmentMode, type JudgmentInputMode } from './realtime/judgmentRequest.ts'
@@ -127,6 +129,8 @@ export default function App() {
   const [apiKey, setApiKey] = useState(() => readProviderKey('openai'))
   const [xaiKey, setXaiKey] = useState(() => readProviderKey('xai'))
   const [googleKey, setGoogleKey] = useState(() => readProviderKey('google'))
+  const [qwenKey, setQwenKey] = useState(() => readProviderKey('qwen'))
+  const [qwenEndpoint, setQwenEndpoint] = useState(() => readQwenEndpoint())
   const [showKey, setShowKey] = useState(false)
   const [link, setLink] = useState<LinkStatus>(initialLink)
   const catalogIds = packCatalog.map((item) => item.id)
@@ -229,7 +233,15 @@ export default function App() {
   const model = voiceById(modelId)
   const needsKey = model.provider !== 'mock'
   const activeKey =
-    model.provider === 'xai' ? xaiKey : model.provider === 'google' ? googleKey : model.provider === 'openai' ? apiKey : ''
+    model.provider === 'xai'
+      ? xaiKey
+      : model.provider === 'google'
+        ? googleKey
+        : model.provider === 'qwen'
+          ? qwenKey
+          : model.provider === 'openai'
+            ? apiKey
+            : ''
   const keyRef = useRef(needsKey ? activeKey : 'mock')
   /* oxlint-disable react/set-state-in-effect, react/immutability, react-hooks/exhaustive-deps --
      Эти эффекты координируют асинхронную загрузку пакета и одноразовое восстановление
@@ -559,8 +571,14 @@ export default function App() {
     const provider = model.provider
     if (provider === 'xai') setXaiKey(value)
     else if (provider === 'google') setGoogleKey(value)
+    else if (provider === 'qwen') setQwenKey(value)
     else setApiKey(value)
     writeProviderKey(provider, value)
+  }
+
+  function rememberQwenEndpoint(value: string) {
+    setQwenEndpoint(value)
+    writeQwenEndpoint(value)
   }
 
   function chooseModel(id: string) {
@@ -1234,6 +1252,8 @@ export default function App() {
         playerNames={playerNames}
         onPlayerNames={editNames}
         onApiKey={rememberKey}
+        qwenEndpoint={qwenEndpoint}
+        onQwenEndpoint={rememberQwenEndpoint}
         onToggleKey={() => setShowKey((value) => !value)}
         onClearKey={() => rememberKey('')}
         onPack={choosePack}
