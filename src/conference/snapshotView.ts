@@ -84,7 +84,7 @@ export function contextFromSnapshot(snapshot: ConferenceSnapshot, pack: Question
     heard: snapshot.heard,
     wrongHeard: [...snapshot.wrongHeard],
     sayCloseGuess: snapshot.sayCloseGuess,
-    judgmentReason: snapshot.judgmentReason,
+    judgmentReason: snapshot.judgmentReason ?? '',
     announceKind: snapshot.announceKind,
     judgmentStatus: snapshot.judgmentStatus,
     clarifyReason: snapshot.clarifyReason,

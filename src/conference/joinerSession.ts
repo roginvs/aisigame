@@ -211,7 +211,10 @@ export class JoinerSession {
     this.transport.send({ type: 'pick', clientId: this.clientId, authToken: this.authToken, themeId, value })
   }
 
-  /** Финал: скрытая ставка. Мастер проверит счёт и право. */
+  /** Финал: скрытая ставка. Мастер проверит счёт и право.
+   * Известное упрощение: сообщение идёт broadcast'ом всей комнате (адресата в финальных
+   * сообщениях нет), так что технически внимательный сосед может прочитать чужую ставку
+   * или ответ в канале. Считаем игроков честными: адресная доставка мастеру — в to-do. */
   sendFinalStake(amount: number): void {
     if (!this.hashOk) return
     this.transport.send({ type: 'finalStake', clientId: this.clientId, authToken: this.authToken, amount })

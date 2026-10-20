@@ -1095,6 +1095,9 @@ export async function connectJitsiConference(input: {
     remoteVideo.delete(userId)
     dropRemoteAudio(userId)
     speakerActivity.clear(userId)
+    // Нулевого кадра от ушедшего не будет: реплика по уровню закрывается здесь, иначе
+    // запасной commit (answerSilentCommit) не придёт и попытка тянет все answerMs.
+    speechLevels.clear(userId)
     emitTiles()
   })
 
@@ -1126,6 +1129,8 @@ export async function connectJitsiConference(input: {
       // выкинуть уже пришедшую новую дорожку того же участника.
       dropRemoteAudioTrack(jitsiTrack)
       speakerActivity.clear(userId)
+      // Дорожка ушла, нулевого кадра уровня не будет — реплику по уровню закрываем сами.
+      speechLevels.clear(userId)
       syncModelMixer()
     }
     emitTiles()
@@ -1147,7 +1152,12 @@ export async function connectJitsiConference(input: {
     if (input.bot) return
     const jitsiTrack = track as JitsiTrack
     const userId = jitsiTrack.isLocal() ? localId() : jitsiTrack.getParticipantId?.()
-    if (userId && jitsiTrack.isMuted?.()) speakerActivity.clear(userId)
+    if (userId && jitsiTrack.isMuted?.()) {
+      speakerActivity.clear(userId)
+      // То же для реплики по уровню: при mute кадры уровня кончаются, эпизод сам не закроется.
+      // Свой уровень чистится в noteOwnLevel (micLive=false), здесь закрываем только чужие.
+      if (!jitsiTrack.isLocal()) speechLevels.clear(userId)
+    }
     // Mute видео оставляет <video> на последнем кадре — снимаем дорожку и даём UI placeholder.
     if (userId && jitsiTrack.getType() === 'video') {
       const el = videoBindings.get(userId)

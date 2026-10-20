@@ -127,7 +127,9 @@ export type ConferenceSnapshot = AppealFields & {
   heard: string
   wrongHeard: string[]
   sayCloseGuess: boolean
-  judgmentReason: string
+  /** Не передаём: пояснение оценки обычно называет правильный ответ, а услышать его игрок
+   * должен только после объявления. Остаётся у мастера — в машине и в копии дебага. */
+  judgmentReason?: string
   judgmentStatus: JudgmentStatus | null
   announceKind: AnnounceKind | null
   clarifyReason: string
@@ -590,7 +592,7 @@ const stateValidators = {
   sayFalseStart: (value: unknown) => typeof value === 'boolean',
   sayCloseGuess: (value: unknown) => typeof value === 'boolean',
   heard: validText,
-  judgmentReason: validText,
+  judgmentReason: (value: unknown) => value === undefined || validText(value),
   clarifyReason: validText,
   statusLine: validText,
   wrongHeard: (value: unknown) => stringArray(value, 10_000),

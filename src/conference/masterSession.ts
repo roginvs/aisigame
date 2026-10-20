@@ -9,7 +9,7 @@ import type { GameVoice } from '../realtime/client.ts'
 import { gameMachine } from '../game/machine.ts'
 import { finalStrikerTurnOpen, pickOpen, statePath } from '../game/machine.ts'
 import { roundThemes } from '../game/pack.ts'
-import type { GameContext, Player, QuestionPack } from '../game/types.ts'
+import type { GameContext, Player, PlayerId, QuestionPack } from '../game/types.ts'
 import { buildConferenceSnapshot, jitsiPairs, timerRemainingMs, type ConferenceJitsiIds } from './buildSnapshot.ts'
 import { createPackPipeHub, type PackPipeLinkState } from './packPipe.ts'
 import { CHUNK_BYTES, createPackTransferMaster, type PackTransferMaster } from './packTransfer.ts'
@@ -873,38 +873,44 @@ export class MasterSession {
 
   private handoffOfflineChooser(now: number): void {
     const snapshot = this.actor.getSnapshot()
+    const context = snapshot.context
     const path = statePath(snapshot.value)
-    const special = snapshot.context.special
+    const special = context.special
     // Кот до выбора получателя и аукцион до первой ставки: уходит отдающий/открывающий.
     const giverPhase = (path.startsWith('cat.') && special?.recipientId === null) || (path.startsWith('auction.') && special?.bid === null)
     if (!path.startsWith('choosing') && !giverPhase) return
-    const players = snapshot.context.players
-    const fromId = giverPhase ? special!.giverId : snapshot.context.chooserId
-    const chooserIndex = players.findIndex((player) => player.id === fromId)
-    const chooser = players[chooserIndex]
-    if (!chooser?.clientId || chooser.clientId === this.masterClientId) return
-
+    const players = context.players
     const roster = this.roster.allIncludingHidden(now)
-    const chooserPresence = roster.find((entry) => entry.clientId === chooser.clientId)
-    if (chooserPresence && !chooserPresence.stale && !chooserPresence.hidden) return
     // После продолжения отсутствующего игрока нет в roster до первого hello.
     // Даём ему тот же десятисекундный порог, что и уже видимому участнику.
-    if (!chooserPresence && now - this.gameStartedAt < PRESENCE_STALE_MS) return
-
-    const onlinePlayerIds = new Set(
-      roster
-        .filter((entry) => entry.playerId !== null && entry.hashOk && (entry.isMaster || (!entry.stale && !entry.hidden)))
-        .map((entry) => entry.playerId),
-    )
-    for (let offset = 1; offset < players.length; offset += 1) {
-      const replacement = players[(chooserIndex + offset) % players.length]
-      if (!replacement || !onlinePlayerIds.has(replacement.id)) continue
-      this.actor.send({
-        type: 'CHOOSER_OFFLINE',
-        fromPlayerId: chooser.id,
-        toPlayerId: replacement.id,
-      })
-      return
+    const absentGrace = now - this.gameStartedAt < PRESENCE_STALE_MS
+    const strikeMoving = finalStrikerTurnOpen(context) && context.finalStriker !== undefined && context.finalStriker !== context.chooserId
+    const tokens: PlayerId[] = [giverPhase ? special!.giverId : context.chooserId]
+    // Финал: при живом выбирающем отвалиться мог тот, чей ход вычёркивания, — его токен тоже передаём.
+    if (strikeMoving && context.finalStriker !== undefined) tokens.push(context.finalStriker)
+    for (const fromId of tokens) {
+      if (fromId === undefined) continue
+      const index = players.findIndex((player) => player.id === fromId)
+      const token = players[index]
+      if (!token?.clientId || token.clientId === this.masterClientId) continue
+      const presence = roster.find((entry) => entry.clientId === token.clientId)
+      if (presence && !presence.stale && !presence.hidden) continue
+      if (!presence && absentGrace) continue
+      const onlinePlayerIds = new Set(
+        roster
+          .filter((entry) => entry.playerId !== null && entry.hashOk && (entry.isMaster || (!entry.stale && !entry.hidden)))
+          .map((entry) => entry.playerId),
+      )
+      for (let offset = 1; offset < players.length; offset += 1) {
+        const replacement = players[(index + offset) % players.length]
+        if (!replacement || !onlinePlayerIds.has(replacement.id)) continue
+        this.actor.send({
+          type: 'CHOOSER_OFFLINE',
+          fromPlayerId: token.id,
+          toPlayerId: replacement.id,
+        })
+        return
+      }
     }
   }
 

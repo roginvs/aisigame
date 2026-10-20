@@ -683,8 +683,15 @@ export const gameMachine = setup({
     }),
     handoffChooser: assign({
       idleOutcome: () => null,
+      // Переданию хода подставляется только тот токен, который был у отключившегося:
+      // ход выбора и (в финале) право удара идут вместе, только пока это один игрок.
       chooserId: ({ context, event }) =>
-        event.type === 'CHOOSER_OFFLINE' ? event.toPlayerId : context.chooserId,
+        event.type === 'CHOOSER_OFFLINE' && event.fromPlayerId === context.chooserId ? event.toPlayerId : context.chooserId,
+      finalStriker: ({ context, event }) => {
+        if (event.type !== 'CHOOSER_OFFLINE') return context.finalStriker
+        if (!finalStrikerTurnOpen(context) || context.finalStriker !== event.fromPlayerId) return context.finalStriker
+        return event.toPlayerId
+      },
       clarifyReason: ({ context, event }) => {
         if (event.type !== 'CHOOSER_OFFLINE') return context.clarifyReason
         const disconnected = context.players.find((player) => player.id === event.fromPlayerId)?.name ?? 'Игрок'
@@ -1365,8 +1372,12 @@ export const gameMachine = setup({
     purposeFalseStart: ({ event }) => event.type === 'HOST_AUDIO_FINISHED' && event.purpose === 'falseStart',
     validChooserHandoff: ({ context, event }) =>
       event.type === 'CHOOSER_OFFLINE' &&
-      event.fromPlayerId === context.chooserId &&
       event.toPlayerId !== event.fromPlayerId &&
+      (
+        event.fromPlayerId === context.chooserId ||
+        // Финал: отвал того, чей ход вычёркивания, тоже требует передачи (мастер посылает для обоих токенов).
+        (finalStrikerTurnOpen(context) && event.fromPlayerId === context.finalStriker)
+      ) &&
       inRoster(context, event.toPlayerId),
     sayFalseStart: ({ context }) => context.sayFalseStart,
     readFinal: ({ context, event }) =>

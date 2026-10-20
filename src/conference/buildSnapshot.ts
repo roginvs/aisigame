@@ -126,6 +126,10 @@ export function buildConferenceSnapshot(input: {
     typedAnswers,
     revealedIds: [...(input.context.revealedIds ?? [])],
     stakeShownIds: [...(input.context.stakeShownIds ?? [])],
+    // Известный упрощённый канал: активная ставка (в финале — сумма текущего финалиста из скрытых bets)
+    // лежит в снимке с момента его хода, до «Смотрим ставку». Скрытость держит только UI (stakeShownIds):
+    // технически внимательный игрок может прочитать сумму в DevTools. Считаем игроков честными:
+    // ради единственного честного поля не разводим отдельную маску снимка (маскировать отдельно — в to-do).
     activeStake: input.context.activeStake,
     attemptId: input.context.attemptId,
     clarifications: input.context.clarifications,
@@ -135,7 +139,8 @@ export function buildConferenceSnapshot(input: {
     heard: input.context.heard,
     wrongHeard: [...input.context.wrongHeard],
     sayCloseGuess: input.context.sayCloseGuess,
-    judgmentReason: input.context.judgmentReason,
+    // judgmentReason в комнату не уходит: пояснение оценки обычно называет правильный ответ,
+    // а услышать его игрок должен только после объявления (как в снимке партии — там поле вырезано).
     judgmentStatus: input.context.judgmentStatus,
     announceKind: input.context.announceKind,
     clarifyReason: input.context.clarifyReason,

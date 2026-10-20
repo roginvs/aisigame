@@ -730,4 +730,121 @@ describe('saved game', () => {
     )
     expect(readSavedGame(storage)?.hearTurnOnly).toBe(false)
   })
+
+  it('финал: снимок пишется в каждой новой фазе финала и несёт скрытые данные разбора', () => {
+    const storage = memory()
+    const finalPack = {
+      name: 'Финальный',
+      rounds: [
+        { index: 0, name: 'Первый раунд', kind: 'normal' as const },
+        { index: 1, name: 'Финал', kind: 'final' as const },
+      ],
+      warnings: [],
+      questions: [
+        {
+          id: 'final-capitals',
+          roundIndex: 1,
+          themeId: 'capitals',
+          themeName: 'Столицы',
+          value: 0,
+          text: 'Столица Франции?',
+          answers: ['Париж'],
+        },
+        {
+          id: 'final-hidden',
+          roundIndex: 1,
+          themeId: 'hidden',
+          themeName: 'Скрытое',
+          value: 0,
+          text: 'Что скрыто?',
+          answers: ['ничего'],
+        },
+      ],
+    }
+    const finalContext = context({
+      packName: 'Финальный',
+      rounds: finalPack.rounds,
+      questions: finalPack.questions,
+      roundIndex: 1,
+      chooserId: 2,
+      finalists: [1, 2, 3],
+      finalCursor: 0,
+      bets: [
+        { playerId: 1, amount: 40 },
+        { playerId: 2, amount: 0 },
+      ],
+      finalStriker: 2,
+      struckThemes: ['hidden'],
+      typedAnswers: { 1: 'Париж', 2: '' },
+      revealedIds: [1],
+      stakeShownIds: [1],
+      activeQuestionId: 'final-capitals',
+      activePlayerId: 1,
+      activeStake: null,
+    })
+    const finalPhases = [
+      'finalDraft',
+      'finalBets.collecting',
+      'finalTyped',
+      'finalReveal.look',
+      'finalReveal.verdict',
+      'finalReveal.stakeCue',
+      'finalReveal.scoreCue',
+      'wrapUp',
+    ]
+    for (const phase of finalPhases) {
+      const saved = persistMatch({ packId: 'f1', packFile: 'final.siq', path: phase, context: finalContext }, storage)
+      expect(saved?.phase, phase).toBe(phase)
+    }
+    const snapshot = readSavedGame(storage)
+    expect(snapshot?.finalStriker).toBe(2)
+    expect(snapshot?.struckThemes).toEqual(['hidden'])
+    expect(snapshot?.typedAnswers).toEqual({ 1: 'Париж', 2: '' })
+    expect(snapshot?.revealedIds).toEqual([1])
+    expect(snapshot?.stakeShownIds).toEqual([1])
+
+    const restored = restoredMatch(finalPack, snapshot ?? sample())
+    expect(restored.resumePath).toBe('wrapUp')
+    expect(restored.finalStriker).toBe(2)
+    expect(restored.struckThemes).toEqual(['hidden'])
+    expect(restored.typedAnswers).toEqual({ 1: 'Париж', 2: '' })
+    expect(restored.revealedIds).toEqual([1])
+    expect(restored.stakeShownIds).toEqual([1])
+  })
+
+  it('финал: новые фазы без финального раунда или без финалистов мягко идут в выбор, чужие игроки отсекаются', () => {
+    const finalPack = {
+      name: 'Финальный',
+      rounds: [{ index: 0, name: 'Финал', kind: 'final' as const }],
+      warnings: [],
+      questions: [],
+    }
+    // Раунд не финальный в пакете — фаза финала не восстанавливается.
+    const nonFinal = restoredMatch(demoPack, sample({ phase: 'finalTyped', roundIndex: 0 }))
+    expect(nonFinal.resumePath).toBe('choosing.listening')
+    // Нет финалистов — тоже.
+    expect(restoredMatch(finalPack, sample({ phase: 'finalBets.collecting', finalists: [] })).resumePath).toBe(
+      'choosing.listening',
+    )
+    // Скрытые ответы держим только за финалистами из ростера.
+    const pruned = restoredMatch(
+      finalPack,
+      sample({ phase: 'finalBets.collecting', finalists: [1, 3], finalStriker: 9, typedAnswers: { 1: 'Париж', 5: 'чужой' } }),
+    )
+    expect(pruned.resumePath).toBe('finalBets.collecting')
+    expect(pruned.finalStriker).toBe(2)
+    expect(pruned.typedAnswers).toEqual({ 1: 'Париж' })
+    // Побитые поля снимок целиком отбрасывают.
+    const storage = memory()
+    storage.setItem(gameStorageKey, JSON.stringify({ ...sample(), struckThemes: 'нет' }))
+    expect(readSavedGame(storage)).toBeNull()
+    storage.setItem(gameStorageKey, JSON.stringify({ ...sample(), finalStriker: 'нет' }))
+    expect(readSavedGame(storage)).toBeNull()
+    storage.setItem(gameStorageKey, JSON.stringify({ ...sample(), typedAnswers: { 1: 5 } }))
+    expect(readSavedGame(storage)).toBeNull()
+    storage.setItem(gameStorageKey, JSON.stringify({ ...sample(), stakeShownIds: [0] }))
+    expect(readSavedGame(storage)).toBeNull()
+    storage.setItem(gameStorageKey, JSON.stringify({ ...sample(), revealedIds: ['нет'] }))
+    expect(readSavedGame(storage)).toBeNull()
+  })
 })

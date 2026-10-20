@@ -205,6 +205,16 @@ export type SavedMatch = AppealFields & {
   bets: Bet[]
   finalCursor: number
   betMisses: number
+  /** Финал: чей ход вычёркивания темы. Нет в старых снимках — восстановится как выбирающий раунда. */
+  finalStriker?: PlayerId
+  /** Финал: вычеркнутые темы. Нет в старых снимках — круг начнётся заново. */
+  struckThemes?: string[]
+  /** Финал: скрытые напечатанные ответы (текст ≤ 200). Нет в старых снимках. */
+  typedAnswers?: Partial<Record<PlayerId, string>>
+  /** Финал: чьи ответы уже раскрыты ведущей. Нет в старых снимках. */
+  revealedIds?: PlayerId[]
+  /** Финал: чьи ставки уже названы. Нет в старых снимках. */
+  stakeShownIds?: PlayerId[]
   activeQuestionId: string | null
   activePlayerId: PlayerId | null
   activeStake: number | null

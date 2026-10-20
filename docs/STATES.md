@@ -1,6 +1,6 @@
 # Состояния партии
 
-Карта машины `src/game/machine.ts` (XState 5, id `game`). Стрелки на схемах — только маршрут. Условия, счёт и табло — в списках ниже: длинный guard на стрелку не помещается.
+Карта машины `src/game/machine.ts` (XState 5, id `game`). Условия, счёт и табло — в списках ниже. Текст — источник; mermaid-схемы при каждой правке не перерисовываются (если нужна диаграмма, её рисуют по состоянию кода на момент просьбы — см. AGENTS.md).
 
 Контроллер (`src/game/controller.ts`) сам счёт не меняет. Он шлёт события машине, включает микрофон и обрывает звук ведущей. Где это меняет фазу или часы, это написано у перехода.
 
@@ -42,87 +42,15 @@
 
 Очки в обычном раунде меняет номинал ячейки, в финале — скрытая ставка, которую ведущая называет в `finalReveal.stakeCue`. Игроков, которые уже ошиблись или промолчали на этом вопросе, машина держит в `missedIds`: их кнопка на этом вопросе больше не принимается.
 
-## Схемы
+## Маршрут
 
 Узлы ожидания описаны ниже. `restoring`, `afterReading`, `finalBets`, `turnCue` и `finalTyped` ждут по таймеру фазы; `choosing`, `reading`, `finalReveal`, `buzzing`, `answering`, `announcing` — составные узлы. Число узлов не является контрактом: ориентир — код машины и именованные ветки ниже. Состояния `buzzing.reminding` в машине нет: так назван только один из путей, с которых «Дальше» возвращает в `buzzing`.
 
-```mermaid
-stateDiagram-v2
-  [*] --> startMenu
-  startMenu --> connecting: старт или продолжение
-  connecting --> failed: нет связи
-  connecting --> welcoming: сессия есть, снимка нет
-  connecting --> restoring: сессия есть, снимок есть
-  restoring --> welcoming: см. список
-  restoring --> choosing: см. список
-  welcoming --> choosing: приветствие кончилось
-  choosing --> chooserHandoff: выбирающий stale 10 с
-  chooserHandoff --> choosing: объявила замену
-  choosing --> flashing: ячейка обычного раунда
-  choosing --> finalDraft: в финале осталась одна тема (последний удар)
-  finalDraft --> finalBets: объявила финал
-  flashing --> reading: моргание кончилось
-  finalBets --> flashing: ставки собраны (или 30 с)
-  reading --> turnCue: финал, дочитала
-  turnCue --> finalTyped: назвала, чей ход
-  finalTyped --> finalReveal: ответы собраны (или 30 с)
-  finalReveal --> wrapUp: все разобраны
-  wrapUp --> finished: финальную речь договорила
-  announcing --> bridging: раунд кончился, дальше есть раунд
-  announcing --> finished: дальше раунда нет
-  announcing --> choosing: ячейка закрыта, раунд ещё идёт
-  announcing --> flashing: ячейка закрыта, выбирающий кликнул ячейку во время комментария (earlyPickOpen)
-  chooserHandoff --> flashing: выбирающий кликнул ячейку во время передачи хода (pickOpen)
-  bridging --> choosing: мост кончился
-  finished --> finished: речь конца кончилась
-  failed --> connecting: старт или продолжение
-```
+Основной маршрут: `startMenu` → `connecting` → `welcoming` (или `restoring`, если есть снимок) → `choosing` → `flashing` → `reading` → (обычный раунд: `buzzing`/`answering`/оценка → `announcing`) → снова `choosing`, либо `bridging`/`finished`. Финал: `choosing` (удары) → `finalDraft` → `finalBets` → `flashing` → `reading` → `turnCue` → `finalTyped` → `finalReveal` (look → verdict → stakeCue → scoreCue, по кругу за каждого финалиста) → `wrapUp` → `finished`.
 
-Глобальные события на схеме не нарисованы: `PAUSE` → `paused`, `STOP` → `stopped`, `CONNECTION_LOST` → `failed`, `RESET_GAME` → `startMenu`, `NEXT_ROUND` → `bridging` или `finished`. Они действуют из почти любого узла; точные запреты — в списке.
+Есть и глобальные события: `PAUSE` → `paused`, `STOP` → `stopped`, `CONNECTION_LOST` → `failed`, `RESET_GAME` → `startMenu`, `NEXT_ROUND` → `bridging` или `finished`. Они действуют из почти любого узла; точные запреты — в списке.
 
-```mermaid
-stateDiagram-v2
-  state reading {
-    [*] --> sealed
-    sealed --> armed: earlyBuzzerMs, не финал
-  }
-  state buzzing {
-    [*] --> open
-  }
-  state answering {
-    [*] --> waiting
-    waiting --> hearing: речь началась
-  }
-  reading --> afterReading: дочитала раньше раннего окна
-  afterReading --> falseStartCue: монетка фальстарта
-  afterReading --> buzzing: иначе, полные buzzerMs
-  falseStartCue --> buzzing: фраза фальстарта кончилась
-  reading --> buzzing: дочитала уже из armed, полоска та же
-  reading --> announcing: buzzerMs вышли, пока ещё читает
-  reading --> answering: кнопка в armed
-  falseStartCue --> answering: кнопка
-  buzzing --> answering: кнопка
-  buzzing --> announcing: окно вышло
-  answering --> judging: договорил
-  answering --> announcing: молчит
-  judging --> announcing: оценка или judgeMs
-  judging --> answering: эхо, не оценка
-  announcing --> answering: созвучие, тот же игрок
-  announcing --> buzzing: ошибка или молчание, есть кому перехватить
-```
-
-```mermaid
-stateDiagram-v2
-  state finalReveal {
-    [*] --> look
-    look --> verdict: вердикт получен (мгновенно за пусто и слово-в-слово, иначе модель `finalJudge`)
-    verdict --> stakeCue: вердикт кончился
-    stakeCue --> scoreCue: назвала ставку
-    scoreCue --> look: есть следующий финалист
-  }
-  finalBets --> flashing: ставки собраны
-  finalTyped --> finalReveal: ответы собраны
-```
+Путь обычного вопроса по узлам: `reading.sealed` → (раннее окно) → `reading.armed`; дочитала раньше окна → `afterReading` → (`falseStartCue` по монетке или сразу) → `buzzing.open`; нажали в `armed` или в окне → `answering.waiting` → `answering.hearing` → оценка → `announcing`; из объявления — снова `buzzing` (перехват после ошибки/молчания), `answering` (созвучие), `flashing` (выбирающий кликнул во время комментария) или мост/выбор/конец.
 
 ## Узлы
 
@@ -134,7 +62,7 @@ stateDiagram-v2
 
 **welcoming.** Ведущая коротко здоровается и зовёт выбрать вопрос. Темы и цены не называет. Табло раунда уже есть, текст вопроса нет. Кнопки закрыты, полоски нет. Микрофон выключен, пока она говорит.
 
-**choosing.** Родитель. На входе гасит вопрос, игрока ответа, услышанное и часы. В финале статус «Выберите тему финала», иначе «назовите тему и стоимость». В финале темы вычёркивают по кругу: удар — это `STRIKE_THEME` от текущего игрока круга (`finalStriker`) или любой `QUESTION_SELECTED` с открытой темой (клик по табло или голос): тема уходит в `struckThemes`, удар переходит по кругу всем игрокам, после удара, оставившего одну тему, — `finalDraft`. Право клика в конференции: `chooserId` или текущий `finalStriker` (мастер проверяет по `clientId`, `canPickCell` — по снимку). Кнопка… нет — подсветка табло остаётся у выбирающего; в финале кнопок нет. Дальше всегда один из детей.
+**choosing.** Родитель. На входе гасит вопрос, игрока ответа, услышанное и часы. В финале статус «Выберите тему финала», иначе «назовите тему и стоимость». В финале темы вычёркивают по кругу: удар — это `STRIKE_THEME` от текущего игрока круга (`finalStriker`) или любой `QUESTION_SELECTED` с открытой темой (клик по табло или голос): тема уходит в `struckThemes`, удар переходит по кругу всем игрокам, после удара, оставившего одну тему, — `finalDraft`. Право клика в конференции: `chooserId` или текущий `finalStriker` (мастер проверяет по `clientId`, `canPickCell` — по снимку). Отвал при открытом круге удара — тоже передача: `CHOOSER_OFFLINE` проходится гвардом и для `fromPlayerId === finalStriker` (не только для `chooserId`), `handoffChooser` двигает каждый токен только если он был у отключившегося — ход выбора и право удара идут вместе, пока это один игрок. Кнопка… нет — подсветка табло остаётся у выбирающего; в финале кнопок нет. Дальше всегда один из детей.
 
 **choosing.listening.** Слушает выбор. Микрофон открыт. Кнопки ответа закрыты, полоски нет. Кашель ячейку не открывает: это решает контроллер и либо молчит, либо шлёт `QUESTION_UNCLEAR` или `QUESTION_SELECTED`. На входе контроллер бампит `choiceEpoch`: запоздавший транскрипт прошлой реплики или выбор до `CHOOSER_OFFLINE` ячейку не открывают. В конференции кликать поле может только `chooserId`; микс для модели сужается до выбирающего (если Jitsi id ещё нет — fail open на всех). Подсказка про выключенный микрофон и уточнение выбора идут с `conversation: none`. Если микрофон выбирающего выключен стабильно (`mutedMicStableMs`), обычное напоминание выбора (каждые 20 с) говорит не про темы, а про микрофон: ведущая сама придумывает фразу с именем. Так не больше `mutedChooserMaxReminders` раз за ход; счётчик не сбрасывается при уточнении и возврате в listening, а только при смене выбирающего или включении микрофона. Отдельного цикла нет. Неясный выбор пишет в «Оценку» «Услышала: …» и что нужны тема и стоимость. Это дополнительная реплика: состояние не меняется, часы выбора не появляются. У мастера галка «Меньше слышать» сужает микс модели до выбора/ответа/ставки (вне них — глухо; в лобби — все); статус «Слушаю Имя» / «Ничего не слышу» / «Слушаю всех». На всех конференционных экранах карточка подписана полным именем: «Вася выбирает вопрос» или «Вася выбирает тему финала».
 
@@ -253,7 +181,7 @@ stateDiagram-v2
 23а. `announcing.holding` → `announcing.holding`.
 24. `bridging` → `bridging`.
 25. `turnCue` → `turnCue`.
-26. `finalBets` → `finalBets`.
+26. `finalDraft` → `finalDraft`; `finalBets.collecting` → `finalBets.collecting`; `finalTyped` → `finalTyped`; `finalReveal.look`/`verdict`/`stakeCue`/`scoreCue` → тот же узел; `wrapUp` → `wrapUp`. Новые фазы финала требуют финального раунда и финалистов в снимке — иначе мягко падают в `choosing.listening` (`restoredMatch`); скрытые данные финала (`struckThemes`, `typedAnswers` за финалистами, `revealedIds`, `stakeShownIds`, `finalStriker`) сериализация снимка партии сохраняет. Старые имена финала (`finalBets.*` голосовых ставок) до переделки восстановлены мягко в выбор: таких состояний в машине больше нет.
 27. `finished` → `finished`.
 28. Любой другой путь → `choosing.listening`.
 
@@ -413,7 +341,7 @@ stateDiagram-v2
 
 Сверка пакета тоже не является состоянием XState. Глобальный статус содержит описание пакета и hash: joiner сам сверяет кеш или запрашивает передачу (`packAck: 0`). Начало/сверка (`packStatus`) и новый endpoint игрока снимают прежние hashOk/ready, сбрасывают старые ACK/peer, но не меняют состав, счёт или фазу машины. Heartbeat прежнего endpoint прогресс не сбрасывает. После совпадения sha256 и успешного разбора joiner отправляет `packVerified`; мастер меняет только roster (`hashOk`, 100%), сразу рассылает диф presence, а `ready` остаётся отдельным действием пользователя. Повторный offer того же проверенного пакета повторяет `packVerified`, чтобы обновившийся мастер не застрял на 99%. `debugLog` игрока вообще не меняет машину или снимок: мастер лишь добавляет проверенный ограниченный батч в память debug dump.
 
-Раз в секунду мастер сверяет `chooserId` с presence. Только в `choosing.*`, когда выбирающий `stale` не меньше 10 секунд, `MasterSession` выбирает следующего по кругу из присутствующих и проверенных игроков и шлёт `CHOOSER_OFFLINE`. Отсутствующему после восстановления партии тоже дают полный `PRESENCE_STALE_MS`. В других фазах, включая `answering.*`, presence снимок обновляет, но событие машине не шлёт.
+Раз в секунду мастер сверяет `chooserId` с presence. Только в `choosing.*`, когда выбирающий `stale` не меньше 10 секунд, `MasterSession` выбирает следующего по кругу из присутствующих и проверенных игроков и шлёт `CHOOSER_OFFLINE`; в финале при открытом круге удара тот же проход проверяет и `finalStriker` (если он другой игрок и тоже затих — шлёт второе событие от его имени). Отсутствующему после восстановления партии тоже дают полный `PRESENCE_STALE_MS`. В других фазах, включая `answering.*`, presence снимок обновляет, но событие машине не шлёт.
 
 ### `ADD_PLAYER`
 
@@ -466,26 +394,7 @@ choosing ──QUESTION_SELECTED [selectedAuction]─▶ auction.announcing → 
 - `announcing` на входе (`openAppealNow`): минус при открытой ячейке — окно `open` для этого игрока; ячейка закрыта — окно `closed` для всех с правом (старое окно `open` заменяется). Поэтому кнопка доступна уже во время объявления.
 - `appealNext` — после объявления результата апелляции в серии `closed`: следующий из `queue` → `appealCue`, иначе → `afterQuestion` (новое 7-секундное окно, если ещё есть право).
 
-```mermaid
-stateDiagram-v2
-  announcing --> buzzing: 0/минус, есть кому жать (окно open)
-  buzzing --> appealCue: APPEAL_REQUESTED от lastPlayerId
-  announcing --> afterQuestion: вопрос закрыт
-  afterQuestion --> choosing: есть право (окно closed)
-  afterQuestion --> roundSummaryWindow: последний вопрос раунда, есть право
-  announcing --> appealCue: APPEAL_REQUESTED, stage open
-  roundSummaryWindow --> appealConfirm: APPEAL_REQUESTED
-  roundSummaryWindow --> appealEnd: appealLeft
-  appealEnd --> bridging
-  appealEnd --> finished
-  appealCue --> answering: purpose appeal
-  announcing --> appealNext: серия closed
-  appealNext --> appealCue: очередь не пуста
-  announcing --> appealConfirm: APPEAL_REQUESTED, stage closed
-  choosing --> appealConfirm: APPEAL_REQUESTED, stage closed
-  appealConfirm --> announcing
-  appealNext --> afterQuestion: очередь пуста
-```
+Путь апелляций текстом: объявление (`announcing`, 0/минус при открытой ячейке или закрытый вопрос) → `appealCue` (переответ, заявка от `lastPlayerId`) → `answering`; `afterQuestion` → `choosing` (окно closed) или `roundSummaryWindow` (последний вопрос); из этих окон заявка → `appealConfirm` либо, в серии, `appealNext` → `appealCue` (очередь не пуста) или `afterQuestion` (очередь пуста); `roundSummaryWindow` по `appealLeft` → `appealEnd` → `bridging`/`finished`.
 
 Переходы `APPEAL_REQUESTED` (из любого узла, кроме `paused`/`stopped`/`failed`, только если `validAppeal`: тот же `questionId`/`windowId`, есть право, игрок ещё не в серии):
 

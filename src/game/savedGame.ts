@@ -153,6 +153,17 @@ const canonicalPhases: Record<string, string> = {
   'announcing.holding': 'announcing',
   bridging: 'bridging',
   turnCue: 'turnCue',
+  // Финал 19.10: вычёркивание тем, скрытые ставки и ответы, разбор по одному.
+  finalDraft: 'finalDraft',
+  'finalBets.collecting': 'finalBets.collecting',
+  finalTyped: 'finalTyped',
+  'finalReveal.look': 'finalReveal.look',
+  'finalReveal.verdict': 'finalReveal.verdict',
+  'finalReveal.stakeCue': 'finalReveal.stakeCue',
+  'finalReveal.scoreCue': 'finalReveal.scoreCue',
+  wrapUp: 'wrapUp',
+  // Старые имена финала «Соцопрос/ставка голосом» (до переделки 19 октября) — для старых снимков.
+  // Таких состояний в машине больше нет: при восстановлении они мягко падут в выбор (restoredMatch).
   finalBets: 'finalBets.asking',
   'finalBets.asking': 'finalBets.asking',
   'finalBets.hearing': 'finalBets.asking',
@@ -191,6 +202,13 @@ const questionPhases = new Set([
   'announcing',
   'turnCue',
   'finalBets.asking',
+  // Финал: вопрос уже открыт (ставки — ещё нет, там activeQuestionId не нужен).
+  'finalTyped',
+  'finalReveal.look',
+  'finalReveal.verdict',
+  'finalReveal.stakeCue',
+  'finalReveal.scoreCue',
+  'wrapUp',
   'cat.resume',
   'auction.resume',
   'specialAway',
@@ -351,6 +369,11 @@ export function restoredMatch(pack: QuestionPack, saved: SavedMatch): Pick<
   | 'finalCursor'
   | 'bets'
   | 'betMisses'
+  | 'finalStriker'
+  | 'struckThemes'
+  | 'typedAnswers'
+  | 'revealedIds'
+  | 'stakeShownIds'
   | 'activeStake'
   | 'activeQuestionId'
   | 'activePlayerId'
@@ -376,6 +399,13 @@ export function restoredMatch(pack: QuestionPack, saved: SavedMatch): Pick<
   if ((phase === 'finalBets.asking' || phase === 'turnCue') && (round?.kind !== 'final' || saved.finalists.length === 0)) {
     phase = 'choosing.listening'
   }
+  // Новые фазы финала тоже требуют финального раунда и финалистов; иначе мягко пойдёт в выбор.
+  if (
+    (phase === 'finalDraft' || phase === 'finalBets.collecting' || phase === 'finalTyped' || phase.startsWith('finalReveal.') || phase === 'wrapUp') &&
+    (round?.kind !== 'final' || saved.finalists.length === 0 || !saved.finalists.every((id) => rosterHas(saved.players, id)))
+  ) {
+    phase = 'choosing.listening'
+  }
   let appeal = saved.appeal ?? null
   if (appeal && (questionById(pack.questions, appeal.questionId)?.roundIndex !== roundIndex || round?.kind === 'final')) appeal = null
   if (appeal?.activePlayerId !== null && appeal && phase === 'answering.waiting') phase = 'appealCue'
@@ -397,6 +427,17 @@ export function restoredMatch(pack: QuestionPack, saved: SavedMatch): Pick<
     finalCursor: saved.finalCursor,
     bets: saved.bets.filter((bet) => rosterHas(saved.players, bet.playerId)),
     betMisses: saved.betMisses,
+    // Финал: чей ход вычёркивания; после раскрытия — какие темы вычеркнуты, чьи ответы/ставки названы.
+    finalStriker:
+      saved.finalStriker !== undefined && rosterHas(saved.players, saved.finalStriker)
+        ? saved.finalStriker
+        : openingChooser(saved.players, roundIndex),
+    struckThemes: (saved.struckThemes ?? []).filter((themeId) =>
+      pack.questions.some((question) => question.roundIndex === roundIndex && question.themeId === themeId),
+    ),
+    typedAnswers: readTypedAnswers(saved.typedAnswers, new Set(saved.finalists.filter((id) => rosterHas(saved.players, id)))),
+    revealedIds: (saved.revealedIds ?? []).filter((id) => rosterHas(saved.players, id)),
+    stakeShownIds: (saved.stakeShownIds ?? []).filter((id) => rosterHas(saved.players, id)),
     activeStake: openQuestion ? saved.activeStake : null,
     activeQuestionId: openQuestion ? saved.activeQuestionId : null,
     activePlayerId: openQuestion && saved.activePlayerId !== null && rosterHas(saved.players, saved.activePlayerId) ? saved.activePlayerId : null,
@@ -483,6 +524,11 @@ function matchFromContext(context: GameContext, phase: string): SavedMatch {
     bets: context.bets.map((bet) => ({ playerId: bet.playerId, amount: bet.amount })),
     finalCursor: context.finalCursor,
     betMisses: context.betMisses,
+    finalStriker: context.finalStriker,
+    struckThemes: [...(context.struckThemes ?? [])],
+    typedAnswers: { ...(context.typedAnswers ?? {}) },
+    revealedIds: [...(context.revealedIds ?? [])],
+    stakeShownIds: [...(context.stakeShownIds ?? [])],
     activeQuestionId: context.activeQuestionId,
     activePlayerId: context.activePlayerId,
     activeStake: context.activeStake,
@@ -586,6 +632,16 @@ function sanitize(value: unknown): SavedGame | null {
   const judgmentStatus =
     record.judgmentStatus === null ? null : judgmentStatuses.find((status) => status === record.judgmentStatus)
   if (judgmentStatus === undefined) return null
+  const stakeShownIds = record.stakeShownIds === undefined ? undefined : playerList(record.stakeShownIds)
+  if (stakeShownIds === null) return null
+  const revealedIds = record.revealedIds === undefined ? undefined : playerList(record.revealedIds)
+  if (revealedIds === null) return null
+  const typed = readTypedAnswersOf(record.typedAnswers)
+  if (typed === null) return null
+  const finalStriker = readFinalStriker(record.finalStriker)
+  if (finalStriker === null) return null
+  const struckThemes = record.struckThemes === undefined ? undefined : stringList(record.struckThemes)
+  if (struckThemes === null) return null
   const conference = normalizeConference(record)
   return {
     version: savedGameVersion,
@@ -606,6 +662,11 @@ function sanitize(value: unknown): SavedGame | null {
     bets: bets.filter((bet) => roster.has(bet.playerId)),
     finalCursor,
     betMisses,
+    ...(finalStriker !== undefined ? { finalStriker } : {}),
+    ...(struckThemes !== undefined ? { struckThemes: struckThemes.filter((themeId) => themeId.trim()) } : {}),
+    ...(typed !== undefined && Object.keys(typed).length > 0 ? { typedAnswers: typed } : {}),
+    ...(revealedIds !== undefined ? { revealedIds: revealedIds.filter((id) => roster.has(id)) } : {}),
+    ...(stakeShownIds !== undefined ? { stakeShownIds: stakeShownIds.filter((id) => roster.has(id)) } : {}),
     activeQuestionId,
     activePlayerId,
     activeStake,
@@ -707,6 +768,37 @@ function whole(value: unknown): number | null {
 
 function isPlayerId(value: unknown): value is PlayerId {
   return typeof value === 'number' && Number.isInteger(value) && value >= 1
+}
+
+/** Финал: чей ход вычёркивания. Нет в старых снимках — restoredMatch вернёт выбирающего раунда. */
+function readFinalStriker(value: unknown): PlayerId | undefined | null {
+  if (value === undefined) return undefined
+  return isPlayerId(value) ? value : null
+}
+
+/** Финал: скрытые ответы id → текст (до 200 символов, как в validFinalTyped). */
+function readTypedAnswersOf(value: unknown): Partial<Record<PlayerId, string>> | undefined | null {
+  if (value === undefined) return undefined
+  if (value === null || typeof value !== 'object') return null
+  const out: Partial<Record<PlayerId, string>> = {}
+  for (const [key, text] of Object.entries(value as Record<string, unknown>)) {
+    const id = Number(key)
+    if (!isPlayerId(id) || typeof text !== 'string') return null
+    out[id] = text.slice(0, 200)
+  }
+  return out
+}
+
+/** Восстановление: скрытые ответы держим только за финалистами. */
+function readTypedAnswers(value: unknown, finalists: Set<PlayerId>): Partial<Record<PlayerId, string>> {
+  if (!value || typeof value !== 'object') return {}
+  const out: Partial<Record<PlayerId, string>> = {}
+  for (const [key, text] of Object.entries(value as Record<string, unknown>)) {
+    const id = Number(key)
+    if (!isPlayerId(id) || typeof text !== 'string' || !finalists.has(id)) continue
+    out[id] = text.slice(0, 200)
+  }
+  return out
 }
 
 

@@ -263,6 +263,13 @@ export function attachController(options: {
     })
   }
 
+  /** Полное отцепление контроллера: запланированное вступление кота/аукциона снимается без заказа. */
+  function clearSpecialIntro(): void {
+    if (!specialIntroTimer) return
+    clearTimeout(specialIntroTimer.timer)
+    specialIntroTimer = null
+  }
+
   function scheduleAnnounce(say: () => void): void {
     dropAnnounceWait()
     playTimeoutBeep()
@@ -1137,6 +1144,12 @@ export function attachController(options: {
   let choiceModelTimer = 0
   let choiceSilenceTimer = 0
 
+  /** Полное отцепление: снять таймеры разбора выбора. */
+  function stopChoiceTimers(): void {
+    window.clearTimeout(choiceModelTimer)
+    window.clearTimeout(choiceSilenceTimer)
+  }
+
   function resetChoiceTurn(why: string): void {
     if (choiceTurn.length) diag('слух', `выбор: реплики хода сброшены (${why})`, { count: choiceTurn.length })
     choiceTurn = []
@@ -1879,6 +1892,14 @@ export function attachController(options: {
     answerOverrunTimer = 0
   }
 
+  /** Полное отцепление: снять таймеры попытки, не трогая очередь реплик (она уже никому не нужна). */
+  function clearAnswerTimers(): void {
+    window.clearTimeout(answerModelTimer)
+    window.clearTimeout(answerSilenceTimer)
+    window.clearTimeout(answerDeadlineTimer)
+    window.clearTimeout(answerOverrunTimer)
+  }
+
   function answerTurnLog(): string {
     return answerTurn.map((u) => `#${u.order} ${u.state}${u.speech ? ` ${u.speech}` : ''}${u.judgment ? ` ${u.judgment.status}` : ''}${u.guessing ? ' перебор' : ''} «${u.heard.slice(0, 40)}»`).join('; ')
   }
@@ -2218,6 +2239,13 @@ export function attachController(options: {
     earUnsub()
     clearLobbyBargeIn()
     clearHostEar()
+    // Отцепление контроллера не должно оставлять замыканиям живые таймеры:
+    // после повторного attach старый таймер мог бы позвать say()/beep уже нового прохода.
+    dropAnnounceWait()
+    clearBuzzerWarning()
+    clearSpecialIntro()
+    clearAnswerTimers()
+    stopChoiceTimers()
     onActions?.(null)
     connectToken += 1
     subscription.unsubscribe()

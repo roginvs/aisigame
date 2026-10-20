@@ -825,8 +825,7 @@ describe('game machine', () => {
     expect(statePath(actor.getSnapshot().value)).toBe('stopped')
   })
 
-  it('клик по табло во время уточнения и передачи хода открывает ячейку', () => {
-    const start = () => {
+  it('клик по табло во время уточнения и передачи хода открывает ячейку', () => {    const start = () => {
       const actor = createActor(gameMachine)
       actor.start()
       actor.send({ type: 'START_GAME', pack: demoPack })
@@ -1073,6 +1072,59 @@ describe('game machine', () => {
     expect(statePath(actor.getSnapshot().value)).toBe('finalDraft')
     expect(actor.getSnapshot().context.struckThemes).toEqual(['flora'])
     expect(actor.getSnapshot().context.finalStriker).toBe(1)
+  })
+
+  it('в финале отключение вычёркивающего передаёт право удара следующему по кругу', () => {
+    const pack: QuestionPack = {
+      name: 'Удар2',
+      rounds: [
+        { index: 0, name: 'Первый раунд', kind: 'normal' },
+        { index: 1, name: 'Финал', kind: 'final' },
+      ],
+      warnings: [],
+      questions: [
+        { id: 'q1', roundIndex: 0, themeId: 'rivers', themeName: 'Реки', value: 100, text: 'Куда впадает Волга?', answers: ['Каспийское море'] },
+        { id: 'final-1', roundIndex: 1, themeId: 'capitals', themeName: 'Столицы', value: 0, text: 'Столица Франции?', answers: ['Париж'] },
+        { id: 'final-2', roundIndex: 1, themeId: 'flora', themeName: 'Флоры', value: 0, text: 'Символ Франции?', answers: ['Роза'] },
+        { id: 'final-3', roundIndex: 1, themeId: 'cinema', themeName: 'Кино', value: 0, text: 'Русское кино?', answers: ['Ходят схемы'] },
+      ],
+    }
+    const start = () => {
+      const actor = createActor(gameMachine)
+      actor.start()
+      actor.send({ type: 'START_GAME', pack })
+      actor.send({ type: 'CONNECTED' })
+      actor.send({ type: 'HOST_AUDIO_FINISHED', purpose: 'welcome' })
+      actor.send({ type: 'QUESTION_SELECTED', themeId: 'rivers', value: 100 })
+      vi.advanceTimersByTime(gameConfig.cellFlashMs)
+      actor.send({ type: 'HOST_AUDIO_FINISHED', purpose: 'read' })
+      vi.advanceTimersByTime(gameConfig.buzzerMs)
+      actor.send({ type: 'HOST_AUDIO_FINISHED', purpose: 'announce' })
+      actor.send({ type: 'HOST_AUDIO_FINISHED', purpose: 'bridge' })
+      expect(statePath(actor.getSnapshot().value)).toBe('choosing.listening')
+      // Финальный раунд открывает третий по кругу: ход выбора и право удара пока у одного.
+      expect(actor.getSnapshot().context.finalStriker).toBe(3)
+      expect(actor.getSnapshot().context.chooserId).toBe(3)
+      return actor
+    }
+
+    // Вычёркивающий сам отключился до первого удара: оба токена идут замене.
+    const both = start()
+    both.send({ type: 'CHOOSER_OFFLINE', fromPlayerId: 3, toPlayerId: 1 })
+    const bothContext = both.getSnapshot().context
+    expect(bothContext.chooserId).toBe(1)
+    expect(bothContext.finalStriker).toBe(1)
+
+    // После удара ход выбора остаётся у открывшего раунд, а право удара ушло следующему:
+    // вычёркивающий отключился отдельно — удар переходит, ход выбора не трогается.
+    const striker = start()
+    striker.send({ type: 'QUESTION_SELECTED', themeId: 'flora', value: 0 })
+    expect(striker.getSnapshot().context.finalStriker).toBe(1)
+    expect(striker.getSnapshot().context.chooserId).toBe(3)
+    expect(statePath(striker.getSnapshot().value)).toBe('choosing.listening')
+    striker.send({ type: 'CHOOSER_OFFLINE', fromPlayerId: 1, toPlayerId: 2 })
+    expect(striker.getSnapshot().context.finalStriker).toBe(2)
+    expect(striker.getSnapshot().context.chooserId).toBe(3)
   })
 
   it('вопрос выбирает второй игрок, пока в раунде никто не ответил, затем последний ответивший', () => {
