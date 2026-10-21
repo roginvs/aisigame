@@ -14,7 +14,8 @@ export function createVoice(modelId: string): GameVoice {
     return new RealtimeClient({ model: model.id, wire: new GeminiWire(model.id, Boolean(model.thinking)) })
   }
   if (model.provider === 'qwen') {
-    return new RealtimeClient({ model: model.id, wire: new QwenWire(model.id, readQwenEndpoint()) })
+    // Адрес читается при каждом подключении: вводить его можно уже после выбора модели.
+    return new RealtimeClient({ model: model.id, wire: new QwenWire(model.id, () => readQwenEndpoint()) })
   }
   return new RealtimeClient({ model: model.id })
 }

@@ -172,8 +172,18 @@ export function qwenTranslateInbound(event: object): object | null {
 }
 
 export function qwenSdpUrl(endpoint: string, model: string): string {
-  const host = endpoint.replace(/^https?:\/\//, '').replace(/\/+$/, '')
-  return `https://${host}/api/v1/webrtc/realtime?model=${encodeURIComponent(model)}`
+  return `https://${qwenEndpointHost(endpoint)}/api/v1/webrtc/realtime?model=${encodeURIComponent(model)}`
+}
+
+/**
+ * Хост SDP-обмена из того, что ввёл автор: полный хост, адрес с https://
+ * или голый id workspace — тогда по умолчанию регион Пекин (cn-beijing),
+ * у workspace в Сингапуре в поле стоит полный хост ap-southeast-1.
+ */
+export function qwenEndpointHost(endpoint: string): string {
+  const value = endpoint.trim().replace(/^https?:\/\//, '').replace(/\/+$/, '')
+  if (!value) return ''
+  return value.includes('.') ? value : `${value}.cn-beijing.maas.aliyuncs.com`
 }
 
 /** Приёмник речи ведущей: дорожка WebRTC в <audio>, уровни — через AnalyserNode. */
@@ -288,18 +298,24 @@ export class QwenWire implements VoiceWire {
   private opened = false
   private responseId = ''
   private vadExtrasBroken = false
+  private sessionChannel: RTCDataChannel | null = null
   private readonly model: string
-  private readonly endpoint: string
+  private readonly endpoint: string | (() => string)
+  private host = ''
 
-  constructor(model: string, endpoint: string) {
+  constructor(model: string, endpoint: string | (() => string)) {
     this.model = model
     this.endpoint = endpoint
   }
 
   async open(apiKey: string, sink: VoiceSink, options?: VoiceOpenOptions): Promise<void> {
     this.close()
-    if (!this.endpoint.trim()) {
-      throw new Error('Укажите адрес workspace DashScope под ключом, например: ws-xxxx.cn-beijing.maas.aliyuncs.com')
+    // Адрес читается при каждом подключении: автор мог ввести его уже после того,
+    // как клиент голоса создался при выборе модели (иначе поле терялось).
+    const endpoint = typeof this.endpoint === 'function' ? this.endpoint() : this.endpoint
+    this.host = qwenEndpointHost(endpoint)
+    if (!this.host) {
+      throw new Error('Укажите «Адрес workspace DashScope» под ключом: id workspace или полный хост ws-xxxx.cn-beijing.maas.aliyuncs.com')
     }
     this.sink = sink
     this.responseId = ''
@@ -364,6 +380,7 @@ export class QwenWire implements VoiceWire {
 
   close(): void {
     this.opened = false
+    this.sessionChannel = null
     this.player.close()
     for (const track of this.micStream?.getAudioTracks() ?? []) track.stop()
     this.micStream = null
@@ -392,7 +409,11 @@ export class QwenWire implements VoiceWire {
 
     const dc = pc.createDataChannel('oai-events')
     this.dc = dc
-    dc.addEventListener('message', (event) => this.onMessage(event.data))
+    this.bindChannel(dc)
+    // Свои события шлём в oai-events, но DashScope отвечает и по серверному каналу
+    // (их пример — «txt»): слушать надо оба, а session.update отдавать в тот,
+    // где пришёл session.created. Пока тот не объявился — шлём в oai-events.
+    pc.ondatachannel = (event) => this.bindChannel(event.channel)
     const opened = new Promise<void>((resolve, reject) => {
       const timer = window.setTimeout(() => reject(new Error('Канал событий не открылся')), 15_000)
       dc.addEventListener(
@@ -418,7 +439,7 @@ export class QwenWire implements VoiceWire {
     await waitIce(pc)
     const sdp = pc.localDescription?.sdp
     if (!sdp) throw new Error('Браузер не подготовил описание соединения')
-    const answer = await exchangeQwenSdp(apiKey, qwenSdpUrl(this.endpoint, this.model), sdp)
+    const answer = await exchangeQwenSdp(apiKey, qwenSdpUrl(this.host, this.model), sdp)
     await pc.setRemoteDescription({ type: 'answer', sdp: answer })
     try {
       await opened
@@ -428,8 +449,13 @@ export class QwenWire implements VoiceWire {
     this.opened = true
   }
 
+  private bindChannel(channel: RTCDataChannel): void {
+    channel.addEventListener('message', (event) => this.onMessage(event.data, channel))
+  }
+
   private dcSend(event: object): boolean {
-    const dc = this.dc
+    // После session.created все события сессии уходят в серверный канал, как в их примере WebRTC.
+    const dc = this.sessionChannel && this.sessionChannel.readyState === 'open' ? this.sessionChannel : this.dc
     if (!dc || dc.readyState !== 'open') return false
     try {
       dc.send(JSON.stringify(event))
@@ -443,7 +469,7 @@ export class QwenWire implements VoiceWire {
     this.sink?.message(JSON.stringify(event))
   }
 
-  private onMessage(data: unknown): void {
+  private onMessage(data: unknown, channel?: RTCDataChannel): void {
     if (typeof data !== 'string') return
     let parsed: Loose
     try {
@@ -452,6 +478,7 @@ export class QwenWire implements VoiceWire {
       return
     }
     const type = text(parsed.type)
+    if (type === 'session.created' && channel) this.sessionChannel = channel
     if (type === 'response.created' || type === 'response.done') {
       const id = text(asRecord(parsed.response).id)
       if (id) this.responseId = type === 'response.created' ? id : ''
@@ -499,7 +526,8 @@ async function waitIce(pc: RTCPeerConnection): Promise<void> {
       resolve()
     }
     pc.addEventListener('icegatheringstatechange', done)
-    window.setTimeout(done, 3_000)
+    // Как в примере DashScope: сбор крыльев может занять до 15 секунд.
+    window.setTimeout(done, 15_000)
   })
 }
 
@@ -519,8 +547,9 @@ async function exchangeQwenSdp(apiKey: string, url: string, sdp: string): Promis
     if (response.status === 401) throw new Error('DashScope отклонил ключ (401). Проверьте ключ и workspace.')
     throw new Error(`DashScope ответил ${response.status}. ${clip(body)}`)
   }
-  if (!body.includes('v=')) throw new Error(`Ответ DashScope не похож на SDP. ${clip(body)}`)
-  return body
+  const answer = body.trim().replace(/\r?\n/g, '\r\n') + '\r\n'
+  if (!answer.includes('v=')) throw new Error(`Ответ DashScope не похож на SDP. ${clip(body)}`)
+  return answer
 }
 
 function asRecord(value: unknown): Loose {

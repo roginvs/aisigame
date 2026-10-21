@@ -208,8 +208,8 @@ export function StartScreen(props: {
                       />
                     </label>
                     <p className="status-line">
-                      Адрес из личного кабинета DashScope: идентификатор workspace и регион, например ws-xxxx.cn-beijing.maas.aliyuncs.com
-                      или ws-xxxx.ap-southeast-1.maas.aliyuncs.com.
+                      Адрес из личного кабинета DashScope: можно только id workspace (регион будет Пекин) или полный хост,
+                      например ws-xxxx.cn-beijing.maas.aliyuncs.com; у сингапурского workspace — ws-xxxx.ap-southeast-1.maas.aliyuncs.com.
                     </p>
                   </>
                 ) : null}

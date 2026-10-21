@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest'
 import { hostInstructions } from '../config.ts'
 import { sessionTools } from './tools.ts'
 import {
+  qwenEndpointHost,
   qwenSessionBody,
   qwenSdpUrl,
   qwenTool,
@@ -136,6 +137,20 @@ describe('qwen wire: исходящие', () => {
     expect(qwenSdpUrl('https://ws-2.ap-southeast-1.maas.aliyuncs.com/', 'qwen3.8-omni-flash-realtime')).toBe(
       'https://ws-2.ap-southeast-1.maas.aliyuncs.com/api/v1/webrtc/realtime?model=qwen3.8-omni-flash-realtime',
     )
+    expect(qwenSdpUrl(' ws-3 ', 'qwen3.8-omni-flash-realtime')).toBe(
+      'https://ws-3.cn-beijing.maas.aliyuncs.com/api/v1/webrtc/realtime?model=qwen3.8-omni-flash-realtime',
+    )
+    expect(qwenSdpUrl('ws-4', 'qwen3.8-omni-flash-realtime')).toBe(
+      'https://ws-4.cn-beijing.maas.aliyuncs.com/api/v1/webrtc/realtime?model=qwen3.8-omni-flash-realtime',
+    )
+  })
+
+  it('хост приведения адреса: голый id получает регион Пекина, полный хост не меняется', () => {
+    expect(qwenEndpointHost('ws-mp1e6ozjbcy0r167')).toBe('ws-mp1e6ozjbcy0r167.cn-beijing.maas.aliyuncs.com')
+    expect(qwenEndpointHost('  https://ws-mp1e6ozjbcy0r167.cn-beijing.maas.aliyuncs.com/  ')).toBe(
+      'ws-mp1e6ozjbcy0r167.cn-beijing.maas.aliyuncs.com',
+    )
+    expect(qwenEndpointHost('')).toBe('')
   })
 })
 
