@@ -186,6 +186,22 @@ export function qwenEndpointHost(endpoint: string): string {
   return value.includes('.') ? value : `${value}.cn-beijing.maas.aliyuncs.com`
 }
 
+/**
+ * Полный адрес релея из того, что ввёл автор: путь от корня («/qwen-relay» — тот же
+ * origin, работает под dev-сервером Vite), хост или полный адрес. Пусто — прямой
+ * вызов DashScope: он отклонён им самим (нет CORS-заголовков), так что на проде
+ * без релея будет внятная ошибка, а не молчание.
+ */
+export function qwenRelayEndpoint(value: string): string {
+  const raw = value.trim()
+  if (!raw) return ''
+  const base = raw.startsWith('/')
+    ? `/${raw.replace(/^\/+/, '')}`.replace(/\/+$/, '')
+    : (/^[a-z][a-z0-9+.-]*:\/\//i.test(raw) ? raw : `https://${raw}`).replace(/\/+$/, '')
+  if (!base || base === '/') return ''
+  return base.endsWith('/qwen-relay') ? base : `${base}/qwen-relay`
+}
+
 /** Приёмник речи ведущей: дорожка WebRTC в <audio>, уровни — через AnalyserNode. */
 class TrackPlayer {
   private readonly audio = new Audio()
@@ -298,25 +314,30 @@ export class QwenWire implements VoiceWire {
   private opened = false
   private responseId = ''
   private vadExtrasBroken = false
+  private relayEndpoint = ''
   private sessionChannel: RTCDataChannel | null = null
   private readonly model: string
   private readonly endpoint: string | (() => string)
+  private readonly relay: string | (() => string)
   private host = ''
 
-  constructor(model: string, endpoint: string | (() => string)) {
+  constructor(model: string, endpoint: string | (() => string), relay: string | (() => string) = '') {
     this.model = model
     this.endpoint = endpoint
+    this.relay = relay
   }
 
   async open(apiKey: string, sink: VoiceSink, options?: VoiceOpenOptions): Promise<void> {
     this.close()
-    // Адрес читается при каждом подключении: автор мог ввести его уже после того,
-    // как клиент голоса создался при выборе модели (иначе поле терялось).
+    // Адрес и релей читаются при каждом подключении: автор мог ввести их уже после
+    // того, как клиент голоса создался при выборе модели (иначе поле терялось).
     const endpoint = typeof this.endpoint === 'function' ? this.endpoint() : this.endpoint
     this.host = qwenEndpointHost(endpoint)
     if (!this.host) {
       throw new Error('Укажите «Адрес workspace DashScope» под ключом: id workspace или полный хост ws-xxxx.cn-beijing.maas.aliyuncs.com')
     }
+    const relayValue = typeof this.relay === 'function' ? this.relay() : this.relay
+    this.relayEndpoint = qwenRelayEndpoint(relayValue)
     this.sink = sink
     this.responseId = ''
     this.vadExtrasBroken = false
@@ -439,7 +460,7 @@ export class QwenWire implements VoiceWire {
     await waitIce(pc)
     const sdp = pc.localDescription?.sdp
     if (!sdp) throw new Error('Браузер не подготовил описание соединения')
-    const answer = await exchangeQwenSdp(apiKey, qwenSdpUrl(this.host, this.model), sdp)
+    const answer = await exchangeQwenSdp(apiKey, qwenSdpUrl(this.host, this.model), sdp, this.relayEndpoint)
     await pc.setRemoteDescription({ type: 'answer', sdp: answer })
     try {
       await opened
@@ -531,16 +552,22 @@ async function waitIce(pc: RTCPeerConnection): Promise<void> {
   })
 }
 
-async function exchangeQwenSdp(apiKey: string, url: string, sdp: string): Promise<string> {
+async function exchangeQwenSdp(apiKey: string, directUrl: string, sdp: string, relay: string): Promise<string> {
+  const headers: Record<string, string> = { Authorization: `Bearer ${apiKey}`, 'Content-Type': 'application/sdp' }
+  if (relay) headers['X-Qwen-Target'] = directUrl
   let response: Response
   try {
-    response = await fetch(url, {
+    response = await fetch(relay || directUrl, {
       method: 'POST',
-      headers: { Authorization: `Bearer ${apiKey}`, 'Content-Type': 'application/sdp' },
+      headers,
       body: sdp,
     })
   } catch {
-    throw new Error('Браузер не смог отправить запрос к DashScope. Часто это сеть или CORS: прямой вызов из страницы не прошёл.')
+    throw new Error(
+      relay
+        ? `Релей DashScope (${relay}) не ответил. Проверьте адрес релея и что релей запущен.`
+        : 'DashScope не принимает прямые вызовы из браузера (нет CORS-заголовков). Укажите «Адрес релея» под полем workspace: /qwen-relay под dev-сервером или адрес своего Worker (relay/README.md).',
+    )
   }
   const body = await response.text()
   if (!response.ok) {

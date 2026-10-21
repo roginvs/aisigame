@@ -1,5 +1,5 @@
 import { MockRealtimeClient } from './mockClient.ts'
-import { readQwenEndpoint, voiceById } from './models.ts'
+import { readQwenEndpoint, readQwenRelay, voiceById } from './models.ts'
 import { RealtimeClient, type GameVoice } from './client.ts'
 import { GeminiWire } from './geminiWire.ts'
 import { GrokWire } from './grokWire.ts'
@@ -15,7 +15,7 @@ export function createVoice(modelId: string): GameVoice {
   }
   if (model.provider === 'qwen') {
     // Адрес читается при каждом подключении: вводить его можно уже после выбора модели.
-    return new RealtimeClient({ model: model.id, wire: new QwenWire(model.id, () => readQwenEndpoint()) })
+    return new RealtimeClient({ model: model.id, wire: new QwenWire(model.id, () => readQwenEndpoint(), () => readQwenRelay()) })
   }
   return new RealtimeClient({ model: model.id })
 }

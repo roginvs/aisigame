@@ -62,11 +62,13 @@ import {
   markModelSwitch,
   readProviderKey,
   readQwenEndpoint,
+  readQwenRelay,
   readVoiceModelId,
   takeModelSwitchNotice,
   voiceById,
   writeProviderKey,
   writeQwenEndpoint,
+  writeQwenRelay,
   writeVoiceModelId,
 } from './realtime/models.ts'
 import { audioJudgmentCapable, judgmentModeFromUrl, writeJudgmentMode, type JudgmentInputMode } from './realtime/judgmentRequest.ts'
@@ -131,6 +133,7 @@ export default function App() {
   const [googleKey, setGoogleKey] = useState(() => readProviderKey('google'))
   const [qwenKey, setQwenKey] = useState(() => readProviderKey('qwen'))
   const [qwenEndpoint, setQwenEndpoint] = useState(() => readQwenEndpoint())
+  const [qwenRelay, setQwenRelay] = useState(() => readQwenRelay())
   const [showKey, setShowKey] = useState(false)
   const [link, setLink] = useState<LinkStatus>(initialLink)
   const catalogIds = packCatalog.map((item) => item.id)
@@ -579,6 +582,11 @@ export default function App() {
   function rememberQwenEndpoint(value: string) {
     setQwenEndpoint(value)
     writeQwenEndpoint(value)
+  }
+
+  function rememberQwenRelay(value: string) {
+    setQwenRelay(value)
+    writeQwenRelay(value)
   }
 
   function chooseModel(id: string) {
@@ -1254,6 +1262,8 @@ export default function App() {
         onApiKey={rememberKey}
         qwenEndpoint={qwenEndpoint}
         onQwenEndpoint={rememberQwenEndpoint}
+        qwenRelay={qwenRelay}
+        onQwenRelay={rememberQwenRelay}
         onToggleKey={() => setShowKey((value) => !value)}
         onClearKey={() => rememberKey('')}
         onPack={choosePack}

@@ -1,4 +1,5 @@
 import fs from 'node:fs'
+import type { IncomingMessage, ServerResponse } from 'node:http'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import react from '@vitejs/plugin-react'
@@ -36,6 +37,72 @@ function localPackCatalog(): Plugin {
   }
 }
 
+const relayHostSuffix = '.maas.aliyuncs.com'
+
+/**
+ * DashScope не отдаёт браузеру CORS-заголовки (21 октября 2026 проверено на проде),
+ * поэтому dev-сервер пересылает SDP-обмен за него: POST /qwen-relay с адресом цели
+ * в заголовке X-Qwen-Target. Клиент передаёт свой ключ в Authorization; сервер здесь
+ * его не хранит. Такой же пересылкой занимается продовый Worker (relay/worker.js).
+ */
+function qwenRelay(): Plugin {
+  return {
+    name: 'qwen-relay',
+    configureServer(server) {
+      server.middlewares.use('/qwen-relay', (req, res) => {
+        void forwardQwenSdp(req, res)
+      })
+    },
+  }
+}
+
+async function forwardQwenSdp(req: IncomingMessage, res: ServerResponse): Promise<void> {
+  const fail = (status: number, message: string) => {
+    res.statusCode = status
+    res.setHeader('Content-Type', 'text/plain; charset=utf-8')
+    res.end(message)
+  }
+  if (req.method !== 'POST') {
+    fail(405, 'Релей понимает только POST')
+    return
+  }
+  const rawTarget = req.headers['x-qwen-target']
+  const targetHeader = Array.isArray(rawTarget) ? rawTarget[0] : rawTarget
+  let target: URL
+  try {
+    target = new URL(targetHeader ?? '')
+  } catch {
+    fail(400, 'В запросе нет адреса X-Qwen-Target')
+    return
+  }
+  if (target.protocol !== 'https:' || !target.hostname.endsWith(relayHostSuffix)) {
+    fail(400, `Релей пересылает только на https://*${relayHostSuffix}`)
+    return
+  }
+  const body = await new Promise<Buffer | null>((resolve) => {
+    const chunks: Buffer[] = []
+    req.on('data', (chunk: Buffer) => chunks.push(chunk))
+    req.on('end', () => resolve(Buffer.concat(chunks)))
+    req.on('error', () => resolve(null))
+  })
+  if (!body) {
+    fail(400, 'Не прочитали тело запроса')
+    return
+  }
+  try {
+    const upstream = await fetch(target, {
+      method: 'POST',
+      headers: { Authorization: req.headers.authorization ?? '', 'Content-Type': 'application/sdp' },
+      body: new Uint8Array(body),
+    })
+    res.statusCode = upstream.status
+    res.setHeader('Content-Type', upstream.headers.get('Content-Type') ?? 'text/plain; charset=utf-8')
+    res.end(Buffer.from(await upstream.arrayBuffer()))
+  } catch {
+    fail(502, 'DashScope не ответил')
+  }
+}
+
 // Dev and `npm run look` stay at `/`. The production build is published at
 // https://roginvs.github.io/aisigame/, so assets need that project prefix.
 export default defineConfig(({ command, mode }) => ({
@@ -44,7 +111,7 @@ export default defineConfig(({ command, mode }) => ({
     __AISIGAME_COMMIT__: JSON.stringify(commitStamp()),
     __AISIGAME_COMMIT_DATE__: JSON.stringify(commitDate()),
   },
-  plugins: [react(), localPackCatalog()],
+  plugins: [react(), localPackCatalog(), qwenRelay()],
   server: {
     host: true,
     port: 5173,

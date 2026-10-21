@@ -105,3 +105,14 @@ export function readQwenEndpoint(storage: Storage = localStorage): string {
 export function writeQwenEndpoint(value: string, storage: Storage = localStorage): void {
   storage.setItem(qwenEndpointStorageKey, value)
 }
+
+/** DashScope не отдаёт браузеру CORS и не берёт ключ из адреса WebSocket: SDP-обмен идёт через релей. */
+export const qwenRelayStorageKey = 'aisigame.qwenRelay'
+
+export function readQwenRelay(storage: Storage = localStorage): string {
+  return storage.getItem(qwenRelayStorageKey) ?? ''
+}
+
+export function writeQwenRelay(value: string, storage: Storage = localStorage): void {
+  storage.setItem(qwenRelayStorageKey, value)
+}

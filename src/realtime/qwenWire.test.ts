@@ -3,6 +3,7 @@ import { hostInstructions } from '../config.ts'
 import { sessionTools } from './tools.ts'
 import {
   qwenEndpointHost,
+  qwenRelayEndpoint,
   qwenSessionBody,
   qwenSdpUrl,
   qwenTool,
@@ -151,6 +152,17 @@ describe('qwen wire: исходящие', () => {
       'ws-mp1e6ozjbcy0r167.cn-beijing.maas.aliyuncs.com',
     )
     expect(qwenEndpointHost('')).toBe('')
+  })
+
+  it('адрес релея: путь от корня, хост и полный адрес приводятся к /qwen-relay', () => {
+    expect(qwenRelayEndpoint('')).toBe('')
+    expect(qwenRelayEndpoint('   ')).toBe('')
+    expect(qwenRelayEndpoint('/')).toBe('')
+    expect(qwenRelayEndpoint('/qwen-relay')).toBe('/qwen-relay')
+    expect(qwenRelayEndpoint('/qwen-relay/')).toBe('/qwen-relay')
+    expect(qwenRelayEndpoint('my-relay.workers.dev')).toBe('https://my-relay.workers.dev/qwen-relay')
+    expect(qwenRelayEndpoint('https://my-relay.workers.dev/')).toBe('https://my-relay.workers.dev/qwen-relay')
+    expect(qwenRelayEndpoint('https://my-relay.workers.dev/qwen-relay')).toBe('https://my-relay.workers.dev/qwen-relay')
   })
 })
 

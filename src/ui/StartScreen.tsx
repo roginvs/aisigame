@@ -29,6 +29,8 @@ export function StartScreen(props: {
   onApiKey: (value: string) => void
   qwenEndpoint: string
   onQwenEndpoint: (value: string) => void
+  qwenRelay: string
+  onQwenRelay: (value: string) => void
   onToggleKey: () => void
   onClearKey: () => void
   onPack: (id: string) => void
@@ -69,6 +71,8 @@ export function StartScreen(props: {
     onApiKey,
     qwenEndpoint,
     onQwenEndpoint,
+    qwenRelay,
+    onQwenRelay,
     onToggleKey,
     onClearKey,
     onPack,
@@ -210,6 +214,21 @@ export function StartScreen(props: {
                     <p className="status-line">
                       Адрес из личного кабинета DashScope: можно только id workspace (регион будет Пекин) или полный хост,
                       например ws-xxxx.cn-beijing.maas.aliyuncs.com; у сингапурского workspace — ws-xxxx.ap-southeast-1.maas.aliyuncs.com.
+                    </p>
+                    <label className="field">
+                      <span>Адрес релея (необязательно)</span>
+                      <input
+                        value={qwenRelay}
+                        autoComplete="off"
+                        spellCheck={false}
+                        placeholder="/qwen-relay"
+                        onChange={(event) => onQwenRelay(event.target.value)}
+                      />
+                    </label>
+                    <p className="status-line">
+                      DashScope не пускает браузер напрямую (нет CORS), поэтому обмен SDP идёт через релей:
+                      «/qwen-relay» под dev-сервером этого проекта или адрес своего Worker (deploy — relay/README.md).
+                      Пусто — прямой вызов, без релея сайт не подключится.
                     </p>
                   </>
                 ) : null}
