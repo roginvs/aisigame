@@ -1,0 +1,4 @@
+# Конфиг релея Qwen для aisigame: деплой — relay/README.md.
+name = "aisigame-qwen-relay"
+main = "worker.js"
+compatibility_date = "2026-10-01"
