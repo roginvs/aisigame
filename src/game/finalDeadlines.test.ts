@@ -3,6 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { gameConfig } from '../config.ts'
 import { finalStakeMs, finalTypedMs } from '../options.ts'
 import { gameMachine, statePath } from './machine.ts'
+import { persistMatch } from './savedGame.ts'
 import type { QuestionPack } from './types.ts'
 
 const pack: QuestionPack = {
@@ -49,6 +50,49 @@ describe('финал: общий срок скрытого ввода', () => {
     expect(statePath(actor.getSnapshot().value)).toBe('flashing')
     expect(actor.getSnapshot().context.bets).toEqual([{ playerId: 1, amount: 50 }, { playerId: 2, amount: 0 }, { playerId: 3, amount: 0 }])
     actor.stop()
+  })
+
+  it('финалист без записи ставки разбирается со ставкой 0', () => {
+    const actor = reachStakes()
+    for (const playerId of [1, 2, 3]) actor.send({ type: 'FINAL_STAKE', playerId, amount: 50 })
+    vi.advanceTimersByTime(gameConfig.cellFlashMs)
+    actor.send({ type: 'HOST_AUDIO_FINISHED', purpose: 'read' })
+    actor.send({ type: 'HOST_AUDIO_FINISHED', purpose: 'turn' })
+    for (const playerId of [1, 2, 3]) actor.send({ type: 'FINAL_TYPED', playerId, text: 'нет' })
+    expect(statePath(actor.getSnapshot().value)).toBe('finalReveal.look')
+    const data = new Map<string, string>()
+    const storage = {
+      get length() { return data.size },
+      getItem: (key: string) => data.get(key) ?? null,
+      setItem: (key: string, value: string) => { data.set(key, value) },
+      removeItem: (key: string) => { data.delete(key) },
+      clear: () => data.clear(),
+      key: (index: number) => [...data.keys()][index] ?? null,
+    }
+    const saved = persistMatch({
+      packId: 'p', packFile: '', path: 'finalReveal.look',
+      context: { ...actor.getSnapshot().context, bets: [] },
+    }, storage)
+    actor.stop()
+    if (!saved) throw new Error('снимок финала не записался')
+    const next = createActor(gameMachine).start()
+    next.send({ type: 'CONTINUE_GAME', pack, saved })
+    next.send({ type: 'CONNECTED' })
+    expect(statePath(next.getSnapshot().value)).toBe('finalReveal.look')
+    expect(next.getSnapshot().context.activeStake).toBe(0)
+    const playerId = next.getSnapshot().context.activePlayerId
+    const score = next.getSnapshot().context.players.find((player) => player.id === playerId)?.score
+    next.send({
+      type: 'ANSWER_JUDGED',
+      judgment: {
+        questionId: 'f1', playerId: playerId ?? 1, attemptId: next.getSnapshot().context.attemptId,
+        status: 'incorrect', heard: 'нет', reason: 'не то',
+      },
+    })
+    next.send({ type: 'HOST_AUDIO_FINISHED', purpose: 'announce' })
+    next.send({ type: 'HOST_AUDIO_FINISHED', purpose: 'stake' })
+    expect(next.getSnapshot().context.players.find((player) => player.id === playerId)?.score).toBe(score)
+    next.stop()
   })
 
   it('ответ одного игрока не перезапускает общий таймер ответов', () => {

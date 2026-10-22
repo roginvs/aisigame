@@ -1330,7 +1330,7 @@ export const gameMachine = setup({
       clarifications: () => 0,
       activeStake: ({ context }) => {
         const playerId = currentFinalist(context)
-        return context.bets.find((bet) => bet.playerId === playerId)?.amount ?? 1
+        return context.bets.find((bet) => bet.playerId === playerId)?.amount ?? 0
       },
       heard: () => '',
       judgmentReason: () => '',
