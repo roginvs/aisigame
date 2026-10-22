@@ -1,7 +1,15 @@
 import { describe, expect, it } from 'vitest'
-import { choicePrompt, echoesChoicePrompt, priceWords } from './choicePrompt.ts'
+import { choicePrompt, echoesChoicePrompt, optionsPrompt, playersPrompt, priceWords } from './choicePrompt.ts'
+import { echoesTranscriptionPrompt } from './promptEcho.ts'
 
 describe('choicePrompt', () => {
+  it('пустой список не подсовывает распознавателю команду', () => {
+    expect(choicePrompt('normal', [])).toBe('')
+    expect(playersPrompt([])).toBe('')
+    expect(optionsPrompt([])).toBe('')
+    expect(echoesTranscriptionPrompt('Реки двести', '')).toBe(false)
+  })
+
   it('подсказывает распознаванию открытые темы и номиналы', () => {
     expect(priceWords(100)).toBe('сто')
     expect(priceWords(1200)).toBe('тысяча двести')

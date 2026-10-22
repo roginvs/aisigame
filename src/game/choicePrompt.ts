@@ -26,7 +26,7 @@ export function priceWords(value: number): string {
 const transcriptionPromptMax = 1024
 
 export function choicePrompt(kind: 'normal' | 'final', cells: { theme: string; value: number }[], prices = asrChoicePromptPrices): string {
-  if (!cells.length) return 'Игрок выбирает ячейку на табло.'
+  if (!cells.length) return ''
   // Только темы: номиналы — обычные числительные, их распознавание слышит и так,
   // а длинный каталог с ценами на шуме распознавание выдаёт целиком вместо речи.
   if (kind === 'final' || !prices) {
@@ -79,13 +79,13 @@ export function wrapCatalog(body: string): string {
 
 /** Подсказка распознаванию при выборе получателя кота: имена кандидатов, тот же формат и предел длины, что у каталога ячеек. */
 export function playersPrompt(names: string[]): string {
-  if (!names.length) return 'Игрок называет другого игрока.'
+  if (!names.length) return ''
   return wrapCatalog(names.join('; '))
 }
 
 /** Подсказка для ставки: варианты экрана суммами со словами («300 триста»), «пас», «ва-банк». */
 export function optionsPrompt(options: Array<{ kind: 'pass' } | { kind: 'stake' | 'allIn' | 'min' | 'max'; amount: number }>): string {
-  if (!options.length) return 'Игрок называет ставку.'
+  if (!options.length) return ''
   return wrapCatalog(options.map((option) => {
     if (option.kind === 'pass') return 'пас'
     const amount = priceHint(option.amount, true)
