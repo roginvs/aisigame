@@ -204,6 +204,7 @@ export type SavedMatch = AppealFields & {
   finalists: PlayerId[]
   bets: Bet[]
   finalCursor: number
+  /** Не используется: промах ставки и так становится нулём. Поле остаётся, чтобы старые сохранения читались. */
   betMisses: number
   /** Финал: чей ход вычёркивания темы. Нет в старых снимках — восстановится как выбирающий раунда. */
   finalStriker?: PlayerId
@@ -293,6 +294,7 @@ export type GameContext = AppealFields & {
   finalists: PlayerId[]
   finalCursor: number
   bets: Bet[]
+  /** Не используется: промах ставки и так становится нулём. Поле остаётся, чтобы старые сохранения читались. */
   betMisses: number
   /** Кто вычеркнул темы в финале: идёт по кругу от выбирающего раунда, до одной открытой темы. */
   finalStriker?: PlayerId
