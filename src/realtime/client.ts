@@ -163,14 +163,15 @@ export class RealtimeClient {
     /** Повтор хода, когда ответ пришёл без вызова функции (Qwen иногда отвечает текстом). */
     retries: number
   } | null = null
-  /** Isolated tool calls use conversation:none — their call_id is not in the session. */
-  private lastToolIsolated = false
+  /** call_id принадлежит конкретному вызову, а не последнему запрошенному инструменту. */
+  private toolOutputs = new Map<string, { isolated: boolean; sent: boolean }>()
   private inputStartedAt: number | null = null
   /** `audio_start_ms` из speech_started — длительность по аудиобуферу, а не по времени прихода событий. */
   private inputAudioStartMs: number | null = null
   /** Идущие ответы модели: отменяем по id, включая ответы вне основной истории разговора. */
   private activeResponses = new Set<string>()
   private responseRequests = new ResponseRequests()
+  private eventSerial = 0
   private inputItemId: string | null = null
   /** Запасной commit: длительность реплики, которую видит уровень, а модель — нет (fa584db п. 1). */
   private pendingForcedUtterance: { durationMs: number } | null = null
@@ -707,6 +708,7 @@ export class RealtimeClient {
     })
     this.markCut(this.speech, `оборвали мы: ${reason || 'без причины'}`)
     this.responseRequests.cancel(this.speech?.responseToken ?? null)
+    this.responseRequests.cancel(this.pendingTool?.responseToken ?? null)
     this.speech = null
     this.pendingSpeak = null
     this.clearFlushTimer()
@@ -735,6 +737,7 @@ export class RealtimeClient {
     this.clearFlushTimer()
     this.clearSpeechTimers()
     this.pendingSpeak = null
+    this.responseRequests.cancel(this.pendingTool?.responseToken ?? null)
     this.pendingTool = null
     this.speech = {
       responseToken: null,
@@ -775,12 +778,12 @@ export class RealtimeClient {
   /** audioItemId — реплика игрока: модель получает её звук (item_reference), а не только расшифровку. */
   requestTool(purpose: string, turn: number, name: string, instructions: string, isolated = false, tool?: { name: string }, audioItemId?: string): void {
     this.responseRequests.cancel(this.speech?.responseToken ?? null)
+    this.responseRequests.cancel(this.pendingTool?.responseToken ?? null)
     this.clearSpeechTimers()
     this.clearFlushTimer()
     this.pendingSpeak = null
     this.speech = null
     this.toolMode = 'text'
-    this.lastToolIsolated = isolated
     const audioReady = Boolean(audioItemId && isolated && this.judgmentCapabilities().isolatedAudioReference &&
       this.audioItems.status(this.audioItems.reference(audioItemId)).ready)
     if (audioItemId) diag('слух', `${name}: ${audioReady ? 'со звуком реплики' : 'без звука (только текст)'}`, { audioItemId })
@@ -796,7 +799,9 @@ export class RealtimeClient {
   sendToolOutput(callId: string, output: unknown): void {
     // У isolated tool response conversation:none — call_id в сессии нет,
     // conversation.item.create даёт invalid_tool_call_id и только шумит в лог.
-    if (this.lastToolIsolated) return
+    const owner = this.toolOutputs.get(callId)
+    if (!owner || owner.isolated || owner.sent) return
+    owner.sent = true
     this.send({
       type: 'conversation.item.create',
       item: {
@@ -824,6 +829,7 @@ export class RealtimeClient {
     this.inputAudioStartMs = null
     this.activeResponses.clear()
     this.responseRequests.reset()
+    this.toolOutputs.clear()
     this.micLive = false
     this.wire?.close()
     this.inputStartedAt = null
@@ -905,10 +911,17 @@ export class RealtimeClient {
       return false
     }
     const record = asRecord(event)
+    const eventId = type === 'response.create'
+      ? (typeof record.event_id === 'string' ? record.event_id : `client-event-${++this.eventSerial}`)
+      : ''
     const request = type === 'response.create' ? this.responseRequests.sent(asRecord(record.response),
-      typeof record.event_id === 'string' ? record.event_id : undefined) : null
+      eventId) : null
     if (owner && request) owner.responseToken = request.token
-    const outbound = request ? { ...event, event_id: request.eventId } : event
+    const response = asRecord(record.response)
+    // event_id нужен только у response.create: по нему ошибка находит свою отправку.
+    // Остальные события не помечаем — отмена и session.update остаются прежней формы.
+    const outbound = request ? { ...event, event_id: request.eventId,
+      response: { ...response, metadata: { ...asRecord(response.metadata), requestId: request.requestId } } } : event
     pushTrace('out', type, outbound)
     try {
       if (this.wire) {
@@ -928,6 +941,7 @@ export class RealtimeClient {
   private sendToolRequest(mode: 'text' | 'audio'): void {
     const pending = this.pendingTool
     if (!pending) return
+    this.responseRequests.cancel(pending.responseToken)
     this.cancelActiveResponse()
     const response = pending.isolated
       ? isolatedToolResponse({
@@ -1041,6 +1055,9 @@ export class RealtimeClient {
 
     if (type === 'error' || type === 'invalid_request_error') {
       const error = asRecord(event.error)
+      const errorId = typeof error.event_id === 'string' ? error.event_id : ''
+      const responseId = typeof error.response_id === 'string' ? error.response_id : ''
+      const errorRequest = errorId ? this.responseRequests.forEvent(errorId) : this.responseRequests.get({ id: responseId })
       if (typeof error.event_id === 'string') this.responseRequests.rejected(error.event_id)
       // Гонка: ответ закончился раньше нашей отмены. Не ошибка и не повод проваливать tool.
       if (error.code === 'response_cancel_not_active') return
@@ -1052,10 +1069,14 @@ export class RealtimeClient {
       }
       const message = readErrorMessage(event)
       pushTrace('note', `Ошибка API: ${message}`)
-      const errorId = typeof error.event_id === 'string' ? error.event_id : ''
-      const responseId = typeof error.response_id === 'string' ? error.response_id : ''
       const judge = this.judgeRequests.get(errorId || this.judgeResponseIds.get(responseId) || '')
       if (judge) { judge.finish(null, message); return }
+      // Чужой найденный запрос не валит текущий ход. Незнакомый event_id — как раньше:
+      // ошибка относится к тому, что ждём, иначе Qwen без эха нашего id никогда не повторит ход.
+      if (errorRequest && (errorRequest.cancelled || errorRequest.token !== this.pendingTool?.responseToken)) {
+        pushTrace('note', 'ошибка другого запроса не меняет ожидающий инструмент', { eventId: errorId, responseId })
+        return
+      }
       if (this.pendingTool && this.toolMode === 'text' && /modalit|output/i.test(message)) {
         this.toolMode = 'audio'
         this.sendToolRequest('audio')
@@ -1269,10 +1290,31 @@ export class RealtimeClient {
         pushTrace('note', `поздний ${call.name} от другой отправки (ответ ${responseId}), жду ${pending.turn}`)
         return
       }
-      if (Number.isNaN(turn) && (!pending || !request || request.token !== pending.responseToken)) return
-      if (pending && (Number.isNaN(turn) || turn === pending.turn)) this.pendingTool = null
+      if (request?.cancelled) return
+      // Qwen не эхомит ход: принимаем только отправку, связанную через created.
+      // OpenAI эхомит turn: тот же ход принимаем и без created, чужой turn уже отсеян выше.
+      const owned = Boolean(pending && request && request.token === pending.responseToken)
+      const markedSameTurn = Boolean(pending && !Number.isNaN(turn) && turn === pending.turn && (!request || owned))
+      if (!pending || !(owned || markedSameTurn)) return
+      if (call.name !== pending.name) {
+        if (pending.retries < 1) {
+          pending.retries += 1
+          pushTrace('note', `${pending.name}: пришёл ${call.name} вместо этой функции — повторяю ход`)
+          this.sendToolRequest(this.toolMode)
+          return
+        }
+        pushTrace('note', `${pending.name}: чужая функция и после повтора — отдаю ходу`)
+        this.pendingTool = null
+        if (pending.purpose === 'select' || pending.purpose === 'catPick' || pending.purpose === 'specialBid') {
+          this.onToolCall(null, toolPurposes[pending.name] ?? pending.purpose, pending.turn)
+        }
+        return
+      }
+      this.pendingTool = null
+      this.toolOutputs.set(call.callId, { isolated: pending.isolated, sent: false })
+      if (this.toolOutputs.size > 256) this.toolOutputs.delete(this.toolOutputs.keys().next().value!)
       // Метка отсутствует: конкретную отправку уже проверили по response.created.
-      this.onToolCall(call, purpose, Number.isNaN(turn) ? (pending ? pending.turn : -1) : turn)
+      this.onToolCall(call, purpose, pending.turn)
       return
     }
     if (!this.speech) return

@@ -9,7 +9,9 @@ export class ResponseRequests {
 
   sent(response: Record<string, unknown>, eventId?: string): ResponseRequest {
     const token = ++this.serial
-    const request = { ...metadataOf(response), token, eventId: eventId || `client-response-${token}` }
+    const metadata = metadataOf(response)
+    const id = eventId || `client-response-${token}`
+    const request = { ...metadata, requestId: metadata.requestId || id, token, eventId: id }
     this.queued.push(request)
     return request
   }
@@ -34,7 +36,16 @@ export class ResponseRequests {
   }
 
   get(response: Record<string, unknown>): ResponseRequest | undefined {
-    return typeof response.id === 'string' ? this.responses.get(response.id) : undefined
+    const known = typeof response.id === 'string' ? this.responses.get(response.id) : undefined
+    if (known) return known
+    const requestId = metadataOf(response).requestId
+    if (!requestId) return undefined
+    return this.queued.find((request) => request.requestId === requestId)
+  }
+
+  forEvent(eventId: string): ResponseRequest | undefined {
+    return this.queued.find((request) => request.eventId === eventId) ??
+      [...this.responses.values()].find((request) => request.eventId === eventId)
   }
 
   cancel(token: number | null): void {

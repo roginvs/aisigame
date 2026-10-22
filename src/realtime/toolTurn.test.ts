@@ -187,6 +187,70 @@ describe('вызов функции без метки хода (Qwen/DashScope)'
     expect(onToolCall).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({ name: 'submitAnswerJudgment' }), 'judge', 42)
   })
 
+  it('ответ с меткой хода и чужой функцией повторяет ожидаемый вызов', () => {
+    const onToolCall = vi.fn()
+    client.onToolCall = onToolCall
+    client.requestTool('select', 5, 'selectQuestion', 'выбери')
+    feed({
+      type: 'response.done',
+      response: {
+        id: 'marked',
+        status: 'completed',
+        metadata: { purpose: 'select', turn: '5' },
+        output: [selectCall('auctionBid')],
+      },
+    })
+    expect(onToolCall).not.toHaveBeenCalled()
+    expect(sent.filter((event) => event.type === 'response.create')).toHaveLength(2)
+    feed({
+      type: 'response.done',
+      response: {
+        id: 'marked-2',
+        status: 'completed',
+        metadata: { purpose: 'select', turn: '5' },
+        output: [selectCall('selectQuestion')],
+      },
+    })
+    expect(onToolCall).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({ name: 'selectQuestion' }), 'select', 5)
+  })
+
+  it('ошибка чужой отправки не валит текущий ход, ошибка без id — валит', () => {
+    const onToolCall = vi.fn()
+    client.onToolCall = onToolCall
+    client.requestTool('select', 5, 'selectQuestion', 'выбери')
+    const own = sent.find((event) => event.type === 'response.create')
+    client.requestSpeech('announce', 6, 'Скажи итог')
+    const speech = sent.filter((event) => event.type === 'response.create').at(-1)
+    client.requestTool('select', 7, 'selectQuestion', 'ещё раз')
+    feed({ type: 'error', error: { event_id: speech?.event_id, message: 'server had an error' } })
+    expect(onToolCall).not.toHaveBeenCalled()
+    feed({ type: 'error', error: { event_id: own?.event_id, message: 'server had an error' } })
+    expect(onToolCall).not.toHaveBeenCalled()
+    feed({ type: 'error', error: { message: 'server had an error' } })
+    expect(onToolCall).toHaveBeenCalledExactlyOnceWith(null, 'select', 7)
+  })
+
+  it('ответ isolated-вызова не пишется в историю, обычный — пишется один раз', () => {
+    client.onToolCall = () => {}
+    client.requestTool('judge', 1, 'submitAnswerJudgment', 'оцени', true)
+    feed({ type: 'response.created', response: { id: 'iso' } })
+    feed({ type: 'response.done', response: { id: 'iso', status: 'completed', output: [selectCall('submitAnswerJudgment')] } })
+    client.sendToolOutput('call_1', { accepted: true })
+    expect(sent.some((event) => event.type === 'conversation.item.create')).toBe(false)
+    client.requestTool('select', 2, 'selectQuestion', 'выбери')
+    feed({ type: 'response.created', response: { id: 'plain' } })
+    feed({
+      type: 'response.done',
+      response: { id: 'plain', status: 'completed', output: [{ ...selectCall('selectQuestion'), call_id: 'call_2' }] },
+    })
+    client.sendToolOutput('call_1', { accepted: true })
+    client.sendToolOutput('call_2', { accepted: true })
+    client.sendToolOutput('call_2', { accepted: true })
+    const outputs = sent.filter((event) => event.type === 'conversation.item.create')
+    expect(outputs).toHaveLength(1)
+    expect(outputs[0]?.item).toMatchObject({ call_id: 'call_2' })
+  })
+
   it('ошибка конкретной отправки до created снимает только её место в очереди', () => {
     const onToolCall = vi.fn()
     client.onToolCall = onToolCall
