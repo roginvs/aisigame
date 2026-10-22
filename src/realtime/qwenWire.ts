@@ -202,8 +202,8 @@ export function qwenRelayEndpoint(value: string): string {
   return base.endsWith('/qwen-relay') ? base : `${base}/qwen-relay`
 }
 
-/** Приёмник речи ведущей: дорожка WebRTC в <audio>, уровни — через AnalyserNode. */
-class TrackPlayer {
+/** Приёмник речи ведущей: дорожка WebRTC в <audio>, уровни — через AnalyserNode. Экспорт — для тестов. */
+export class TrackPlayer {
   private readonly audio = new Audio()
   private analyser: AnalyserNode | null = null
   private source: MediaStreamAudioSourceNode | null = null
