@@ -171,8 +171,8 @@ async function joinConference(context: import('@playwright/test').BrowserContext
     await guest.goto(invite.href)
     await guest.getByLabel('Ваше имя').fill('Гость')
     await guest.getByRole('button', { name: 'Подключиться' }).click()
-    await expect(guest.getByRole('button', { name: 'Я готов' })).toBeEnabled({ timeout: 60_000 })
-    await guest.getByRole('button', { name: 'Я готов' }).click()
+    await expect(guest.getByRole('button', { name: 'Я в игре' })).toBeEnabled({ timeout: 60_000 })
+    await guest.getByRole('button', { name: 'Я в игре' }).click()
     await master.getByRole('button', { name: 'Начать игру' }).click()
   return { master, guest }
 }

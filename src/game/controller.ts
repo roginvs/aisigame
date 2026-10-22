@@ -752,6 +752,10 @@ export function attachController(options: {
     if (!isAnnouncingPath(path)) dropAnnounceWait()
     if (path === 'connecting') {
       historyStartId = getTrace().at(-1)?.id ?? 0
+      answerLinePublished.clear()
+      noBuzzerKey = null
+      noBuzzerDone = false
+      lastHostSpoken = ''
       const token = ++connectToken
       const apiKey = getApiKey().trim()
       if (!apiKey) {

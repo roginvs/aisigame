@@ -1626,6 +1626,8 @@ export const gameMachine = setup({
       after: { appealLeft: { guard: 'idleClosedAppeal', actions: ['clearAppeals', 'clearTimer'] } },
       initial: 'listening',
       entry: 'setChoosingStatus',
+      // В пакете может изначально быть одна тема финала: круг вычёркивания уже закончен.
+      always: { guard: ({ context }) => isFinal(context) && openFinalThemes(context).length === 1, target: 'finalDraft' },
       on: {
         CHOOSER_OFFLINE: {
           guard: 'validChooserHandoff',
@@ -2044,8 +2046,6 @@ export const gameMachine = setup({
           on: {
             FINAL_STAKE: {
               guard: 'validFinalStake',
-              target: 'collecting',
-              reenter: true,
               actions: 'placeTypedStake',
             },
           },
@@ -2062,8 +2062,6 @@ export const gameMachine = setup({
       on: {
         FINAL_TYPED: {
           guard: 'validFinalTyped',
-          target: 'finalTyped',
-          reenter: true,
           actions: 'storeTypedAnswer',
         },
       },

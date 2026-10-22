@@ -118,7 +118,7 @@ test('кот: запасной разбор моделью (имя и ставк
   await expect(group).toBeVisible()
   await expect(group.getByRole('button', { name: 'Апелляция' })).toBeEnabled()
   await group.getByRole('button', { name: 'Апелляция' }).click()
-  await page.getByRole('button', { name: 'Да, я ответил правильно' }).click({ timeout: 10_000 })
+  await page.getByRole('button', { name: 'Да, мой ответ был верным' }).click({ timeout: 10_000 })
   await expect(page.getByRole('group', { name: `${target}: 300` })).toBeVisible()
 })
 
@@ -189,8 +189,8 @@ test('конференция: гость отдаёт кота кнопкой, �
       await guest.goto(invite.href)
       await guest.getByLabel('Ваше имя').fill(names[index + 1]!)
       await guest.getByRole('button', { name: 'Подключиться' }).click()
-      await expect(guest.getByRole('button', { name: 'Я готов' })).toBeEnabled()
-      await guest.getByRole('button', { name: 'Я готов' }).click()
+      await expect(guest.getByRole('button', { name: 'Я в игре' })).toBeEnabled()
+      await guest.getByRole('button', { name: 'Я в игре' }).click()
     }
     await master.getByRole('button', { name: 'Начать игру' }).click()
     for (let index = 0; index < 2; index += 1) {
@@ -211,7 +211,7 @@ test('конференция: гость отдаёт кота кнопкой, �
     for (const page of pages.filter((item) => item !== giver)) {
       await expect(page.getByRole('group', { name: 'Кому отдать' })).toHaveCount(0)
     }
-    await giver.getByRole('group', { name: 'Кому отдать' }).getByRole('button', { name: recipientName }).click()
+    await giver.getByRole('group', { name: 'Кому отдать' }).getByRole('button', { name: recipientName, exact: true }).click()
     const stake = recipient.getByRole('group', { name: 'Ставка' })
     await expect(stake).toBeVisible()
     for (const page of pages.filter((item) => item !== recipient)) {

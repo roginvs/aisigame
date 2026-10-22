@@ -1244,6 +1244,7 @@ describe('game machine', () => {
           text: 'Столица Франции?',
           answers: ['Париж'],
         },
+        { id: 'final-other', roundIndex: 1, themeId: 'other', themeName: 'Другая', value: 0, text: 'Вопрос?', answers: ['Ответ'] },
       ],
     }
     const actor = createActor(gameMachine)
@@ -1794,6 +1795,7 @@ describe('game machine', () => {
           text: 'Столица Франции?',
           answers: ['Париж'],
         },
+        { id: 'final-other', roundIndex: 1, themeId: 'other', themeName: 'Другая', value: 0, text: 'Вопрос?', answers: ['Ответ'] },
       ],
     }
     const actor = createActor(gameMachine)

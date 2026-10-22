@@ -19,7 +19,7 @@ test('joiner на телефоне скроллит страницу и дотя
   await joiner.goto(localInviteUrl(invite, master.url()))
   await joiner.getByLabel('Ваше имя').fill('Гость')
   await joiner.getByRole('button', { name: 'Подключиться' }).click()
-  await expect(joiner.getByRole('button', { name: 'Я готов' })).toBeEnabled({ timeout: 60_000 })
+  await expect(joiner.getByRole('button', { name: 'Я в игре' })).toBeEnabled({ timeout: 60_000 })
   await expect(master.getByText('Пакет сверен', { exact: false })).toBeVisible()
   await expect(master.getByText('Сверка…', { exact: true })).toHaveCount(0)
   await expect(joiner.locator('[data-air]')).toHaveCount(0)
@@ -30,7 +30,7 @@ test('joiner на телефоне скроллит страницу и дотя
 
   const compose = joiner.getByPlaceholder('Сообщение в чат…')
   const send = joiner.getByRole('button', { name: 'Отправить' })
-  const ready = joiner.getByRole('button', { name: 'Я готов' })
+  const ready = joiner.getByRole('button', { name: 'Я в игре' })
   const mic = joiner.getByRole('button', { name: 'Включить микрофон' })
   await expect(joiner.getByRole('region', { name: 'Участники' })).toBeVisible()
   await ready.scrollIntoViewIfNeeded()
@@ -55,7 +55,7 @@ test('joiner на телефоне скроллит страницу и дотя
     await nextCam.click()
   }
 
-  await joiner.getByRole('button', { name: 'Я готов' }).click()
+  await joiner.getByRole('button', { name: 'Я в игре' }).click()
   await master.getByRole('button', { name: 'Начать игру' }).click()
   await expect(joiner.getByRole('status').filter({ hasText: 'Гость выбирает вопрос' })).toBeVisible({
     timeout: 30_000,

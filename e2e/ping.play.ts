@@ -19,7 +19,7 @@ test('конференция: пинг гостя виден в углу кад�
     await guest.goto(invite.href)
     await guest.getByLabel('Ваше имя').fill('Гость')
     await guest.getByRole('button', { name: 'Подключиться' }).click()
-    await expect(guest.getByRole('button', { name: 'Я готов' })).toBeEnabled()
+    await expect(guest.getByRole('button', { name: 'Я в игре' })).toBeEnabled()
     for (const page of [master, guest]) {
       const ping = page.getByRole('group', { name: 'Гость' }).locator('.video-ping')
       await expect(ping).toHaveText(/^\d+ ms$/, { timeout: 15_000 })

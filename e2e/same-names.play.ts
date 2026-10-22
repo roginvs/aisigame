@@ -71,8 +71,8 @@ test.describe('одинаковые имена и имена служебных 
     const invite = localInviteUrl(await copyInvite(master), master.url())
     const guests = [await join(context.newPage(), invite, 'Вася'), await join(context.newPage(), invite, 'Вася')]
     for (const guest of guests) {
-      await expect(guest.getByRole('button', { name: 'Я готов' })).toBeEnabled({ timeout: 60_000 })
-      await guest.getByRole('button', { name: 'Я готов' }).click()
+      await expect(guest.getByRole('button', { name: 'Я в игре' })).toBeEnabled({ timeout: 60_000 })
+      await guest.getByRole('button', { name: 'Я в игре' }).click()
     }
     await expect(master.getByText('Пакет сверен · готов')).toHaveCount(2, { timeout: 30_000 })
     await master.getByRole('button', { name: 'Начать игру' }).click()
@@ -105,7 +105,7 @@ async function join(pending: Promise<Page>, invite: string, name: string): Promi
   await page.goto(invite.includes('mock=1') ? invite : `${invite}&mock=1`)
   await page.getByLabel('Ваше имя').fill(name)
   await page.getByRole('button', { name: 'Подключиться' }).click()
-  await expect(page.getByRole('button', { name: 'Я готов' })).toBeVisible({ timeout: 60_000 })
+  await expect(page.getByRole('button', { name: 'Я в игре' })).toBeVisible({ timeout: 60_000 })
   return page
 }
 

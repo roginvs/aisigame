@@ -199,10 +199,9 @@ describe('ручные апелляции', () => {
     expect(path(actor)).toBe('roundSummaryWindow'); expect(actor.getSnapshot().context.appeal?.summary).toBe('pending')
     actor.send({ type: 'HOST_AUDIO_FINISHED', purpose: 'roundSummary' })
     vi.advanceTimersByTime(appealWindowMs())
-    expect(path(actor)).toBe('choosing.listening'); expect(actor.getSnapshot().context.roundIndex).toBe(1)
-    // Круг выбирающего при двух игроках: финальный раунд открывает первый.
+    expect(path(actor)).toBe('finalDraft'); expect(actor.getSnapshot().context.roundIndex).toBe(1)
+    // При одной теме круг вычёркивания не нужен; токен раунда всё равно у первого.
     expect(actor.getSnapshot().context.finalStriker).toBe(1)
-    actor.send({ type: 'STRIKE_THEME', playerId: 1, themeId: 't' })
     expect(path(actor)).toBe('finalDraft')
     actor.send({ type: 'HOST_AUDIO_FINISHED', purpose: 'finalIntro' })
     // В финале играют все независимо от счёта.
@@ -308,7 +307,7 @@ describe('ручные апелляции', () => {
     request(actor, 1); expect(path(actor)).toBe('appealConfirm'); confirm(actor); say(actor)
     expect(path(actor)).toBe('roundSummaryWindow'); expect(actor.getSnapshot().context.appeal?.summary).toBe('pending')
     actor.send({ type: 'HOST_AUDIO_FINISHED', purpose: 'roundSummary' }); expect(path(actor)).toBe('roundSummaryWindow')
-    vi.advanceTimersByTime(appealWindowMs()); expect(path(actor)).toBe('choosing.listening')
+    vi.advanceTimersByTime(appealWindowMs()); expect(path(actor)).toBe('finalDraft')
     expect(scores(actor)).toEqual([100, -100]); expect(actor.getSnapshot().context.roundIndex).toBe(1)
   })
 })

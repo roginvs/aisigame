@@ -20,8 +20,8 @@ async function joinOnPhone(browser: Browser, device: string) {
   await guest.goto(invite.href)
   await guest.getByLabel('Ваше имя').fill('Гость')
   await guest.getByRole('button', { name: 'Подключиться' }).tap()
-  await expect(guest.getByRole('button', { name: 'Я готов' })).toBeEnabled({ timeout: 60_000 })
-  await guest.getByRole('button', { name: 'Я готов' }).tap()
+  await expect(guest.getByRole('button', { name: 'Я в игре' })).toBeEnabled({ timeout: 60_000 })
+  await guest.getByRole('button', { name: 'Я в игре' }).tap()
   await master.getByRole('button', { name: 'Начать игру' }).click()
   return { context, master, guest }
 }

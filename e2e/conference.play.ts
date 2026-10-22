@@ -58,12 +58,12 @@ test.describe('конференция на BroadcastChannel', () => {
     await joiner.goto(`${invite}&mock=1`)
     await joiner.getByLabel('Ваше имя').fill('Гость')
     await joiner.getByRole('button', { name: 'Подключиться' }).click()
-    await expect(joiner.getByRole('button', { name: 'Я готов' })).toBeEnabled()
+    await expect(joiner.getByRole('button', { name: 'Я в игре' })).toBeEnabled()
     await master.getByRole('textbox').fill('Сообщение до перезагрузки')
     await master.getByRole('textbox').press('Enter')
     const guestAtMaster = master.getByRole('group', { name: 'Гость', exact: true })
     for (const clearCache of [false, true]) {
-      await joiner.getByRole('button', { name: 'Я готов' }).click()
+      await joiner.getByRole('button', { name: 'Я в игре' }).click()
       await expect(guestAtMaster.getByText('Пакет сверен · готов', { exact: true })).toBeVisible()
       if (clearCache) {
         await joiner.evaluate(() => new Promise<void>((resolve, reject) => {
@@ -76,7 +76,7 @@ test.describe('конференция на BroadcastChannel', () => {
       await joiner.reload()
       await joiner.getByRole('button', { name: 'Подключиться' }).click()
       await expect(joiner.locator('.bubble-typed').filter({ hasText: 'Сообщение до перезагрузки' })).toBeVisible()
-      await expect(joiner.getByRole('button', { name: 'Я готов' })).toBeEnabled()
+      await expect(joiner.getByRole('button', { name: 'Я в игре' })).toBeEnabled()
       await expect(joiner.getByRole('group', { name: 'Гость', exact: true }).getByText('Пакет сверен', { exact: true })).toBeVisible()
       await expect(guestAtMaster.getByText('Пакет сверен', { exact: true })).toBeVisible()
       await expect(guestAtMaster.getByText('Пакет сверен · готов', { exact: true })).toHaveCount(0)
@@ -130,9 +130,9 @@ test.describe('конференция на BroadcastChannel', () => {
     await expect(joiner.getByRole('button', { name: 'Подключиться' })).toBeVisible()
     await joiner.getByLabel('Ваше имя').fill('Гость')
     await joiner.getByRole('button', { name: 'Подключиться' }).click()
-    await expect(joiner.getByRole('button', { name: 'Я готов' })).toBeVisible()
-    await expect(joiner.getByRole('button', { name: 'Я готов' })).toBeEnabled({ timeout: 60_000 })
-    await joiner.getByRole('button', { name: 'Я готов' }).click()
+    await expect(joiner.getByRole('button', { name: 'Я в игре' })).toBeVisible()
+    await expect(joiner.getByRole('button', { name: 'Я в игре' })).toBeEnabled({ timeout: 60_000 })
+    await joiner.getByRole('button', { name: 'Я в игре' }).click()
     await master.getByRole('button', { name: 'Начать игру' }).click()
     await expect(joiner.getByRole('status').filter({ hasText: 'Гость выбирает вопрос' })).toBeVisible({
       timeout: 30_000,
@@ -198,8 +198,8 @@ test.describe('конференция на BroadcastChannel', () => {
     await joiner.goto(joinerUrl)
     await joiner.getByLabel('Ваше имя').fill('Гость')
     await joiner.getByRole('button', { name: 'Подключиться' }).click()
-    await expect(joiner.getByRole('button', { name: 'Я готов' })).toBeEnabled({ timeout: 60_000 })
-    await joiner.getByRole('button', { name: 'Я готов' }).click()
+    await expect(joiner.getByRole('button', { name: 'Я в игре' })).toBeEnabled({ timeout: 60_000 })
+    await joiner.getByRole('button', { name: 'Я в игре' }).click()
     await master.getByRole('button', { name: 'Начать игру' }).click()
     await expect(joiner.getByRole('status').filter({ hasText: 'Гость выбирает вопрос' })).toBeVisible({
       timeout: 30_000,
@@ -260,7 +260,7 @@ test.describe('конференция на BroadcastChannel', () => {
     await expect(page).not.toHaveURL(/join=/)
   })
 
-  test('подменённый байт пакета держит «Я готов» выключенной', async ({ browser }) => {
+  test('подменённый байт пакета держит «Я в игре» выключенной', async ({ browser }) => {
     const context = await browser.newContext()
     await context.grantPermissions(['clipboard-read', 'clipboard-write'])
     const master = await context.newPage()
@@ -278,7 +278,7 @@ test.describe('конференция на BroadcastChannel', () => {
     await joiner.getByLabel('Ваше имя').fill('Гость')
     await joiner.evaluate(() => sessionStorage.setItem('aisigame.tamperPack', '1'))
     await joiner.getByRole('button', { name: 'Подключиться' }).click()
-    await expect(joiner.getByRole('button', { name: 'Я готов' })).toBeDisabled({ timeout: 60_000 })
+    await expect(joiner.getByRole('button', { name: 'Я в игре' })).toBeDisabled({ timeout: 60_000 })
   })
 
   test('в лобби у гостя виден статус загрузки/готовности, не обрезан рядом игроков', async ({ browser }) => {
@@ -302,14 +302,14 @@ test.describe('конференция на BroadcastChannel', () => {
     await joiner.goto(joinerUrl)
     await joiner.getByLabel('Ваше имя').fill('Гость')
     await joiner.getByRole('button', { name: 'Подключиться' }).click()
-    await expect(joiner.getByRole('button', { name: 'Я готов' })).toBeEnabled({ timeout: 60_000 })
+    await expect(joiner.getByRole('button', { name: 'Я в игре' })).toBeEnabled({ timeout: 60_000 })
 
     const guestProgress = master.locator('.conference-player .player-lobby-progress').filter({ hasText: /Пакет|Загрузка/ })
     await expect(guestProgress.first()).toBeVisible({ timeout: 30_000 })
     const box = await guestProgress.first().boundingBox()
     expect(box?.height ?? 0).toBeGreaterThan(8)
 
-    await joiner.getByRole('button', { name: 'Я готов' }).click()
+    await joiner.getByRole('button', { name: 'Я в игре' }).click()
     await expect(master.getByText('Пакет сверен · готов')).toBeVisible({ timeout: 15_000 })
   })
 
@@ -334,7 +334,7 @@ test.describe('конференция на BroadcastChannel', () => {
     await joiner.goto(joinerUrl)
     await joiner.getByLabel('Ваше имя').fill('Гость')
     await joiner.getByRole('button', { name: 'Подключиться' }).click()
-    await expect(joiner.getByRole('button', { name: 'Я готов' })).toBeEnabled({ timeout: 60_000 })
+    await expect(joiner.getByRole('button', { name: 'Я в игре' })).toBeEnabled({ timeout: 60_000 })
 
     // Гость ставит паузу — «Пауза» видна обоим, кнопки переключаются на «Дальше».
     await joiner.getByRole('button', { name: 'Пауза', exact: true }).click()
@@ -347,10 +347,10 @@ test.describe('конференция на BroadcastChannel', () => {
     await master.getByRole('button', { name: 'Дальше' }).click()
     await expect(master.locator('.stage-pause')).toHaveCount(0)
     await expect(joiner.locator('.stage-pause')).toHaveCount(0)
-    await expect(joiner.getByRole('button', { name: 'Я готов' })).toBeEnabled()
+    await expect(joiner.getByRole('button', { name: 'Я в игре' })).toBeEnabled()
 
     // Партия стартует после паузы как обычно.
-    await joiner.getByRole('button', { name: 'Я готов' }).click()
+    await joiner.getByRole('button', { name: 'Я в игре' }).click()
     await master.getByRole('button', { name: 'Начать игру' }).click()
     await expect(master.locator('.board')).toBeVisible({ timeout: 30_000 })
     await expect(joiner.locator('.stage-pause')).toHaveCount(0)

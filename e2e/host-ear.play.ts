@@ -22,13 +22,13 @@ test('плашка ведущей: «Слышу…» → «Поняла, дум�
   await joiner.goto(url.toString())
   await joiner.getByLabel('Ваше имя').fill('Гость')
   await joiner.getByRole('button', { name: 'Подключиться' }).click()
-  await expect(joiner.getByRole('button', { name: 'Я готов' })).toBeEnabled({ timeout: 60_000 })
+  await expect(joiner.getByRole('button', { name: 'Я в игре' })).toBeEnabled({ timeout: 60_000 })
   // В лобби ухо не показываем: там нет хода, который его погасит.
   await master.evaluate(() => window.__aisigame?.hearSlow?.('привет', 400, 200))
   await master.waitForTimeout(200)
   await expect(master.getByTestId('host-ear')).toHaveCount(0)
   await master.waitForTimeout(800)
-  await joiner.getByRole('button', { name: 'Я готов' }).click()
+  await joiner.getByRole('button', { name: 'Я в игре' }).click()
   await master.getByRole('button', { name: 'Начать игру' }).click()
   await expect(joiner.getByRole('status').filter({ hasText: 'Гость выбирает вопрос' })).toBeVisible({ timeout: 30_000 })
 

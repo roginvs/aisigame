@@ -237,6 +237,33 @@ describe('attachController choice', () => {
     actor.stop()
   })
 
+  it('новая партия с тем же пакетом заново публикует эталон и напоминает про кнопку', async () => {
+    const client = new MockRealtimeClient()
+    const speech = vi.spyOn(client, 'requestSpeech').mockImplementation(() => {})
+    const { actor, stop, actions } = await boot(client, pack, () => [])
+    const cursor = getTrace().at(-1)?.id ?? 0
+    for (let match = 0; match < 2; match += 1) {
+      if (match > 0) {
+        actor.send({ type: 'RESET_GAME' })
+        actor.send({ type: 'START_GAME', pack })
+        await vi.advanceTimersByTimeAsync(0)
+      }
+      actor.send({ type: 'HOST_AUDIO_FINISHED', purpose: 'welcome' })
+      actor.send({ type: 'QUESTION_SELECTED', themeId: 's', value: 400 })
+      await vi.advanceTimersByTimeAsync(gameConfig.cellFlashMs + 100)
+      actor.send({ type: 'HOST_AUDIO_FINISHED', purpose: 'read' })
+      expect(statePath(actor.getSnapshot().value)).toBe('buzzing.open')
+      actions().speechWithoutBuzzer(2)
+      await vi.advanceTimersByTimeAsync(gameConfig.buzzerMs + 200)
+      expect(statePath(actor.getSnapshot().value)).toMatch(/^announcing/)
+    }
+    expect(speech.mock.calls.filter(([purpose]) => purpose === 'noBuzzer')).toHaveLength(2)
+    expect(getTrace().filter((e) => e.id > cursor && e.kind === 'chat' &&
+      String((e.detail as { text?: string }).text ?? '').startsWith('Правильный ответ:'))).toHaveLength(2)
+    stop()
+    actor.stop()
+  })
+
   it('оставляет выбор открытым, если распознавание повторило каталог', async () => {
     const client = new MockRealtimeClient()
     const { actor, stop } = await boot(client)

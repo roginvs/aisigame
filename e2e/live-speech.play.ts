@@ -22,7 +22,7 @@ test('речь игрока растёт в чате черновиком у м�
   await joiner.goto(url.toString())
   await joiner.getByLabel('Ваше имя').fill('Гость')
   await joiner.getByRole('button', { name: 'Подключиться' }).click()
-  await expect(joiner.getByRole('button', { name: 'Я готов' })).toBeEnabled({ timeout: 60_000 })
+  await expect(joiner.getByRole('button', { name: 'Я в игре' })).toBeEnabled({ timeout: 60_000 })
 
   const phrase = 'раз два три четыре пять шесть'
   await master.evaluate((text) => window.__aisigame?.hearLive?.(text, 400), phrase)

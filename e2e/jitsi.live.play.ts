@@ -72,11 +72,11 @@ test('приложение открывает Jitsi-лобби, передаёт
   await joiner.goto(localInvite.href)
   await joiner.getByLabel('Ваше имя').fill('Live игрок')
   await joiner.getByRole('button', { name: 'Подключиться' }).click()
-  await expect(joiner.getByRole('button', { name: 'Я готов' })).toBeEnabled({ timeout: 45_000 })
+  await expect(joiner.getByRole('button', { name: 'Я в игре' })).toBeEnabled({ timeout: 45_000 })
   await expect(joiner.locator('.video-placeholder', { hasText: 'Live мастер' })).toBeVisible({ timeout: 30_000 })
   await expect(joiner.locator('.video-placeholder', { hasText: 'Ведущая' })).toBeVisible({ timeout: 30_000 })
   await expect(master.locator('.video-placeholder', { hasText: 'Live игрок' })).toBeVisible({ timeout: 30_000 })
-  await joiner.getByRole('button', { name: 'Я готов' }).click()
+  await joiner.getByRole('button', { name: 'Я в игре' }).click()
   await expect(
     master
       .getByRole('listitem')

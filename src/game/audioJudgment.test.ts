@@ -231,10 +231,7 @@ describe('audio judging gameplay', () => {
     client.hear('пылесосел'); await vi.advanceTimersByTimeAsync(180 + quietMs)
     expect(score()).toBe(100)
     actor.send({ type: 'NEXT_ROUND' }); await vi.advanceTimersByTimeAsync(80)
-    // Вычёркиваем единственную тему финала (выбирающий по кругу — третий) → finalDraft.
-    actor.send({ type: 'STRIKE_THEME', playerId: 3, themeId: 'final' })
-    expect(statePath(actor.getSnapshot().value)).toBe('finalDraft')
-    actor.send({ type: 'HOST_AUDIO_FINISHED', purpose: 'finalIntro' })
+    // При единственной теме мок сам завершает объявление финала; вычёркивать нечего.
     // Ставки — только на табло, тайпер 30 секунд.
     expect(statePath(actor.getSnapshot().value)).toBe('finalBets.collecting')
     actor.send({ type: 'FINAL_STAKE', playerId: 1, amount: 10 })
@@ -270,8 +267,7 @@ describe('audio judging gameplay', () => {
     client.hear('пылесосел'); await vi.advanceTimersByTimeAsync(180 + quietMs)
     actor.send({ type: 'NEXT_ROUND' }); await vi.advanceTimersByTimeAsync(80)
     audio.mockClear()
-    actor.send({ type: 'STRIKE_THEME', playerId: 3, themeId: 'final' })
-    actor.send({ type: 'HOST_AUDIO_FINISHED', purpose: 'finalIntro' })
+    expect(statePath(actor.getSnapshot().value)).toBe('finalBets.collecting')
     actor.send({ type: 'FINAL_STAKE', playerId: 1, amount: 10 })
     actor.send({ type: 'FINAL_STAKE', playerId: 2, amount: 0 })
     actor.send({ type: 'FINAL_STAKE', playerId: 3, amount: 0 })

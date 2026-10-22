@@ -413,6 +413,10 @@ export function restoredMatch(pack: QuestionPack, saved: SavedMatch): Pick<
   const special = questionOk && saved.special?.questionId === saved.activeQuestionId ? saved.special : null
   if ((phase === 'cat.resume' || phase === 'auction.resume' || phase === 'specialAway') && !special) phase = 'choosing.listening'
   const openQuestion = questionOk && questionPhases.has(phase)
+  // В финале очки меняются ПОСЛЕ вердикта, при раскрытии ставки. Без сохранённого
+  // статуса reload из verdict/stakeCue превращал уже принятый плюс/минус в нулевое изменение.
+  const keepVerdict = phase === 'announcing' || phase === 'finalReveal.verdict' ||
+    phase === 'finalReveal.stakeCue' || phase === 'finalReveal.scoreCue'
 
   return {
     outcomes: saved.outcomes ?? {},
@@ -446,8 +450,8 @@ export function restoredMatch(pack: QuestionPack, saved: SavedMatch): Pick<
     heard: openQuestion ? saved.heard : '',
     wrongHeard: openQuestion ? saved.wrongHeard : [],
     sayCloseGuess: phase === 'announcing' && openQuestion ? saved.sayCloseGuess : false,
-    announceKind: phase === 'announcing' ? saved.announceKind : null,
-    judgmentStatus: phase === 'announcing' ? saved.judgmentStatus : null,
+    announceKind: keepVerdict ? saved.announceKind : null,
+    judgmentStatus: keepVerdict ? saved.judgmentStatus : null,
     special: openQuestion ? special : null,
     resumePath: phase,
     statusLine: statusFor(phase, pack.name, round?.name ?? 'Раунд', round?.kind === 'final', answererStatus(saved, saved.activePlayerId)),

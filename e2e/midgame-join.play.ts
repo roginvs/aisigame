@@ -24,8 +24,8 @@ test('гость посреди партии виден сразу: плитка
   await first.goto(url.toString())
   await first.getByLabel('Ваше имя').fill('Аня')
   await first.getByRole('button', { name: 'Подключиться' }).click()
-  await expect(first.getByRole('button', { name: 'Я готов' })).toBeEnabled({ timeout: 60_000 })
-  await first.getByRole('button', { name: 'Я готов' }).click()
+  await expect(first.getByRole('button', { name: 'Я в игре' })).toBeEnabled({ timeout: 60_000 })
+  await first.getByRole('button', { name: 'Я в игре' }).click()
   await master.getByRole('button', { name: 'Начать игру' }).click()
   await expect(first.getByRole('status').filter({ hasText: 'Аня выбирает вопрос' })).toBeVisible({ timeout: 30_000 })
 
