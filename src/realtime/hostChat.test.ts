@@ -85,6 +85,19 @@ describe('чат ведущей: реплику оборвали мы — стр
     expect(cutNotes(cursor)[0]?.detail).toMatchObject({ full: line, playedMs: 2400, source: 'audio_end_ms' })
   })
 
+  it('поздний текст оборванной реплики остаётся в чате, даже когда уже заказано новое чтение', () => {
+    const cursor = speak()
+    client.interruptSpeech('тест')
+    client.requestSpeech('read', 2, 'Вопрос', 'Сколько струн у скрипки?', true)
+    feed({ type: 'output_audio_buffer.cleared', response_id: 'r1' })
+    feed({ type: 'response.created', response: { id: 'r2', metadata: { purpose: 'read', turn: '2' } } })
+    feed({ type: 'conversation.item.truncated', item_id: 'it1', content_index: 0, audio_end_ms: 2400 })
+    feed({ type: 'response.done', response: { id: 'r1', status: 'cancelled', metadata: { purpose: 'clarify', turn: '1' }, output: [
+      { id: 'it1', type: 'message', content: [{ type: 'output_audio', transcript: line }] },
+    ] } })
+    expect(hostLines(cursor)).toEqual(['Сколько струн у скрипки?', 'Вася, выбери ячейку ещё…'])
+  })
+
   it('оборвали на 60 мс (дамп: «Игорь, выберите я») — строка убирается', () => {
     const edits: ChatLineEdit[] = []
     const off = subscribeChatEdits((edit) => edits.push(edit))

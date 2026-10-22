@@ -1,5 +1,5 @@
 type Metadata = { purpose: string; turn: string; requestId: string }
-export type ResponseRequest = Metadata & { token: number; eventId: string }
+export type ResponseRequest = Metadata & { token: number; eventId: string; cancelled?: boolean }
 
 /** Связывает созданный сервером ответ с конкретной отправкой, в том числе без эха metadata. */
 export class ResponseRequests {
@@ -35,6 +35,13 @@ export class ResponseRequests {
 
   get(response: Record<string, unknown>): ResponseRequest | undefined {
     return typeof response.id === 'string' ? this.responses.get(response.id) : undefined
+  }
+
+  cancel(token: number | null): void {
+    if (token === null) return
+    const request = this.queued.find((item) => item.token === token) ??
+      [...this.responses.values()].find((item) => item.token === token)
+    if (request) request.cancelled = true
   }
 
   rejected(eventId: string): void {

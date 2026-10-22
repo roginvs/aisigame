@@ -30,6 +30,7 @@ export type LinkStatus = {
 type LooseEvent = Record<string, unknown> & { type?: string }
 
 type SpeechTurn = {
+  responseToken: number | null
   purpose: string
   turn: number
   started: boolean
@@ -167,7 +168,7 @@ export class RealtimeClient {
   private inputStartedAt: number | null = null
   /** `audio_start_ms` из speech_started — длительность по аудиобуферу, а не по времени прихода событий. */
   private inputAudioStartMs: number | null = null
-  /** Идущие ответы модели: unscoped `response.cancel` шлём только при них (иначе `response_cancel_not_active`). */
+  /** Идущие ответы модели: отменяем по id, включая ответы вне основной истории разговора. */
   private activeResponses = new Set<string>()
   private responseRequests = new ResponseRequests()
   private inputItemId: string | null = null
@@ -705,6 +706,7 @@ export class RealtimeClient {
       purpose: this.speech?.purpose ?? null,
     })
     this.markCut(this.speech, `оборвали мы: ${reason || 'без причины'}`)
+    this.responseRequests.cancel(this.speech?.responseToken ?? null)
     this.speech = null
     this.pendingSpeak = null
     this.clearFlushTimer()
@@ -729,11 +731,13 @@ export class RealtimeClient {
     const flushFirst = this.playbackResponseId !== null || this.outputFlush === 'inflight'
     // Новая реплика поверх ещё звучащей: прежнюю обрываем мы — подпись до места обрыва.
     if (this.speech && this.speech.started && !this.speech.ended && flushFirst) this.markCut(this.speech, `новая реплика поверх: ${purpose}`)
+    this.responseRequests.cancel(this.speech?.responseToken ?? null)
     this.clearFlushTimer()
     this.clearSpeechTimers()
     this.pendingSpeak = null
     this.pendingTool = null
     this.speech = {
+      responseToken: null,
       purpose,
       turn,
       started: false,
@@ -770,6 +774,7 @@ export class RealtimeClient {
   /** tool — суженная схема на этот запрос (enum открытых тем, вариантов ставки); иначе общая из сессии. */
   /** audioItemId — реплика игрока: модель получает её звук (item_reference), а не только расшифровку. */
   requestTool(purpose: string, turn: number, name: string, instructions: string, isolated = false, tool?: { name: string }, audioItemId?: string): void {
+    this.responseRequests.cancel(this.speech?.responseToken ?? null)
     this.clearSpeechTimers()
     this.clearFlushTimer()
     this.pendingSpeak = null
@@ -886,8 +891,10 @@ export class RealtimeClient {
   }
 
   private cancelActiveResponse(): void {
-    if (this.activeResponses.size === 0) return
-    this.send({ type: 'response.cancel' })
+    for (const responseId of this.activeResponses) {
+      // Нативный аудиосудья живёт параллельно и отменяется собственным AbortSignal.
+      if (!this.judgeResponseIds.has(responseId)) this.send({ type: 'response.cancel', response_id: responseId })
+    }
   }
 
   private send(event: object, owner?: { responseToken: number | null }): boolean {
@@ -1025,6 +1032,10 @@ export class RealtimeClient {
       if (typeof id === 'string') {
         if (type === 'response.created') this.activeResponses.add(id)
         else this.activeResponses.delete(id)
+        if (type === 'response.created' && this.responseRequests.get(asRecord(event.response))?.cancelled) {
+          this.send({ type: 'response.cancel', response_id: id })
+          return
+        }
       }
     }
 
@@ -1081,6 +1092,13 @@ export class RealtimeClient {
         const valid = call?.name === 'submitAnswerJudgment' && response.status === 'completed'
         nativeJudge?.finish(valid ? call : null, valid ? undefined : 'audio-response-failed')
       }
+      return
+    }
+
+    if (type === 'output_audio_buffer.started' && this.responseRequests.get({ id: responseId })?.cancelled) {
+      this.send({ type: 'response.cancel', response_id: responseId })
+      // Общий clear не должен стереть уже заказанный новый вердикт.
+      if (!this.speech && this.outputFlush !== 'inflight') this.sendOutputClear()
       return
     }
 
@@ -1228,8 +1246,12 @@ export class RealtimeClient {
       }
       return
     }
-    if (!call && !this.speech?.expect && earlyPurpose !== 'read') {
-      for (const { line, itemId } of assistantUtterances(response)) this.publishHostLine(line, earlyPurpose, itemId)
+    if (!call && earlyPurpose !== 'read' && (!this.speech?.expect || this.skipsResponse(toolResponseId))) {
+      for (const { line, itemId } of assistantUtterances(response)) {
+        if (!this.skipsResponse(toolResponseId) || (itemId && this.cutItems.has(itemId))) {
+          this.publishHostLine(line, earlyPurpose, itemId, toolResponseId)
+        }
+      }
     }
     if (call && toolPurposes[call.name]) {
       // Не трогаем speech: оценка может прийти уже после таймаута, когда
@@ -1281,6 +1303,7 @@ export class RealtimeClient {
   private onPlaybackStopped(event: LooseEvent): void {
     if (!this.speech) return
     const responseId = typeof event.response_id === 'string' ? event.response_id : ''
+    if (responseId && this.skipsResponse(responseId)) return
     if (responseId && responseId === this.speech.dropResponseId) {
       pushTrace('note', 'сброшено аудио не той реплики')
       return
@@ -1305,7 +1328,13 @@ export class RealtimeClient {
   private noteHostLine(event: LooseEvent, line: string): void {
     const speech = this.speech
     const responseId = typeof event.response_id === 'string' ? event.response_id : speech?.liveResponseId ?? ''
-    if (responseId && speech && this.skipsResponse(responseId)) return
+    if (responseId && this.skipsResponse(responseId)) {
+      const itemId = readItemId(event)
+      if (itemId && this.cutItems.has(itemId)) {
+        this.publishHostLine(line, this.responseRequests.get({ id: responseId })?.purpose ?? '', itemId, responseId)
+      }
+      return
+    }
     pushTrace('note', `ведущая сказала: ${line}`)
     if (!speech) return
     if (speech.expect) {
@@ -1320,16 +1349,16 @@ export class RealtimeClient {
       }
       return
     }
-    this.publishHostLine(line, speech.purpose, readItemId(event))
+    this.publishHostLine(line, speech.purpose, readItemId(event), responseId)
   }
 
-  private publishHostLine(line: string, purpose: string, itemId: string | null = null): void {
+  private publishHostLine(line: string, purpose: string, itemId: string | null = null, responseId = ''): void {
     if (itemId) {
       if (this.hostItemsInChat.has(itemId)) return
       this.hostItemsInChat.add(itemId)
       if (this.hostItemsInChat.size > 200) this.hostItemsInChat.delete(this.hostItemsInChat.values().next().value!)
     }
-    const speech = this.speech
+    const speech = responseId && this.skipsResponse(responseId) ? null : this.speech
     if (speech?.mustSay && purpose === speech.purpose && !saysAnswer(line, speech.mustSay)) {
       this.missedReveal(line)
       return
@@ -1444,6 +1473,9 @@ export class RealtimeClient {
   private sendSpeech(instructions: string): boolean {
     const speech = this.speech
     if (!speech) return false
+    this.responseRequests.cancel(speech.responseToken)
+    speech.liveResponseId = null
+    speech.itemId = null
     if (speech.expect) {
       return this.send({
         type: 'response.create',
@@ -1452,7 +1484,7 @@ export class RealtimeClient {
           turn: speech.turn,
           take: speech.retries + 1,
         }),
-      })
+      }, speech)
     }
     if (speech.isolated) {
       return this.send({
@@ -1462,7 +1494,7 @@ export class RealtimeClient {
           turn: speech.turn,
           take: speech.retries + 1,
         }),
-      })
+      }, speech)
     }
     return this.send({
       type: 'response.create',
@@ -1473,7 +1505,7 @@ export class RealtimeClient {
         metadata: { purpose: speech.purpose, turn: String(speech.turn), take: String(speech.retries + 1) },
         instructions: withHostRules(instructions),
       },
-    })
+    }, speech)
   }
 
   private finishSpeech(reason: string): void {
@@ -1583,8 +1615,12 @@ export class RealtimeClient {
   }
 
   private skipsResponse(responseId: string): boolean {
+    const request = this.responseRequests.get({ id: responseId })
+    if (request?.cancelled) return true
     const speech = this.speech
     if (!speech) return false
+    if (request && speech.responseToken !== null && request.token !== speech.responseToken) return true
+    if (speech.liveResponseId && responseId !== speech.liveResponseId) return true
     return responseId === speech.dropResponseId || responseId === speech.ignoreResponseId
   }
 

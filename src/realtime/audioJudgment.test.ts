@@ -32,6 +32,19 @@ beforeEach(() => {
 })
 afterEach(() => { client.stopSession(); vi.useRealTimers(); vi.unstubAllGlobals(); vi.restoreAllMocks() })
 describe('native audio dispatcher', () => {
+  it('отмена речи по id не отменяет параллельную аудиооценку', async () => {
+    ready()
+    const primary = client.requestAudioJudgment(request(), 'question + answers')
+    feed({ type: 'response.created', response: { id: 'resp-primary', metadata: { requestId: 'primary' } } })
+    client.requestSpeech('buzzCall', 3, 'Вася, говори', undefined, true)
+    feed({ type: 'response.created', response: { id: 'buzz', metadata: { purpose: 'buzzCall', turn: '3' } } })
+    client.interruptSpeech('игрок отвечает')
+    expect(send.mock.calls.map((call) => JSON.parse(String(call[0])) as Record<string, unknown>)
+      .filter((event) => event.type === 'response.cancel')).toEqual([{ type: 'response.cancel', response_id: 'buzz' }])
+    done('primary')
+    expect((await primary).name).toBe('submitAnswerJudgment')
+  })
+
   it('sends only question context plus the ready audio reference and one tool', async () => {
     ready()
     const primary = client.requestAudioJudgment(request(), 'question + answers')
