@@ -202,7 +202,7 @@ stateDiagram-v2
 - `answering`/`judging`/`announcing` — как обычно, счёт ±`activeStake`. Перехвата нет: после `incorrect`/`silence` ячейка закрывается (ветка 71 не срабатывает), ответ пакета публикуется по обычным правилам закрытия. `near_miss` → повтор тому же игроку.
 - После объявления `chooserId = catRecipientId` при любом исходе (сейчас и так выбирает последний оцененный/промолчавший — совпадает).
 - Пауза/восстановление: `cat.*` в `resumePath`/`RESUME`/`restoring`; `picking`/`staking` — заново с фразы, `resolving*` — в соответствующий слушающий узел, `recipientAway` — заново полные 15 с. `savedGame` сохраняет новые поля; совместимо с `savedGameVersion: 1`.
-- Эпохи: `cat.picking` и `cat.staking` бампят `choiceEpoch`/`betEpoch`.
+- Эпохи: `cat.picking` и `cat.staking` бампят `choiceEpoch`.
 - `CHOOSER_OFFLINE` в `cat.announcing/picking*` (ушёл выбравший): право отдать кота переходит следующему по кругу подключённому игроку (`catGiverId` меняется, ведущая свободно объявляет); отдать себе он тоже не может.
 
 ### Отключение получателя

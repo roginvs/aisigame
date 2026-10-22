@@ -155,7 +155,7 @@ stateDiagram-v2
 
 - **auction.announcing.** Вход: `auctionOrder` — круг от `chooserId` по `players`, `auctionBidderId = chooserId`. Статус «Аукцион». Ведущая говорит (`purpose: 'auction'`): поздравление, номинал как минимум, обращение к выбравшему. Микрофон закрыт. Звук «динь» уже сыграл (см. «Звук»).
 - **auction.autoOpen.** Ставка = номинал, `auctionLeaderId = chooserId`. Ведущая: «ставка N, автоматически» (`purpose: 'auctionAuto'`; можно слить с announcing одной фразой).
-- **auction.asking.** Ведущая просит ставку (`purpose: 'auctionAsk'`): открытие — «назовите ставку, минимум N»; перекупка — «Вася, будете перекупать? Сейчас N у Маши». Варианты в `auctionOptions` уже на экране спрашиваемого, кнопки живые с начала фразы. Бамп `betEpoch`.
+- **auction.asking.** Ведущая просит ставку (`purpose: 'auctionAsk'`): открытие — «назовите ставку, минимум N»; перекупка — «Вася, будете перекупать? Сейчас N у Маши». Варианты в `auctionOptions` уже на экране спрашиваемого, кнопки живые с начала фразы.
 - **auction.listening.** Микс модели — только `auctionBidderId` (как `finalBets`). Тишина: как выбор ячейки — без таймера и лимита, подсказки при выключенном микрофоне. Кнопка отправителя ≠ спрашиваемый — отбрасывается.
 - **auction.resolving / clarifying.** Разбор голоса локально (см. «Голос»), запасной tool модели — `resolveAuctionBid`. Неясно / не из вариантов → переспрос «назовите один из вариантов», снова `listening`.
 - **auction.advancing.** Не ждёт. Применяет ход: ставка → `auctionBid`, `auctionLeaderId`, `auctionAllIn`; пас → `auctionPassed`. Затем ищет следующего по `auctionOrder` после текущего, кто не в `auctionPassed`, не лидер, подключён и у кого `auctionOptions` не пусты кроме паса. Не может перебить — автопас (запись в `auctionLog`, ведущая не обращается). Нет такого → `won`.
@@ -224,7 +224,7 @@ stateDiagram-v2
 - `prices.test.ts`: см. «Запасная цена»; аукцион с ценой 0 получает выведенный номинал.
 - `siq.test.ts`: `auction`/`stake` → аукцион; `stakeAll` нет.
 - `machine.test.ts`: 1/2/3 игрока; автопас; ва-банк; конец торгов; победитель отвечает без кнопки ±ставка; нет перехвата; следующий выбирающий; restore/pause в каждом узле; уход спрашиваемого.
-- `controller.test.ts`: purposes, `betEpoch`, микс только спрашиваемого.
+- `controller.test.ts`: purposes, микс только спрашиваемого.
 - `masterSession.test.ts`/`messages.test.ts`: `pick target=auction` от чужого клиента и не из вариантов отвергается.
 - `beep.test.ts`: `playAuctionDing`; e2e: `match.play.ts` (мок) — аукцион демо; `conference.play.ts` — перекупка кнопкой.
 

@@ -127,8 +127,6 @@ export function attachController(options: {
   let expectingToolTurn: number | null = null
   /** Инвалидирует in-flight разбор выбора (в т.ч. после CHOOSER_OFFLINE). */
   let choiceEpoch = 0
-  /** Инвалидирует in-flight разбор ставки при смене финалиста. */
-  let betEpoch = 0
   let specialEpoch = 0
   /** Текст текущего хода ведущей — чтобы не принять её эхо за ответ игрока при раннем слухе. */
   let lastHostSpoken = ''
@@ -955,7 +953,6 @@ export function attachController(options: {
       applyAnswerDecision()
     }
     if (path === 'finalDraft') {
-      betEpoch += 1
       client.setTranscriptionPrompt('')
       speakWhileListening('finalIntro', finalIntroCue(context))
     }
