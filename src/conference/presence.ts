@@ -75,6 +75,12 @@ export function mergeReturningPlayer(
   }
 }
 
+/** Участник ушёл: место и отметка жизни не копятся до конца сессии. */
+export function forgetPlayer(clientId: string): void {
+  remembered.delete(clientId)
+  lastSeenByClient.delete(clientId)
+}
+
 export function clearRememberedPlayersForTests(): void {
   remembered.clear()
   lastSeenByClient.clear()

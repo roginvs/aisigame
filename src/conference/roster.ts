@@ -3,6 +3,7 @@ import {
   PRESENCE_HIDE_MS,
   PRESENCE_STALE_MS,
   applyPresence,
+  forgetPlayer,
   lookupRememberedPlayer,
   mergeReturningPlayer,
   rememberPlayer,
@@ -214,6 +215,20 @@ export class ConferenceRoster {
     if (!entry) return
     touch(clientId, now)
     this.entries.set(clientId, { ...entry, pingMs: Math.max(0, Math.round(pingMs)), lastSeen: now })
+  }
+
+  /** Скрытый гость (минута без вести) снят: ростер и память присутствия его больше не держат. */
+  pruneHidden(now = Date.now()): void {
+    for (const [clientId, entry] of this.entries) {
+      if (entry.isMaster) continue
+      if (now - entry.lastSeen >= PRESENCE_HIDE_MS) this.release(clientId)
+    }
+  }
+
+  release(clientId: string): void {
+    if (clientId === this.masterClientId) return
+    this.entries.delete(clientId)
+    forgetPlayer(clientId)
   }
 
   heartbeat(clientId: string, now = Date.now()): void {

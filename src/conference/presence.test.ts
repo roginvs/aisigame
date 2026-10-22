@@ -4,6 +4,7 @@ import {
   PRESENCE_STALE_MS,
   applyPresence,
   clearRememberedPlayersForTests,
+  forgetPlayer,
   lookupRememberedPlayer,
   mergeReturningPlayer,
   rememberPlayer,
@@ -54,6 +55,25 @@ describe('rememberPlayer / returning', () => {
       now,
     )
     expect(view?.hidden).toBe(false)
+  })
+
+  it('явное снятие не возвращает старое место', () => {
+    rememberPlayer({ clientId: 'c1', playerId: 2, score: 300, name: 'Маша' })
+    forgetPlayer('c1')
+    expect(lookupRememberedPlayer('c1')).toBeNull()
+    expect(mergeReturningPlayer('c1', 'Маша', 10)).toBeNull()
+  })
+
+  it('скрытый гость исчезает из ростера и из памяти', () => {
+    rememberPlayer({ clientId: 'guest', playerId: 4, score: 10, name: 'Гость' })
+    const roster = new ConferenceRoster('master', 'Мастер')
+    const seen = 5_000
+    roster.upsertHello('guest', 'Гость', seen)
+    expect(lookupRememberedPlayer('guest')).toMatchObject({ playerId: 4, score: 10 })
+    roster.pruneHidden(seen + PRESENCE_HIDE_MS)
+    expect(roster.get('guest')).toBeUndefined()
+    expect(lookupRememberedPlayer('guest')).toBeNull()
+    expect(roster.get('master')).toBeDefined()
   })
 
   it('восстанавливает clientId, playerId и резервирует новые id после максимального', () => {

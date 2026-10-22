@@ -232,6 +232,7 @@ export class MasterSession {
     this.pingTimer = window.setInterval(() => this.sendPing(), PING_INTERVAL_MS)
     this.presenceTimer = window.setInterval(() => {
       const now = Date.now()
+      this.roster.pruneHidden(now)
       this.onRosterCb()
       if (this.gameStarted) {
         this.handoffOfflineChooser(now)
