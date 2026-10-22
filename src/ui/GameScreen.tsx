@@ -126,6 +126,8 @@ export function GameScreen(props: {
   link: LinkStatus
   /** Мастер конференции: отвод того, что реально слышит модель. */
   modelMeter?: () => AnalyserNode | null
+  /** Мастер: уровень дорожки ведущей (что модель говорит). */
+  modelOutLevel?: () => number
   onAppeal?: (request: AppealRequest) => Promise<{ accepted: boolean; reason: string }>
   onBuzz: (playerId: PlayerId) => void
   /** Кот/аукцион: кнопка «кому отдать», ставка или торг. */
@@ -200,6 +202,7 @@ export function GameScreen(props: {
   const [appealError, setAppealError] = useState('')
   const onAppeal = props.onAppeal
   const modelMeter = props.modelMeter
+  const modelOutLevel = props.modelOutLevel
   const inLobby = Boolean(conference?.lobby)
   // The start form / lobby leave the page scrolled to their bottom buttons; on a scrolling (narrow)
   // page that hid the board above the fold, especially in phone landscape. Start the match at the top.
@@ -455,7 +458,7 @@ export function GameScreen(props: {
             {(!conference || conference.isMaster) && modelMeter ? (
               <>
                 {' '}
-                <ModelInputMeter getAnalyser={modelMeter} />
+                <ModelInputMeter getAnalyser={modelMeter} getOutLevel={modelOutLevel} />
               </>
             ) : null}
           </p>

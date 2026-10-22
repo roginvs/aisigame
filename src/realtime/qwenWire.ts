@@ -212,6 +212,7 @@ class TrackPlayer {
   private speaking = false
   private quiet = 0
   private hostTap: MediaStreamAudioDestinationNode | null = null
+  private level = 0
   private readonly emit: (event: object) => void
   private readonly turn: () => string
 
@@ -263,13 +264,16 @@ class TrackPlayer {
   }
 
   private probe(): void {
+    this.level = 0
     const analyser = this.analyser
-    if (!analyser || !this.turn()) return
+    if (!analyser) return
     const data = new Float32Array(analyser.fftSize)
     analyser.getFloatTimeDomainData(data)
     let sum = 0
     for (const value of data) sum += value * value
     const rms = Math.sqrt(sum / (data.length || 1))
+    this.level = Math.min(1, rms * 4)
+    if (!this.turn()) return
     if (!this.speaking) {
       if (rms >= 0.015) {
         this.speaking = true
@@ -301,12 +305,19 @@ class TrackPlayer {
     this.audio.muted = muted
   }
 
+  /** Уровень речи ведущей 0..1 (что модель говорит) — для индикатора мастера. */
+  outputLevel(): number {
+    return this.level
+  }
+
   /** Ответ ведущей в комнату Jitsi: destination отдаём сразу, дорожку подключаем при приходе. */
   attachHostOutput(handler: (stream: MediaStream) => void): void {
     if (!this.hostTap) {
       const ctx = gameAudioContext()
       void ctx.resume()
       this.hostTap = ctx.createMediaStreamDestination()
+      // Комната просит поток позже ontrack: догоняем — иначе «Ведущая» уходит в комнату тишиной.
+      this.source?.connect(this.hostTap)
     }
     handler(this.hostTap.stream)
   }
@@ -402,6 +413,10 @@ export class QwenWire implements VoiceWire {
 
   setLocalPlayback(enabled: boolean): void {
     this.player.setMuted(!enabled)
+  }
+
+  outputLevel(): number {
+    return this.player.outputLevel()
   }
 
   attachHostOutput(handler: (stream: MediaStream) => void): void {

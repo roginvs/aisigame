@@ -2,14 +2,15 @@ import { useEffect, useRef, useState, type MouseEvent } from 'react'
 import { meterHitTolerancePx } from '../options.ts'
 import { getLinkStatus, getTrace, pushTrace, subscribeTrace } from '../debug/trace.ts'
 import { createMarkerCollector, hitTest, type MeterHit, meterLegendText, meterMarkerColors, meterMarkerLegend, type MeterMarker } from './meterMarkers.ts'
-import { CLOSED_OVERLAY, drawMarkers, HEIGHT, meterLevel, modelInputOpen, waveColor, WIDTH } from './meterDraw.ts'
+import { CLOSED_OVERLAY, OUTPUT_WAVE_COLOR, drawMarkers, HEIGHT, meterLevel, modelInputOpen, waveColor, WIDTH } from './meterDraw.ts'
 
 /**
  * Индикатор того, что реально слышит модель: история уровня выхода микшера
  * (тот же поток, что уходит в realtime). В конференции — `getLevel` из общих уровней
  * мастера (после микшера, разосланы всем), без конференции — свой AnalyserNode.
+ * `getOutLevel` — уровень дорожки ведущей (что модель говорит): прозрачно-серая волна сверху.
  */
-export function ModelInputMeter({ getAnalyser, getLevel }: { getAnalyser?: () => AnalyserNode | null; getLevel?: () => number }) {
+export function ModelInputMeter({ getAnalyser, getLevel, getOutLevel }: { getAnalyser?: () => AnalyserNode | null; getLevel?: () => number; getOutLevel?: () => number }) {
   const canvasRef = useRef<HTMLCanvasElement | null>(null)
   const hitsRef = useRef<MeterHit[]>([])
   // Пока мышь над индикатором, картинка стоит (данные пишутся дальше): подпись не убегает из-под курсора.
@@ -34,6 +35,8 @@ export function ModelInputMeter({ getAnalyser, getLevel }: { getAnalyser?: () =>
     const times = new Float64Array(WIDTH)
     // Открыт ли вход модели (setMicEnabled) в момент каждого столбца: закрытое — серым, в модель не ушло.
     const open = new Uint8Array(WIDTH)
+    // Уровень дорожки ведущей (что модель говорит) — серая волна сверху.
+    const outHistory = new Float32Array(WIDTH)
     let samples: Uint8Array<ArrayBuffer> | null = null
     const collector = createMarkerCollector()
     let markers: MeterMarker[] = collector.ingest(getTrace())
@@ -54,6 +57,7 @@ export function ModelInputMeter({ getAnalyser, getLevel }: { getAnalyser?: () =>
       history[head] = level
       times[head] = Date.now()
       open[head] = modelInputOpen(getLinkStatus().mic) ? 1 : 0
+      outHistory[head] = getOutLevel ? getOutLevel() : 0
       head = (head + 1) % WIDTH
       if (frozenRef.current) return
       ctx.clearRect(0, 0, WIDTH, HEIGHT)
@@ -70,6 +74,15 @@ export function ModelInputMeter({ getAnalyser, getLevel }: { getAnalyser?: () =>
           ctx.fillRect(x, 0, 1, HEIGHT)
         }
       }
+      // Волна «что говорит модель»: от верхнего края вниз, прозрачно-серая; полосы дорожек рисуются поверх.
+      for (let x = 0; x < WIDTH; x += 1) {
+        const value = outHistory[(head + x) % WIDTH] ?? 0
+        const h = Math.max(1, Math.round(value * HEIGHT * 0.8) - 1)
+        if (h > 0) {
+          ctx.fillStyle = OUTPUT_WAVE_COLOR
+          ctx.fillRect(x, 0, 1, h)
+        }
+      }
       hitsRef.current = drawMarkers(ctx, markers, times, head)
     }
     frame = requestAnimationFrame(tick)
@@ -78,7 +91,7 @@ export function ModelInputMeter({ getAnalyser, getLevel }: { getAnalyser?: () =>
       unsubscribe()
       cancelAnimationFrame(frame)
     }
-  }, [getAnalyser, getLevel])
+  }, [getAnalyser, getLevel, getOutLevel])
 
   return (
     <span className={tip ? 'model-meter-wrap has-hit' : 'model-meter-wrap'} tabIndex={0} aria-describedby="model-meter-legend">
@@ -97,6 +110,7 @@ export function ModelInputMeter({ getAnalyser, getLevel }: { getAnalyser?: () =>
       <span id="model-meter-legend" role="tooltip" className="model-meter-legend" data-testid="model-meter-legend">
         <span><b>Что слышит модель</b> (выход микшера, справа — сейчас).</span>
         <span><i className="sw" style={{ background: waveColor(true, true) }} /> волна — звук, который ушёл в модель</span>
+        <span><i className="sw" style={{ background: OUTPUT_WAVE_COLOR }} /> серая волна сверху — что говорит модель (уровень дорожки ведущей)</span>
         <span><i className="sw" style={{ background: CLOSED_OVERLAY }} /> серая вуаль — вход модели закрыт, в модель не ушло</span>
         <span><b>Полосы сверху</b> — от начала до конца, у каждого типа своя строка; <b>черты</b> — события:</span>
         {meterMarkerLegend.map(([group, label]) => (

@@ -12,6 +12,8 @@ export interface VoiceWire {
   setOutputMuted(muted: boolean): void
   /** Мастер Jitsi: false — ведущую слушаем из комнаты, локально не играем (поток в комнату идёт). */
   setLocalPlayback?(enabled: boolean): void
+  /** Уровень речи ведущей 0..1 (что модель говорит) — индикатор мастера. */
+  outputLevel?(): number
   attachHostOutput(handler: (stream: MediaStream) => void): void
   setInputStream(stream: MediaStream | null): void
 }

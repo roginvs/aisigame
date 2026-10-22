@@ -27,6 +27,8 @@ export function waveColor(live: boolean, open: boolean): string {
   if (!live) return '#888'
   return open ? '#4ade80' : '#6b7280'
 }
+/** Прозрачно-серая волна «что говорит модель»: уровень дорожки ведущей (сверху вниз). */
+export const OUTPUT_WAVE_COLOR = 'rgba(203, 213, 225, 0.45)'
 /** Подложка под полосами дорожек. */
 export const LANE_BACKING = 'rgba(10, 12, 20, 0.85)'
 export const WIDTH = METER_WIDTH

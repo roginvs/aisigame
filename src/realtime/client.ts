@@ -1,5 +1,6 @@
 import { diag } from '../debug/diag.ts'
-import { onAudioOutputsReopen, recreateStreamElement, reopenAudioOutputs, unlockAudio } from '../audio/beep.ts'
+import { gameAudioContext, onAudioOutputsReopen, recreateStreamElement, reopenAudioOutputs, unlockAudio } from '../audio/beep.ts'
+import { createHostOutputReader } from './hostOutputLevel.ts'
 import { gameConfig, hostInstructions, withHostRules } from '../config.ts'
 import { recordResponseUsage, resetUsage } from './usage.ts'
 import { livePlayerChatVisible } from './liveSpeech.ts'
@@ -123,6 +124,10 @@ export class RealtimeClient {
   private stopReopen: () => void = () => undefined
   private outputMuted = false
   private localPlayback = true
+  /** Клон дорожки ведущей в анализатор (OpenAI без провода): один и тот же трек в <audio> и в Web Audio глушит элемент. */
+  private hostOutputAnalyser: AnalyserNode | null = null
+  private hostAnalyserTeardown: (() => void) | null = null
+  private readonly readHostOutput: (analyser: AnalyserNode | null) => number = createHostOutputReader()
   /** itemId → когда пришёл speech_stopped (для задержки расшифровки в дебаге). */
   private speechStoppedAt = new Map<string, number>()
   private audioItems = new AudioItems()
@@ -327,6 +332,7 @@ export class RealtimeClient {
       const [stream] = event.streams
       if (!stream || !alive()) return
       this.audio.srcObject = stream
+      this.attachHostAnalyser(stream)
       this.stopReopen()
       this.stopReopen = onAudioOutputsReopen(() => {
         const current = this.audio.srcObject
@@ -412,6 +418,35 @@ export class RealtimeClient {
     this.hostOutputHandler = handler
     const current = this.audio.srcObject
     if (current instanceof MediaStream) handler(forkHostStream(current))
+  }
+
+  /** Уровень речи ведущей 0..1 (что модель говорит) — для индикатора мастера. */
+  outputLevel(): number {
+    if (this.wire) return this.wire.outputLevel?.() ?? 0
+    return this.readHostOutput(this.hostOutputAnalyser)
+  }
+
+  private attachHostAnalyser(stream: MediaStream): void {
+    this.hostAnalyserTeardown?.()
+    this.hostAnalyserTeardown = null
+    this.hostOutputAnalyser = null
+    const track = stream.getAudioTracks()[0]
+    if (!track) return
+    const ctx = gameAudioContext()
+    void ctx.resume()
+    // Тот же трек в <audio> и в Web Audio на Chromium глушит элемент: анализатору отдаю клон.
+    const clone = track.clone()
+    const source = ctx.createMediaStreamSource(new MediaStream([clone]))
+    const analyser = ctx.createAnalyser()
+    analyser.fftSize = 512
+    source.connect(analyser)
+    this.hostOutputAnalyser = analyser
+    this.hostAnalyserTeardown = () => {
+      this.hostOutputAnalyser = null
+      source.disconnect()
+      analyser.disconnect()
+      clone.stop()
+    }
   }
 
   /** null — снова микрофон из connect(); иначе replaceTrack на отправителе WebRTC. */
@@ -802,6 +837,9 @@ export class RealtimeClient {
     this.pc = null
     this.mic = null
     this.hostOutputHandler = null
+    this.hostAnalyserTeardown?.()
+    this.hostAnalyserTeardown = null
+    this.hostOutputAnalyser = null
     this.usingExternalInput = false
     if (dc) dc.onmessage = null
     if (pc) {
@@ -1695,6 +1733,7 @@ export type GameVoice = Pick<
   | 'connect'
   | 'setMicEnabled'
   | 'setOutputMuted'
+  | 'outputLevel'
   | 'setLocalPlayback'
   | 'discardInputAudio'
   | 'forceInputCommit'

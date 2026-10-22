@@ -224,6 +224,7 @@ export default function App() {
   const conferenceTilesRef = useRef<ConferenceTile[]>([])
   const warnedMicAttemptRef = useRef('')
   const modelMeter = useCallback(() => conferenceHandleRef.current?.modelMeter?.() ?? null, [])
+  const modelOutLevel = useCallback(() => voiceClientRef.current?.outputLevel() ?? 0, [])
   const localMicStream = useCallback(() => conferenceHandleRef.current?.localMicStream() ?? null, [])
   const bindConferenceVideo = useCallback((participantId: string, element: HTMLVideoElement | null) => {
     conferenceHandleRef.current?.bindVideo(participantId, element)
@@ -1477,6 +1478,7 @@ export default function App() {
       onNextRound={() => send({ type: 'NEXT_ROUND' })}
       onAnswerMediaEnded={conferenceRole === 'joiner' ? undefined : () => send({ type: 'ANSWER_MEDIA_ENDED' })}
       modelMeter={conferenceRole === 'master' ? modelMeter : undefined}
+      modelOutLevel={conferenceRole === 'master' ? modelOutLevel : undefined}
       modelId={modelId}
       onModel={switchModel}
       audioJudgment={judgmentMode === 'audio'}

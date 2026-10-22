@@ -124,6 +124,10 @@ export class MockRealtimeClient implements GameVoice {
     this.localPlayback = enabled
   }
 
+  outputLevel(): number {
+    return 0
+  }
+
   setOutputMuted(muted: boolean): void {
     if (muted) this.onLink({ host: 'idle' })
   }
