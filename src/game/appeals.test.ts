@@ -140,6 +140,17 @@ describe('ручные апелляции', () => {
     expect(actor.getSnapshot().context.playedIds).toEqual(['q100'])
   })
 
+  it('пауза в подтверждении апелляции возвращает к объявлению', () => {
+    const actor = start(); normal(actor, 1, 'incorrect'); normal(actor, 2, 'incorrect'); normal(actor, 3, 'correct')
+    request(actor, 1)
+    expect(path(actor)).toBe('appealConfirm')
+    actor.send({ type: 'PAUSE', path: path(actor) })
+    expect(path(actor)).toBe('paused')
+    expect(actor.getSnapshot().context.resumePath).toBe('appealConfirm')
+    actor.send({ type: 'RESUME' })
+    expect(path(actor)).toBe('announcing.speaking')
+  })
+
   it('подтверждённый игрок больше не может подать апелляцию на этот вопрос', () => {
     const actor = start(); normal(actor, 1, 'incorrect'); normal(actor, 2, 'incorrect'); normal(actor, 3, 'correct')
     request(actor, 1); request(actor, 2); confirm(actor); say(actor); confirm(actor); say(actor)

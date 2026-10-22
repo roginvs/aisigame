@@ -2236,6 +2236,7 @@ export const gameMachine = setup({
         { guard: ({ context }) => context.resumePath.startsWith('auction.'), target: 'auction.resume', actions: 'resumeClock' },
         { guard: ({ context }) => context.resumePath === 'specialAway', target: 'specialAway', actions: ['resumeClock', 'restartAwayClock'] },
         { guard: ({ context }) => context.resumePath === 'appealCue', target: 'appealCue', actions: 'resumeClock' },
+        { guard: ({ context }) => context.resumePath === 'appealConfirm', target: 'announcing', actions: 'resumeClock' },
         { guard: ({ context }) => context.resumePath === 'roundSummaryWindow', target: 'roundSummaryWindow', actions: ['resumeClock', 'restartAppealClock'] },
         // Лобби конференции: паузу ставили до старта партии — «Дальше» возвращает в startMenu.
         { guard: ({ context }) => context.resumePath === 'startMenu', target: 'startMenu', actions: 'resumeClock' },
