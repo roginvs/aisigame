@@ -36,7 +36,41 @@ describe('финал: общий срок скрытого ввода', () => {
     actor.send({ type: 'HOST_AUDIO_FINISHED', purpose: 'welcome' })
     expect(statePath(actor.getSnapshot().value)).toBe('finalDraft')
     actor.send({ type: 'HOST_AUDIO_FINISHED', purpose: 'finalIntro' })
+    // Стартовые игроки с нулём: ставка 0 уже стоит, окно не ждёт ввода.
+    expect(statePath(actor.getSnapshot().value)).toBe('flashing')
+    expect(actor.getSnapshot().context.bets).toEqual([1, 2, 3].map((playerId) => ({ playerId, amount: 0 })))
+    actor.stop()
+  })
+
+  it('нулевой и отрицательный счёт получают ставку 0 сразу', () => {
+    const actor = createActor(gameMachine).start()
+    actor.send({
+      type: 'START_GAME', pack,
+      players: [
+        { id: 1, name: 'Плюс', score: 100 },
+        { id: 2, name: 'Ноль', score: 0 },
+        { id: 3, name: 'Минус', score: -100 },
+      ],
+    })
+    actor.send({ type: 'CONNECTED' })
+    actor.send({ type: 'HOST_AUDIO_FINISHED', purpose: 'welcome' })
+    actor.send({ type: 'STRIKE_THEME', playerId: 2, themeId: 'other' })
+    actor.send({ type: 'HOST_AUDIO_FINISHED', purpose: 'finalIntro' })
     expect(statePath(actor.getSnapshot().value)).toBe('finalBets.collecting')
+    expect(actor.getSnapshot().context.bets).toEqual([{ playerId: 3, amount: 0 }, { playerId: 2, amount: 0 }])
+    actor.send({ type: 'FINAL_STAKE', playerId: 3, amount: 0 })
+    expect(actor.getSnapshot().context.bets).toHaveLength(2)
+    actor.send({ type: 'FINAL_STAKE', playerId: 1, amount: 40 })
+    expect(statePath(actor.getSnapshot().value)).toBe('flashing')
+    vi.advanceTimersByTime(gameConfig.cellFlashMs)
+    actor.send({ type: 'HOST_AUDIO_FINISHED', purpose: 'read' })
+    actor.send({ type: 'HOST_AUDIO_FINISHED', purpose: 'turn' })
+    for (const playerId of [1, 2, 3]) actor.send({ type: 'FINAL_TYPED', playerId, text: '' })
+    expect(statePath(actor.getSnapshot().value)).toBe('finalReveal.verdict')
+    expect(actor.getSnapshot().context.activePlayerId).toBe(3)
+    actor.send({ type: 'HOST_AUDIO_FINISHED', purpose: 'announce' })
+    actor.send({ type: 'HOST_AUDIO_FINISHED', purpose: 'stake' })
+    expect(actor.getSnapshot().context.players.find((player) => player.id === 3)?.score).toBe(-100)
     actor.stop()
   })
 

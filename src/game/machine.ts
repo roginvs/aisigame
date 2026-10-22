@@ -1221,6 +1221,15 @@ export const gameMachine = setup({
       phaseStartedAt: () => null,
       phaseDurationMs: () => null,
     }),
+    placeZeroScoreStakes: assign({
+      // Ноль и минус не могут назвать положительную ставку: ноль ставится сразу, окно их не ждёт.
+      bets: ({ context }) => [
+        ...context.bets,
+        ...context.finalists
+          .filter((id) => playerScore(context, id) <= 0 && !context.bets.some((bet) => bet.playerId === id))
+          .map((id) => ({ playerId: id, amount: 0 })),
+      ],
+    }),
     fillMissingStakes: assign({
       // Кто не успел — ставка 0: счёт не меняется.
       bets: ({ context }) => [
@@ -2036,7 +2045,7 @@ export const gameMachine = setup({
       initial: 'collecting',
       states: {
         collecting: {
-          entry: 'startFinalStakeTimer',
+          entry: ['placeZeroScoreStakes', 'startFinalStakeTimer'],
           always: { guard: 'finalAllStaked', target: '#game.flashing', actions: ['openFinalQuestion', 'stopPhaseClock'] },
           after: {
             deadlineFinalStake: {

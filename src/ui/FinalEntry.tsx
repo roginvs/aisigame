@@ -44,8 +44,10 @@ export function FinalEntry(props: {
       <div className="special-options final-entry-list">
         {context.finalists.map((id) => {
           if (entered(id)) {
+            const autoZero = kind === 'stake' && scoreOf(id) <= 0
+            const done = autoZero ? 'ставка 0 — на счёте нет плюса' : doneText(kind)
             return (
-              <p key={id} className="final-entry-done">{playerName(context, id)} — {doneText(kind)}</p>
+              <p key={id} className="final-entry-done">{playerName(context, id)} — {done}</p>
             )
           }
           if (!canAct(id)) {
