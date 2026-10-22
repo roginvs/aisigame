@@ -64,6 +64,19 @@ async function boot(client: MockRealtimeClient, beforeBuzz?: () => void, questio
 const notes = () => getTrace().filter((e) => e.kind === 'note').map((e) => e.title)
 
 describe('ответ из нескольких реплик', () => {
+  it('Qwen подменила Per di manocchio на Первый диманокль и сказала correct: нет начисления или штрафа', async () => {
+    const client = new StatusClient()
+    client.statuses = [{ status: 'correct', heard: 'Первый диманокль.' }]
+    const roman: QuestionPack = { ...pack, questions: [{ ...pack.questions[0]!,
+      text: 'Как звали первого римского императора?', answers: ['Октавиан Август', 'Август'] }] }
+    const { actor, score, path } = await boot(client, undefined, roman)
+    client.hear('Per di manocchio.', 850)
+    await vi.advanceTimersByTimeAsync(answerSilenceDecideMs + 300)
+    expect(score()).toBe(0)
+    expect(path()).toBe('buzzing.open')
+    expect(actor.getSnapshot().context.outcomes).toMatchObject({ q: { 1: { amount: 0, correct: false } } })
+  })
+
   it('«хе-хе» → «щас-щас, отвечу» → ответ: засчитан ответ, вердикт только после тишины', async () => {
     const client = new MockRealtimeClient()
     const { score, path } = await boot(client)
@@ -217,6 +230,9 @@ describe('ответ из нескольких реплик', () => {
     expect(text).toContain('только при почти полной уверенности')
     expect(text).toContain('Сомневаешься — false')
     expect(text).toContain('1) «хе-хе» 2) «щас»')
+    expect(text).toContain('heard — дословная копия всей реплики игрока')
+    expect(text).toContain('без сокращения, перевода и исправления под эталон')
+    expect(text).toContain('При пустой расшифровке — unintelligible')
     expect(judgmentInstructions(actor.getSnapshot().context, 'x')).not.toContain('Это не первая реплика')
     actor.stop()
   })

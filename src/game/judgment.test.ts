@@ -10,6 +10,41 @@ const seasons = {
 }
 
 describe('settleJudgment', () => {
+  const roman = {
+    activeQuestionId: 'r0-t0-100-0', activePlayerId: 1, attemptId: 1,
+    reportedQuestionId: 'r0-t0-100-0', reportedPlayerId: 1, reportedAttemptId: 1,
+    questionText: 'Как звали первого римского императора?', answers: ['Октавиан Август', 'Август'],
+    status: 'correct' as const, transcript: 'Per di manocchio.', heard: 'Первый диманокль.',
+    reason: 'Игрок назвал Октавиана Августа, что является верным ответом на вопрос о первом римском императоре.',
+  }
+
+  it('не засчитывает подменённую реплику из живого дампа Qwen 22 октября', () => {
+    expect(settleJudgment(roman)).toMatchObject({ status: 'ambiguous', heard: 'Per di manocchio.' })
+  })
+
+  it.each(['Август', '', 'Октавиан Август'])('не принимает выдуманное heard=%j вместо исходного текста', (heard) => {
+    expect(settleJudgment({ ...roman, heard }).status).toBe('ambiguous')
+  })
+
+  it('не засчитывает вердикт текстового судьи без исходного текста', () => {
+    expect(settleJudgment({ ...roman, transcript: '', heard: 'Август' }).status).toBe('unintelligible')
+  })
+
+  it('не позволяет судье выбросить исправление игрока и оценить только первый вариант', () => {
+    expect(settleJudgment({ ...roman, transcript: 'Август, нет, Цезарь', heard: 'Август' }).status).toBe('ambiguous')
+  })
+
+  it('сравнивает текст на любом языке и сохраняет знаки чисел', () => {
+    const input = { ...roman, answers: ['другой эталон'] }
+    expect(settleJudgment({ ...input, transcript: '你好', heard: '再见' }).status).toBe('ambiguous')
+    expect(settleJudgment({ ...input, transcript: '-1', heard: '1' }).status).toBe('ambiguous')
+    expect(settleJudgment({ ...input, transcript: 'Straße', heard: 'Straße!' }).status).toBe('correct')
+  })
+
+  it('разрешает косметические различия записи и смысловой ответ вне эталонов', () => {
+    expect(settleJudgment({ ...roman, transcript: '  Гай   Октавий. ', heard: 'гай октавий!' }).status).toBe('correct')
+  })
+
   it('accepts a valid alternative title not listed in package answers', () => {
     const result = settleJudgment({
       ...seasons, activeQuestionId: 'book', reportedQuestionId: 'book',
@@ -393,7 +428,7 @@ describe('совпадение с эталоном', () => {
         heard: '"Мастер и Маргарита"',
         transcript: '',
       }).status,
-    ).toBe('correct')
+    ).toBe('ambiguous')
     expect(sameEtalon('  МАСТЕР   и   Маргарита!  ', ['Мастер и Маргарита'])).toBe(true)
     const otherBook = settleJudgment({
       ...coded,

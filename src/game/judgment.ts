@@ -16,7 +16,7 @@ export function settleJudgment(input: {
   reason: string
   source?: 'text' | 'audio'
 }): AnswerJudgment {
-  const heard = (input.source === 'audio' ? input.heard : input.transcript || input.heard).trim()
+  const heard = (input.source === 'audio' ? input.heard : input.transcript).trim()
   const sameQuestion =
     input.reportedQuestionId === input.activeQuestionId &&
     input.reportedPlayerId === input.activePlayerId &&
@@ -65,6 +65,10 @@ export function settleJudgment(input: {
     status = 'near_miss'
     reason = 'Распознавание неуверенное, а реплика похожа на эталон. Нужно повторить.'
   }
+  if (status === 'correct' && input.source !== 'audio' && !sameTranscript(input.transcript, input.heard)) {
+    status = 'ambiguous'
+    reason = 'Текстовый судья оценил другую реплику. Верный ответ не подтверждён.'
+  }
   const audioUncertain = input.source === 'audio' && (status === 'unintelligible' || status === 'ambiguous')
   if (!audioUncertain && status !== 'correct' && (sameEtalon(heard, input.answers) || syllableEtalon(heard, input.answers))) {
     status = 'correct'
@@ -78,6 +82,14 @@ export function settleJudgment(input: {
     heard,
     reason,
   }
+}
+
+/** Судья копирует весь исходный текст: пересказ или исправление под эталон не доказательство ответа. */
+function sameTranscript(transcript: string, heard: string): boolean {
+  const key = (value: string): string => value.normalize('NFC').toLowerCase().replaceAll('ё', 'е')
+    .replace(/[.,!?…«»„“”"'():;]+/gu, ' ').replace(/\s+/gu, ' ').trim()
+  const original = key(transcript)
+  return Boolean(original) && original === key(heard)
 }
 
 export function judgmentChatText(status: JudgmentStatus, heard: string): string {

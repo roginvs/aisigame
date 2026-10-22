@@ -256,12 +256,24 @@ describe('audio judging gameplay', () => {
     // Точный эталон решает машина: модель не дёргаем.
     expect(text).not.toHaveBeenCalled()
   })
-  it('печатный ответ не слово-в-слово решает модель: неверный — минус ставки', async () => {
+  it.each([
+    { label: 'неверный', typed: 'Пылесос', heard: null, expected: 90 },
+    { label: 'верный смысловой', typed: 'Ближайшая к Земле звезда', heard: 'Ближайшая к Земле звезда', expected: 110 },
+    { label: 'подменённый судьёй', typed: 'Per di manocchio.', heard: 'Солнце', expected: 90 },
+  ])('печатный ответ $label: оценка опирается на сохранённый текст', async ({ typed, heard, expected }) => {
     const client = new MockRealtimeClient()
+    const request = client.requestTool.bind(client)
+    const text = vi.spyOn(client, 'requestTool').mockImplementation((purpose, turn, name, instructions, isolated, tool) => {
+      if (purpose !== 'finalJudge' || heard === null) { request(purpose, turn, name, instructions, isolated, tool); return }
+      window.setTimeout(() => client.onToolCall({ name, callId: 'final-text', arguments: {
+        status: 'correct', heard, reason: 'Верно', speech: 'answer', guessing: false,
+      } }, purpose, turn), 40)
+    })
     const audio = vi.spyOn(client, 'requestAudioJudgment')
     const finalPack: QuestionPack = { ...pack,
       rounds: [...pack.rounds, { index: 1, kind: 'final', name: 'Финал' }],
-      questions: [...pack.questions, { ...pack.questions[1]!, id: 'final', roundIndex: 1, themeId: 'final', themeName: 'Финал', value: 0 }],
+      questions: [...pack.questions, { ...pack.questions[1]!, id: 'final', roundIndex: 1, themeId: 'final', themeName: 'Финал', value: 0,
+        text: 'Какая звезда находится ближе всего к Земле?' }],
     }
     const { actor, score } = await boot(client, 'audio', finalPack)
     client.hear('пылесосел'); await vi.advanceTimersByTimeAsync(180 + quietMs)
@@ -273,16 +285,15 @@ describe('audio judging gameplay', () => {
     actor.send({ type: 'FINAL_STAKE', playerId: 3, amount: 0 })
     await vi.advanceTimersByTimeAsync(1500)
     expect(statePath(actor.getSnapshot().value)).toBe('finalTyped')
-    actor.send({ type: 'FINAL_TYPED', playerId: 1, text: 'Пылесос' })
+    actor.send({ type: 'FINAL_TYPED', playerId: 1, text: typed })
     actor.send({ type: 'FINAL_TYPED', playerId: 2, text: '' })
     actor.send({ type: 'FINAL_TYPED', playerId: 3, text: '' })
     // Не слово-в-слово — просим модель.
-    const text = vi.spyOn(client, 'requestTool')
     for (let i = 0; i < 12 && statePath(actor.getSnapshot().value) !== 'finished'; i++) {
       await vi.advanceTimersByTimeAsync(12000)
     }
-    // Модель вернула incorrect: минус ставки (10), у нулевых ставка — ноль.
-    expect(score()).toBe(90)
+    // У нулевых ставка — ноль; исход игрока с десятью очками ставки зависит от проверки текста.
+    expect(score()).toBe(expected)
     expect(audio).not.toHaveBeenCalled()
     expect(text.mock.calls.filter((call) => call[0] === 'finalJudge')).toHaveLength(1)
   })

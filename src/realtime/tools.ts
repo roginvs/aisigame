@@ -48,7 +48,7 @@ export const submitAnswerJudgmentTool = {
         type: 'string',
         enum: ['correct', 'incorrect', 'needs_clarification', 'unintelligible', 'ambiguous'],
       },
-      heard: { type: 'string', description: 'Что именно сказал игрок, коротко.' },
+      heard: { type: 'string', description: 'Дословная реплика игрока, без исправления под эталон. При оценке текста скопируй весь переданный текст без сокращения и перевода.' },
       reason: { type: 'string', description: 'Почему выставлен этот статус, одна фраза.' },
       speech: {
         type: 'string',
