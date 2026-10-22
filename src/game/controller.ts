@@ -645,6 +645,8 @@ export function attachController(options: {
   }
 
   let previousRound = actor.getSnapshot().context.roundIndex
+  /** Откуда сняли паузу. `resumeClock` стирает `resumePath` до этой подписки. */
+  let pausedFrom = ''
   const subscription = actor.subscribe((snapshot) => {
     const path = statePath(snapshot.value)
     const round = snapshot.context.roundIndex
@@ -718,6 +720,7 @@ export function attachController(options: {
       return
     }
     if (path === 'paused') {
+      pausedFrom = context.resumePath
       holdAnnounceWait()
       holdSpecialIntro()
       clearBuzzerWarning()
@@ -731,10 +734,10 @@ export function attachController(options: {
       if (buzzerChimeLive(path)) armBuzzerWarning(context.phaseDurationMs ?? gameConfig.buzzerMs)
       // Кот/аукцион: RESUME сворачивает подсостояние (cat.picking → cat.announcing, staking.listening → staking.asking…).
       // Узел ждёт конец реплики, которой ещё не было — как при обычном входе заказываем её заново.
-      const rerouted = (path.startsWith('cat.') || path.startsWith('auction.')) && path !== context.resumePath
+      const rerouted = (path.startsWith('cat.') || path.startsWith('auction.')) && path !== pausedFrom
       const skipped =
         (path === 'bridging' && context.roundIndex !== fromRound) ||
-        (path === 'finished' && context.resumePath !== 'finished') ||
+        (path === 'finished' && pausedFrom !== 'finished') ||
         rerouted
       if (!skipped) {
         const pending = held.splice(0)

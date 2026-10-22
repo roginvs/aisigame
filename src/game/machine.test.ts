@@ -1935,6 +1935,7 @@ describe('game machine', () => {
 
     actor.send({ type: 'RESUME' })
     expect(statePath(actor.getSnapshot().value)).toBe('startMenu')
+    expect(actor.getSnapshot().context.resumePath).toBe('')
     // Игра не началась: после «Дальше» старт партии по-прежнему работает как обычно.
     actor.send({ type: 'START_GAME', pack: demoPack, players: playersFromNames('А; Б; В') })
     expect(statePath(actor.getSnapshot().value)).toBe('connecting')

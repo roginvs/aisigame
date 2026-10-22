@@ -637,6 +637,7 @@ export const gameMachine = setup({
       falseStarts: ({ context }) =>
         shiftFalseStarts(context.falseStarts, context.pauseStartedAt === null ? 0 : Date.now() - context.pauseStartedAt),
       pauseStartedAt: () => null,
+      resumePath: () => '',
     }),
     loadPack: assign(({ event }) =>
       event.type === 'START_GAME' ? blankMatch(event.pack, event.players) : {},
