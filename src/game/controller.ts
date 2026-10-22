@@ -1,5 +1,5 @@
 import { diag } from '../debug/diag.ts'
-import { setLeakTarget, failedAttempts, resetFailedAttempts, suspiciousOnce } from '../debug/suspicious.ts'
+import { setLeakTarget, failedAttempts, resetFailedAttempts, resetSuspiciousState, suspiciousOnce } from '../debug/suspicious.ts'
 import { jokeCoin } from './jokeCoin.ts'
 import { auctionBidToolFor, selectQuestionToolFor } from '../realtime/tools.ts'
 import type { Actor, SnapshotFrom } from 'xstate'
@@ -685,6 +685,7 @@ export function attachController(options: {
     fromRound: number,
   ): void {
     const context = snapshot.context
+    if (path === 'startMenu' || path === 'connecting') resetSuspiciousState()
     // Детектор «подозрительно»: машина перешла в announcing по таймауту оценки — модель не успела (judgeMs).
     if (path === 'announcing' && from === 'judging' && context.judgmentReason === 'Модель не успела оценить ответ') {
       suspiciousOnce('слегка', 'judgeMissed', 20_000, 'оценка не пришла в отведённое окно (judgeMs)', {

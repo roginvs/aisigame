@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { getTrace } from './trace.ts'
-import { checkHostUtterance, failedAttempts, resetFailedAttempts, setLeakTarget, suspicious, suspiciousOnce } from './suspicious.ts'
+import { checkHostUtterance, failedAttempts, resetFailedAttempts, resetSuspiciousState, setLeakTarget, suspicious, suspiciousOnce } from './suspicious.ts'
 
 function traceTitles(): string[] {
   return getTrace().map((entry) => entry.title)
@@ -21,6 +21,19 @@ describe('suspicious — слой «подозрительно» (диагнос
   it('suspiciousOnce держит cooldown: тот же ключ недавно уже был', () => {
     expect(suspiciousOnce('сильно', 'test-cooldown', 60_000, 'первый раз')).toBe(true)
     expect(suspiciousOnce('сильно', 'test-cooldown', 60_000, 'второй раз')).toBe(false)
+  })
+
+  it('сброс партии снова пускает ту же заметку и обнуляет неудачи', () => {
+    expect(suspiciousOnce('сильно', 'reset-key', 60_000, 'первый')).toBe(true)
+    expect(suspiciousOnce('сильно', 'reset-key', 60_000, 'второй')).toBe(false)
+    resetSuspiciousState()
+    expect(suspiciousOnce('сильно', 'reset-key', 60_000, 'после сброса')).toBe(true)
+    failedAttempts('q-reset', 1, 'раз')
+    failedAttempts('q-reset', 1, 'два')
+    resetSuspiciousState()
+    const before = getTrace().length
+    failedAttempts('q-reset', 1, 'снова одна')
+    expect(getTrace().slice(before).every((entry) => !entry.title.startsWith('подозрительно'))).toBe(true)
   })
 
   describe('неудачные попытки ответа подряд', () => {

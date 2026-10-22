@@ -42,6 +42,12 @@ export function resetFailedAttempts(): void {
   failures.count = 0
 }
 
+/** Новая партия не наследует заметки и счётчик неудач прошлой. */
+export function resetSuspiciousState(): void {
+  cooldowns.clear()
+  resetFailedAttempts()
+}
+
 export function suspicious(level: SuspicionLevel, text: string, detail?: Record<string, unknown>): void {
   const clean = text.trim()
   if (!clean) return
