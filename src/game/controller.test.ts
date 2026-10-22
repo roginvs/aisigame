@@ -629,6 +629,27 @@ describe('attachController answer listening', () => {
     actor.stop()
   })
 
+  it('два одинаковых имени: чат другого игрока и участника без игрового id не засчитывается', async () => {
+    const client = new MockRealtimeClient()
+    const { actor, stop, actions } = await boot(client)
+    actor.send({ type: 'RESET_GAME' })
+    actor.send({ type: 'START_GAME', pack, players: [{ id: 1, name: 'Вася', score: 0 }, { id: 2, name: 'Вася', score: 0 }] })
+    await vi.advanceTimersByTimeAsync(80)
+    actor.send({ type: 'QUESTION_SELECTED', themeId: 'p', value: 400 })
+    await vi.advanceTimersByTimeAsync(gameConfig.cellFlashMs + 80)
+    actor.send({ type: 'BUZZER_PRESSED', playerId: 1 })
+    actions().chatAnswer(2, 'ответ')
+    actions().chatAnswer(null, 'ответ')
+    await vi.advanceTimersByTimeAsync(answerSilenceDecideMs + 100)
+    expect(statePath(actor.getSnapshot().value)).toBe('answering.waiting')
+    expect(actor.getSnapshot().context.players.map((player) => player.score)).toEqual([0, 0])
+    actions().chatAnswer(1, 'ответ')
+    await vi.advanceTimersByTimeAsync(answerSilenceDecideMs + 400)
+    expect(actor.getSnapshot().context.players.map((player) => player.score)).toEqual([400, 0])
+    stop()
+    actor.stop()
+  })
+
   it('ответ сообщением в чат: реплика того, чей ход, идёт в оценку, чужое — игнорируется', async () => {
     const client = new MockRealtimeClient()
     const requestTool = vi.spyOn(client, 'requestTool')
@@ -640,14 +661,14 @@ describe('attachController answer listening', () => {
 
     // Сообщение не отвечающего — не трогает попытку.
     const judgeBefore = judgeLines().length
-    actions().chatAnswer('Игрок 2', 'ответ')
+    actions().chatAnswer(2, 'ответ')
     await vi.advanceTimersByTimeAsync(100)
     expect(statePath(actor.getSnapshot().value)).toBe('answering.waiting')
     expect(requestTool).not.toHaveBeenCalledWith('judge', expect.anything(), 'submitAnswerJudgment', expect.anything(), expect.anything())
     expect(judgeLines().length).toBe(judgeBefore)
 
     // Сообщение отвечающего — реплика попытки, эталон засчитывается локально без модели.
-    actions().chatAnswer('Игрок 1', 'ответ')
+    actions().chatAnswer(1, 'ответ')
     await vi.advanceTimersByTimeAsync(100)
     expect(statePath(actor.getSnapshot().value)).toBe('answering.settling')
     expect(getTrace().some((entry) => entry.kind === 'note' && entry.title.includes('из чата'))).toBe(true)

@@ -117,6 +117,34 @@ describe('MasterSession resume', () => {
     actor.stop()
   })
 
+  it('чат одинаковых имён передаёт контроллеру id из привязанного clientId, включая мастера', () => {
+    const players = [
+      { id: 1, name: 'Вася', score: 0, clientId: 'master-client' },
+      { id: 2, name: 'Вася', score: 0, clientId: 'guest-a' },
+      { id: 3, name: 'Вася', score: 0, clientId: 'guest-b' },
+    ]
+    const actor = createActor(gameMachine).start()
+    actor.send({ type: 'CONTINUE_GAME', pack: demoPack, saved: { ...saved, players } })
+    actor.send({ type: 'CONNECTED' })
+    const transport = new MemoryTransport()
+    const onChatLine = vi.fn()
+    const session = new MasterSession({
+      transport, actor, client: { requestSpeech: vi.fn() } as unknown as GameVoice,
+      masterClientId: 'master-client', masterName: 'Вася', pack: demoPack,
+      packBytes: new Uint8Array([1, 2, 3]), packHash: 'hash', authorityToken: 'master-token',
+      onRoster: () => {}, resumePlayers: players, onChatLine,
+    })
+    for (const [clientId, endpoint] of [['guest-a', 'endpoint-a'], ['guest-b', 'endpoint-b']]) {
+      if (!clientId || !endpoint) throw new Error('нет тестового участника')
+      transport.receive({ type: 'hello', clientId, authToken: clientId, name: 'Вася' }, endpoint)
+      transport.receive({ type: 'chat', clientId, authToken: clientId, text: 'ответ' }, endpoint)
+    }
+    session.sendChat('ответ мастера')
+    expect(onChatLine.mock.calls).toEqual([[2, 'ответ'], [3, 'ответ'], [1, 'ответ мастера']])
+    session.dispose()
+    actor.stop()
+  })
+
   it('публикует чат, речь ведущей, услышанное и оценку сразу, ровно двумя полями', () => {
     const actor = createActor(gameMachine).start()
     const transport = new MemoryTransport()
@@ -128,7 +156,7 @@ describe('MasterSession resume', () => {
       onRoster: () => {}, onHistory,
     })
     const start = transport.sent.length
-    session.sendChat('Мастер', 'Привет')
+    session.sendChat('Привет')
     pushHostLine('Новая реплика кольцевого буфера')
     pushPlayerLine('Ответ игрока')
     pushJudgeLine('Верно')

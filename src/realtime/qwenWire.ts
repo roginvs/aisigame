@@ -108,7 +108,7 @@ export function qwenTranslateOutbound(event: object, options: { vadExtras?: bool
         interruptResponse,
       }),
     })
-    events.push({ type: 'response.create' })
+    events.push({ type: 'response.create', ...(typeof record.event_id === 'string' ? { event_id: record.event_id } : {}) })
     return { events }
   }
   if (type === 'response.cancel') {

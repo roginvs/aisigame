@@ -1,4 +1,5 @@
 import { expect, test, type Page } from '@playwright/test'
+import { answerSilenceDecideMs } from '../src/options.ts'
 
 /**
  * Узнаём участников по id соединения, не по имени: пары `[jitsiId, clientId]` из снимка мастера
@@ -57,7 +58,7 @@ test.describe('одинаковые имена и имена служебных 
     await context.close()
   })
 
-  test('партия с двумя «Васями»: в игре карточки тоже по id, своя карточка у каждого своя', async ({ browser }) => {
+  test('партия с двумя «Васями»: карточки и ответы из чата различаются по id', async ({ browser }) => {
     test.setTimeout(180_000)
     const context = await browser.newContext()
     await context.grantPermissions(['clipboard-read', 'clipboard-write'])
@@ -88,6 +89,22 @@ test.describe('одинаковые имена и имена служебных 
       await expect.poll(async () => (await idsOf(guest, 'Вася')).filter(Boolean).length).toBeGreaterThanOrEqual(1)
       for (const id of (await idsOf(guest, 'Вася')).filter(Boolean)) expect(masterIds).toContain(id)
     }
+    const [answerer, other] = guests
+    if (!answerer || !other) throw new Error('нет двух игроков')
+    await answerer.getByRole('button', { name: 'Текст, 100', exact: true }).click()
+    await expect(answerer.getByRole('status').filter({ hasText: 'Жмите кнопку' })).toBeVisible()
+    await answerer.locator('.conference-player.self button.buzzer').click()
+    await other.getByRole('textbox', { name: 'Сообщение в чат' }).fill('Август')
+    await other.getByRole('textbox', { name: 'Сообщение в чат' }).press('Enter')
+    await expect(master.locator('.chat-log')).toContainText('Август')
+    // Проверяем отсутствие засчёта после полного окна принятия решения, а не до прихода сообщения.
+    await master.waitForTimeout(answerSilenceDecideMs + 300)
+    await expect(master.getByRole('group', { name: 'Вася: 0', exact: true })).toHaveCount(2)
+    await expect(answerer.getByRole('status').filter({ hasText: 'Вася отвечает' })).toBeVisible()
+    await answerer.getByRole('textbox', { name: 'Сообщение в чат' }).fill('Август')
+    await answerer.getByRole('textbox', { name: 'Сообщение в чат' }).press('Enter')
+    await expect(answerer.locator('.conference-player.self')).toHaveAttribute('aria-label', 'Вася: 100')
+    await expect(other.locator('.conference-player.self')).toHaveAttribute('aria-label', 'Вася: 0')
     await context.close()
   })
 })

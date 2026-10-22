@@ -9,7 +9,7 @@ type Harness = { dc: unknown; wireOpen: boolean; handleMessage(raw: string): voi
  * Живая партия 22 октября, дамп 16-18-34: DashScope не эхомит metadata (purpose/turn)
  * в response.done — каждый вызов функции прилетал без метки, клиент отдавал turn=-1
  * и контроллер отбрасывал его как поздний. Здесь проверяем атрибуцию: вызов без метки
- * приписывается ожидающему ходу, чужие (активные на момент запроса) — отбрасываются,
+ * связывается с отправкой через response.created, чужие и неопознанные — отбрасываются,
  * ответ текстом вместо функции — один повтор и быстрый отказ ходу.
  */
 
@@ -72,11 +72,13 @@ describe('вызов функции без метки хода (Qwen/DashScope)'
     client.onToolCall = (call, purpose, turn) => calls.push({ purpose, call, turn })
     client.requestTool('select', 5, 'selectQuestion', 'выбери')
     // Первый ответ — текст без функции.
+    feed({ type: 'response.created', response: { id: 'q1' } })
     feed({ type: 'response.done', response: { id: 'q1', status: 'completed', output: [] } })
     expect(sent.filter((e) => e.type === 'response.create')).toHaveLength(2)
     // Потерянный текст в чат не публикуется.
     expect(notesFrom(cursor).some((n) => n.includes('без вызова функции'))).toBe(true)
     // Второй — тоже текст: отдаём ходу нулевой вызов.
+    feed({ type: 'response.created', response: { id: 'q2' } })
     feed({ type: 'response.done', response: { id: 'q2', status: 'completed', output: [] } })
     expect(calls).toEqual([{ purpose: 'select', call: null, turn: 5 }])
     expect(sent.filter((e) => e.type === 'response.create')).toHaveLength(2)
@@ -87,7 +89,9 @@ describe('вызов функции без метки хода (Qwen/DashScope)'
     const calls: Array<{ purpose: string; call: unknown }> = []
     client.onToolCall = (call, purpose) => calls.push({ purpose, call })
     client.requestTool('judge', 7, 'submitAnswerJudgment', 'оцени')
+    feed({ type: 'response.created', response: { id: 'q1' } })
     feed({ type: 'response.done', response: { id: 'q1', status: 'completed', output: [] } })
+    feed({ type: 'response.created', response: { id: 'q2' } })
     feed({ type: 'response.done', response: { id: 'q2', status: 'completed', output: [] } })
     expect(calls).toEqual([])
     // Паметка пишется, но onToolCall не зовётся: нулевой вердикт — это вердикт.
@@ -112,10 +116,12 @@ describe('вызов функции без метки хода (Qwen/DashScope)'
     client.onToolCall = onToolCall
     client.requestTool('select', 5, 'selectQuestion', 'выбери')
     const done = { type: 'response.done', response: { id: 'q1', status: 'completed', output: [] } }
+    feed({ type: 'response.created', response: { id: 'q1' } })
     feed(done)
     feed(done)
     expect(onToolCall).not.toHaveBeenCalled()
     expect(sent.filter((e) => e.type === 'response.create')).toHaveLength(2)
+    feed({ type: 'response.created', response: { id: 'q2' } })
     feed({ type: 'response.done', response: { id: 'q2', status: 'completed', output: [selectCall('selectQuestion')] } })
     expect(onToolCall).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({ name: 'selectQuestion' }), 'select', 5)
   })
@@ -124,9 +130,11 @@ describe('вызов функции без метки хода (Qwen/DashScope)'
     const onToolCall = vi.fn()
     client.onToolCall = onToolCall
     client.requestTool('select', 5, 'selectQuestion', 'выбери')
+    feed({ type: 'response.created', response: { id: 'q1' } })
     feed({ type: 'response.done', response: { id: 'q1', status: 'completed', output: [selectCall('auctionBid')] } })
     expect(onToolCall).not.toHaveBeenCalled()
     expect(sent.filter((e) => e.type === 'response.create')).toHaveLength(2)
+    feed({ type: 'response.created', response: { id: 'q2' } })
     feed({ type: 'response.done', response: { id: 'q2', status: 'completed', output: [selectCall('selectQuestion')] } })
     expect(onToolCall).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({ name: 'selectQuestion' }), 'select', 5)
   })
@@ -141,20 +149,52 @@ describe('вызов функции без метки хода (Qwen/DashScope)'
     expect(notesFrom(cursor).some((n) => n.includes('поздний selectQuestion turn=3'))).toBe(true)
   })
 
-  it('done речи ведущей без метки (Qwen) не считается ответом на инструмент: текст в чат идёт как раньше', () => {
+  it('created и done старой речи после запроса функции не расходуют повтор инструмента', () => {
     const cursor = getTrace().at(-1)?.id ?? 0
     const calls: Array<{ purpose: string }> = []
     client.onToolCall = (_call, purpose) => calls.push({ purpose })
-    client.requestTool('select', 5, 'selectQuestion', 'выбери')
-    // Реплика-подсказка, ушедшая до запроса: её done — не наш, но она в снимке stale.
-    // Отдельно проверяем не-snapshot сценарий: speech активна, done без call дошёл.
-    ;(client as unknown as { speech: unknown }).speech = null
+    client.requestSpeech('clarify', 5, 'Попроси выбрать ещё раз')
     const stray = { id: 's1', status: 'completed', output: [{ id: 'm1', type: 'message', content: [{ type: 'output_audio', transcript: 'Тема — Сказки' }] }] }
-    // Чужого снимка нет: s1 не в staleResponses, ждущего чужого ответа нет.
     client.requestTool('judge', 8, 'submitAnswerJudgment', 'оцени')
+    feed({ type: 'response.created', response: { id: 's1' } })
     feed({ type: 'response.done', response: stray })
-    // judge не форсится нулевым вызовом и не републикуется как реплика хода.
     expect(calls).toEqual([])
-    expect(notesFrom(cursor).some((n) => n.includes('повторяю ход'))).toBe(true)
+    expect(notesFrom(cursor).some((n) => n.includes('повторяю ход'))).toBe(false)
+    expect(sent.filter((e) => e.type === 'response.create')).toHaveLength(2)
+  })
+
+  it('created старой оценки после нового запроса не превращает старый вердикт в новый', () => {
+    const onToolCall = vi.fn()
+    client.onToolCall = onToolCall
+    client.requestTool('judge', 41, 'submitAnswerJudgment', 'первый ответ')
+    client.requestTool('judge', 42, 'submitAnswerJudgment', 'второй ответ')
+    feed({ type: 'response.created', response: { id: 'old' } })
+    feed({ type: 'response.done', response: { id: 'old', status: 'completed', output: [selectCall('submitAnswerJudgment')] } })
+    expect(onToolCall).not.toHaveBeenCalled()
+    feed({ type: 'response.created', response: { id: 'new' } })
+    feed({ type: 'response.done', response: { id: 'new', status: 'completed', output: [selectCall('submitAnswerJudgment')] } })
+    expect(onToolCall).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({ name: 'submitAnswerJudgment' }), 'judge', 42)
+  })
+
+  it('не угадывает владельца unmarked done без response.created', () => {
+    const onToolCall = vi.fn()
+    client.onToolCall = onToolCall
+    client.requestTool('judge', 42, 'submitAnswerJudgment', 'оцени')
+    feed({ type: 'response.done', response: { id: 'unknown', status: 'completed', output: [selectCall('submitAnswerJudgment')] } })
+    expect(onToolCall).not.toHaveBeenCalled()
+    feed({ type: 'response.created', response: { id: 'own' } })
+    feed({ type: 'response.done', response: { id: 'own', status: 'completed', output: [selectCall('submitAnswerJudgment')] } })
+    expect(onToolCall).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({ name: 'submitAnswerJudgment' }), 'judge', 42)
+  })
+
+  it('ошибка конкретной отправки до created снимает только её место в очереди', () => {
+    const onToolCall = vi.fn()
+    client.onToolCall = onToolCall
+    client.requestTool('select', 5, 'selectQuestion', 'выбери')
+    const request = sent.find((e) => e.type === 'response.create')
+    feed({ type: 'error', error: { event_id: request?.event_id, message: 'unsupported output modality' } })
+    feed({ type: 'response.created', response: { id: 'audio-retry' } })
+    feed({ type: 'response.done', response: { id: 'audio-retry', status: 'completed', output: [selectCall('selectQuestion')] } })
+    expect(onToolCall).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({ name: 'selectQuestion' }), 'select', 5)
   })
 })

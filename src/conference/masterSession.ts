@@ -61,8 +61,8 @@ export type MasterSessionOptions = {
   onRoster: () => void
   messageRing?: ConferenceMessageRing
   onHistory?: (history: ConferenceMessageRing) => void
-  /** Участник написал в чат: мастер-имя и текст. Контроллер сам решит, ответ ли это в попытке. */
-  onChatLine?: (name: string, text: string) => void
+  /** Проверенный автор чата: id из главного состояния; null — участник пока не играет. */
+  onChatLine?: (playerId: number | null, text: string) => void
   /** Игроки сохранённой партии. Если переданы, лобби не объявляется и не рассылается. */
   resumePlayers?: readonly Player[]
   /** Речь людей в комнате (без «Ведущей»): лобби ждёт тишину перед репликой. */
@@ -114,7 +114,7 @@ export class MasterSession {
   private onRosterCb: () => void
   private initialHistory: ConferenceMessageRing
   private onHistory: (history: ConferenceMessageRing) => void
-  private onChatLineCb: ((name: string, text: string) => void) | null = null
+  private onChatLineCb: ((playerId: number | null, text: string) => void) | null = null
   private isRoomSpeaking: () => boolean
   private machineSub: { unsubscribe: () => void } | null = null
   private masterClientId: string
@@ -344,11 +344,17 @@ export class MasterSession {
     return now - master.lastSeen > PRESENCE_STALE_MS
   }
 
-  sendChat(name: string, text: string): void {
+  sendChat(text: string): void {
+    this.acceptChat(this.masterClientId, text)
+  }
+
+  private acceptChat(clientId: string, text: string): void {
     const clean = text.trim()
-    if (!clean) return
-    this.broadcastMessage({ kind: 'chat', name, text: clean, at: new Date().toISOString() })
-    this.onChatLineCb?.(name, clean)
+    const entry = this.roster.get(clientId)
+    if (!clean || !entry) return
+    this.broadcastMessage({ kind: 'chat', name: entry.name, text: clean, at: new Date().toISOString() })
+    const playerId = this.actor.getSnapshot().context.players.find((player) => player.clientId === clientId)?.id ?? null
+    this.onChatLineCb?.(playerId, clean)
   }
 
   dispose(): void {
@@ -597,10 +603,7 @@ export class MasterSession {
       return
     }
     if (message.type === 'chat') {
-      const clean = message.text.trim()
-      const name = this.roster.get(message.clientId)?.name
-      if (!clean || !name) return
-      this.sendChat(name, clean)
+      this.acceptChat(message.clientId, message.text)
       return
     }
     if (message.type === 'audioSinkNote') {

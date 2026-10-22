@@ -18,6 +18,7 @@ import { sessionTools, toolPurposes } from './tools.ts'
 import { createSilentMicStream } from './pcm.ts'
 import type { VoiceWire } from './wire.ts'
 import { ItemPrompts, echoesAnyPrompt } from './itemPrompts.ts'
+import { ResponseRequests } from './responseRequests.ts'
 import { transcriptionConfidence, transcriptOf, type StoredTranscript } from './utterance.ts'
 
 export type LinkStatus = {
@@ -156,8 +157,8 @@ export class RealtimeClient {
     isolated: boolean
     tool?: { name: string }
     audioItemId?: string
-    /** Ответы, созданные до этого запроса: их поздние done — чужие (провайдер без метки хода). */
-    staleResponses: Set<string>
+    /** Конкретная отправка response.create; повтор этого же хода получает новый token. */
+    responseToken: number | null
     /** Повтор хода, когда ответ пришёл без вызова функции (Qwen иногда отвечает текстом). */
     retries: number
   } | null = null
@@ -168,6 +169,7 @@ export class RealtimeClient {
   private inputAudioStartMs: number | null = null
   /** Идущие ответы модели: unscoped `response.cancel` шлём только при них (иначе `response_cancel_not_active`). */
   private activeResponses = new Set<string>()
+  private responseRequests = new ResponseRequests()
   private inputItemId: string | null = null
   /** Запасной commit: длительность реплики, которую видит уровень, а модель — нет (fa584db п. 1). */
   private pendingForcedUtterance: { durationMs: number } | null = null
@@ -184,7 +186,6 @@ export class RealtimeClient {
   /** audio_end_ms из conversation.item.truncated — если обрыв отмечен уже после события. */
   private truncatedMs = new Map<string, number>()
   private transcriptWaiters = new Map<string, Array<(text: string) => void>>()
-  private looseTranscriptWaiters: Array<(text: string) => void> = []
   /** Пока открыта попытка ответа: в чат только после allow / не после suppress. */
   private playerChatGated = false
   private playerChatAllowed = new Set<string>()
@@ -607,25 +608,25 @@ export class RealtimeClient {
     itemId: string | null,
     timeoutMs: number,
   ): Promise<{ text: string; arrived: boolean; confidence: number | null }> {
-    const known = itemId ?? this.inputItemId
-    const ready = transcriptOf(known, this.transcripts)
+    // Без id нельзя отличить ответ этой попытки от предыдущей/следующей реплики.
+    if (!itemId) return Promise.resolve({ text: '', arrived: false, confidence: null })
+    const token = this.sessionToken
+    const ready = transcriptOf(itemId, this.transcripts)
     if (ready) return Promise.resolve(ready)
     return new Promise((resolve) => {
       const timer = window.setTimeout(() => {
-        this.removeTranscriptWaiter(known, finish)
-        resolve(transcriptOf(known, this.transcripts) ?? { text: '', arrived: false, confidence: null })
+        this.removeTranscriptWaiter(itemId, finish)
+        resolve(token === this.sessionToken ? transcriptOf(itemId, this.transcripts) ?? { text: '', arrived: false, confidence: null }
+          : { text: '', arrived: false, confidence: null })
       }, timeoutMs)
       const finish = (text: string) => {
         window.clearTimeout(timer)
-        resolve(transcriptOf(known ?? this.inputItemId, this.transcripts) ?? { text, arrived: true, confidence: null })
+        resolve(token === this.sessionToken ? transcriptOf(itemId, this.transcripts) ?? { text, arrived: true, confidence: null }
+          : { text: '', arrived: false, confidence: null })
       }
-      if (known) {
-        const bucket = this.transcriptWaiters.get(known) ?? []
-        bucket.push(finish)
-        this.transcriptWaiters.set(known, bucket)
-      } else {
-        this.looseTranscriptWaiters.push(finish)
-      }
+      const bucket = this.transcriptWaiters.get(itemId) ?? []
+      bucket.push(finish)
+      this.transcriptWaiters.set(itemId, bucket)
     })
   }
 
@@ -639,9 +640,6 @@ export class RealtimeClient {
     const matched = this.transcriptWaiters.get(itemId) ?? []
     this.transcriptWaiters.delete(itemId)
     for (const waiter of matched) waiter(text)
-    const loose = this.looseTranscriptWaiters
-    this.looseTranscriptWaiters = []
-    for (const waiter of loose) waiter(text)
   }
 
   /** Черновик в чате: только показ, игра его не читает. */
@@ -694,11 +692,7 @@ export class RealtimeClient {
     return echo
   }
 
-  private removeTranscriptWaiter(itemId: string | null, finish: (text: string) => void): void {
-    if (!itemId) {
-      this.looseTranscriptWaiters = this.looseTranscriptWaiters.filter((waiter) => waiter !== finish)
-      return
-    }
+  private removeTranscriptWaiter(itemId: string, finish: (text: string) => void): void {
     const left = (this.transcriptWaiters.get(itemId) ?? []).filter((waiter) => waiter !== finish)
     if (left.length) this.transcriptWaiters.set(itemId, left)
     else this.transcriptWaiters.delete(itemId)
@@ -788,7 +782,7 @@ export class RealtimeClient {
     this.pendingTool = {
       purpose, turn, name, instructions, isolated, tool,
       audioItemId: audioReady ? audioItemId : undefined,
-      staleResponses: new Set(this.activeResponses),
+      responseToken: null,
       retries: 0,
     }
     this.sendToolRequest('text')
@@ -824,6 +818,7 @@ export class RealtimeClient {
     this.wireOpen = false
     this.inputAudioStartMs = null
     this.activeResponses.clear()
+    this.responseRequests.reset()
     this.micLive = false
     this.wire?.close()
     this.inputStartedAt = null
@@ -836,7 +831,6 @@ export class RealtimeClient {
     this.cutItems.clear()
     this.truncatedMs.clear()
     this.transcriptWaiters.clear()
-    this.looseTranscriptWaiters = []
     this.playerChatGated = false
     this.playerChatAllowed.clear()
     this.playerChatSuppressed.clear()
@@ -896,25 +890,28 @@ export class RealtimeClient {
     this.send({ type: 'response.cancel' })
   }
 
-  private send(event: object): boolean {
+  private send(event: object, owner?: { responseToken: number | null }): boolean {
     const type = eventType(event)
     if (type === 'input_audio_buffer.clear') this.pendingForcedUtterance = null
-    if (this.wire) {
-      if (!this.wireOpen) {
-        pushTrace('note', `не отправлено, канал закрыт: ${type}`, event)
-        return false
-      }
-      pushTrace('out', type, event)
-      return this.wire.send(event)
-    }
-    if (!this.canSend() || !this.dc) {
+    if (!this.canSend()) {
       pushTrace('note', `не отправлено, канал закрыт: ${type}`, event)
       return false
     }
-    pushTrace('out', type, event)
+    const record = asRecord(event)
+    const request = type === 'response.create' ? this.responseRequests.sent(asRecord(record.response),
+      typeof record.event_id === 'string' ? record.event_id : undefined) : null
+    if (owner && request) owner.responseToken = request.token
+    const outbound = request ? { ...event, event_id: request.eventId } : event
+    pushTrace('out', type, outbound)
     try {
-      this.dc.send(JSON.stringify(event))
+      if (this.wire) {
+        const sent = this.wire.send(outbound)
+        if (!sent && request) this.responseRequests.rejected(request.eventId)
+        return sent
+      }
+      this.dc?.send(JSON.stringify(outbound))
     } catch {
+      if (request) this.responseRequests.rejected(request.eventId)
       pushTrace('note', `не отправлено, канал закрыт: ${type}`, event)
       return false
     }
@@ -924,9 +921,6 @@ export class RealtimeClient {
   private sendToolRequest(mode: 'text' | 'audio'): void {
     const pending = this.pendingTool
     if (!pending) return
-    // Повтор или смена modalities отменяет предыдущую генерацию этого же хода.
-    // Её поздний done не должен расходовать новый повтор или присваивать ему вызов.
-    for (const id of this.activeResponses) pending.staleResponses.add(id)
     this.cancelActiveResponse()
     const response = pending.isolated
       ? isolatedToolResponse({
@@ -944,7 +938,7 @@ export class RealtimeClient {
           metadata: { purpose: pending.purpose, turn: String(pending.turn) },
           instructions: withHostRules(pending.instructions),
         }
-    this.send({ type: 'response.create', response })
+    this.send({ type: 'response.create', response }, pending)
     if (!this.canSend()) this.dropLink('Связь с ведущей прервалась. Начните игру ещё раз.')
   }
 
@@ -1026,6 +1020,7 @@ export class RealtimeClient {
     this.sessionUpdatedWaiter?.(event)
     if (type === 'session.updated') this.sessionUpdatedWaiter = null
     if (type === 'response.created' || type === 'response.done') {
+      if (type === 'response.created') this.responseRequests.created(asRecord(event.response))
       const id = asRecord(event.response).id
       if (typeof id === 'string') {
         if (type === 'response.created') this.activeResponses.add(id)
@@ -1035,6 +1030,7 @@ export class RealtimeClient {
 
     if (type === 'error' || type === 'invalid_request_error') {
       const error = asRecord(event.error)
+      if (typeof error.event_id === 'string') this.responseRequests.rejected(error.event_id)
       // Гонка: ответ закончился раньше нашей отмены. Не ошибка и не повод проваливать tool.
       if (error.code === 'response_cancel_not_active') return
       if (error.code === 'input_audio_buffer_commit_empty') {
@@ -1200,19 +1196,24 @@ export class RealtimeClient {
     const response = asRecord(event.response)
     recordResponseUsage(response)
     const call = readToolCall(response)
+    const request = this.responseRequests.get(response)
     const earlyMeta = asRecord(response.metadata)
-    const earlyPurpose = typeof earlyMeta.purpose === 'string' ? earlyMeta.purpose : ''
+    const earlyPurpose = typeof earlyMeta.purpose === 'string' ? earlyMeta.purpose : request?.purpose ?? ''
     const toolResponseId = typeof response.id === 'string' ? response.id : ''
     const pendingTool = this.pendingTool
-    // Ответ без метки хода (Qwen не эхомит metadata): пока ждём функцию, такой done — наш;
-    // чужие (прежде отменённые) опознаём по снимку идущих ответов на момент запроса.
+    // Даже created старого ответа может прийти ПОСЛЕ нового запроса. Без метки хода
+    // принимаем только id, связанный через очередь отправок с этой конкретной отправкой.
     const unmarkedToolDone = pendingTool && !this.speech && Number.isNaN(Number(earlyMeta.turn))
-      && !(toolResponseId && pendingTool.staleResponses.has(toolResponseId))
+      && request?.token === pendingTool.responseToken
+    if (pendingTool && Number.isNaN(Number(earlyMeta.turn)) && !unmarkedToolDone &&
+      (call || !request || Object.values(toolPurposes).includes(request.purpose))) {
+      pushTrace('note', `поздний или неопознанный ответ без метки хода (${toolResponseId}), жду ${pendingTool.turn}`)
+      return
+    }
     if (pendingTool && unmarkedToolDone && (!call || call.name !== pendingTool.name)) {
       // Модель ответила текстом/пусто вместо вызова: текст не пишем в чат, один повтор
       // той же подсказки, потом быстрый отказ контроллеру (у judge/finalJudge нулевой
       // call — сразу вердикт, там отдаём штатному таймауту).
-      if (toolResponseId) pendingTool.staleResponses.add(toolResponseId)
       if (pendingTool.retries < 1) {
         pendingTool.retries += 1
         const status = typeof response.status === 'string' ? response.status : 'completed'
@@ -1242,15 +1243,13 @@ export class RealtimeClient {
         pushTrace('note', `поздний ${call.name} turn=${turn}, жду ${pending.turn}`)
         return
       }
-      if (pending && Number.isNaN(turn) && responseId && pending.staleResponses.has(responseId)) {
-        // Провайдер без метки хода в response.done (Qwen): опознаём свой запрос по id ответа.
-        pushTrace('note', `поздний ${call.name} без метки хода (ответ ${responseId}), жду ${pending.turn}`)
+      if (pending && request && request.token !== pending.responseToken) {
+        pushTrace('note', `поздний ${call.name} от другой отправки (ответ ${responseId}), жду ${pending.turn}`)
         return
       }
+      if (Number.isNaN(turn) && (!pending || !request || request.token !== pending.responseToken)) return
       if (pending && (Number.isNaN(turn) || turn === pending.turn)) this.pendingTool = null
-      // Qwen (DashScope) не возвращает metadata хода в ответе: вызов без метки — это
-      // единственный летящий запрос-функция (аудио-судья уходит раньше своим путём,
-      // у речи tool_choice 'none' и вызовов не бывает). Приписываем ожидающему ходу.
+      // Метка отсутствует: конкретную отправку уже проверили по response.created.
       this.onToolCall(call, purpose, Number.isNaN(turn) ? (pending ? pending.turn : -1) : turn)
       return
     }

@@ -940,7 +940,7 @@ export default function App() {
           const persisted = persistConferenceHistory(roomId, next)
           if (persisted) setSavedGame(persisted)
         },
-        onChatLine: (name, text) => controllerActionsRef.current?.chatAnswer(name, text),
+        onChatLine: (playerId, text) => controllerActionsRef.current?.chatAnswer(playerId, text),
         isRoomSpeaking: () => conferenceHandleRef.current?.anyoneSpeaking() ?? false,
         resumePlayers: restoringGame ? resume?.saved.players : undefined,
         usePackPipe: !useBroadcast,
@@ -1535,7 +1535,7 @@ export default function App() {
               bindVideo: bindConferenceVideo,
               onSendChat: (text) => {
                 if (conferenceRole === 'joiner') joinerSessionRef.current?.sendChat(text)
-                else masterSessionRef.current?.sendChat(conferenceName || 'Мастер', text)
+                else masterSessionRef.current?.sendChat(text)
               },
               messageRing: conferenceRole === 'master' ? masterHistory : joinerSnapshot ?? emptyMessageRing(),
               onConferenceExit: conferenceRole === 'joiner' ? leaveConferenceToMenu : exitToMenu,

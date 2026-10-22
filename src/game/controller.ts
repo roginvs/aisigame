@@ -64,7 +64,7 @@ let audioRequestSequence = 0
 type GameActor = Actor<typeof gameMachine>
 
 export type GameControllerActions = {
-  chatAnswer: (playerName: string, text: string) => void
+  chatAnswer: (playerId: PlayerId | null, text: string) => void
   remindMutedAnswerer: (playerName: string) => void
   /** Речь без кнопки по уровню звука: playerId из дорожки Jitsi. */
   speechWithoutBuzzer: (playerId: number) => void
@@ -2124,15 +2124,15 @@ export function attachController(options: {
   }
 
   /** Ответ текстом из чата конференции: только тот, чей ход; реплики хода — как речь. */
-  function chatAnswer(playerName: string, text: string): void {
+  function chatAnswer(playerId: PlayerId | null, text: string): void {
     const clean = text.replace(/\s+/g, ' ').trim()
     if (!clean) return
     const path = statePath(actor.getSnapshot().value)
     if (path !== 'answering.waiting' && path !== 'answering.hearing' && path !== 'answering.settling') return
     const context = actor.getSnapshot().context
     const player = context.players.find((item) => item.id === context.activePlayerId)
-    if (!player || player.name !== playerName) {
-      pushTrace('note', `чат-ответ: не ход ${playerName || '—'} (ход ${player?.name ?? '—'}), сообщение игнорю`)
+    if (!player || player.id !== playerId) {
+      pushTrace('note', `чат-ответ: не ход игрока ${playerId ?? '—'} (ход ${player?.id ?? '—'}), сообщение игнорю`)
       return
     }
     if (answerTurn.some((u) => u.state === 'pending' && u.chatText === clean)) return

@@ -100,7 +100,7 @@ it('два игрока входят раньше мастера; общий с�
   expect(joiners.every((session) => session.snapshot()?.presence.length === 3)).toBe(true)
   expect(transport.sent.filter((message) => message.type === 'snapshot')).toHaveLength(1)
 
-  master.sendChat('Мастер', 'Первый чат')
+  master.sendChat('Первый чат')
   joiners[1]!.sendChat('Второй чат')
   await vi.advanceTimersByTimeAsync(0)
   expect(messageRingEntries(joiners[0]!.snapshot()!).filter(({ message }) => message.kind === 'chat').map(({ message }) => message.text)).toEqual(['Первый чат', 'Второй чат'])
@@ -109,8 +109,8 @@ it('два игрока входят раньше мастера; общий с�
   const fullCount = transport.sent.filter((message) => message.type === 'snapshot').length
   const secondCalls = callbacks[1]!.onSnapshot.mock.calls.length
   room.dropNextUpdateFor = 'first'
-  master.sendChat('Мастер', 'Потерянный диф')
-  master.sendChat('Мастер', 'Следующий диф')
+  master.sendChat('Потерянный диф')
+  master.sendChat('Следующий диф')
   await vi.advanceTimersByTimeAsync(0)
   expect(transport.sent.filter((message) => message.type === 'snapshot')).toHaveLength(fullCount + 1)
   expect(callbacks[1]!.onSnapshot.mock.calls.length).toBeGreaterThan(secondCalls + 2)
