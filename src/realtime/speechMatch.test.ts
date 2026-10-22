@@ -82,7 +82,8 @@ describe('verbatimResponse', () => {
     expect(response.instructions).toContain('Не объявляй тему')
     expect(response.instructions).not.toContain('Повтори фразу')
     expect(response.instructions).not.toContain('Скажи вслух')
-    expect(response.input[0]?.content[0]?.text).toBe('Сколько струн у обычной скрипки?')
+    expect(response.input[0]?.content[0]?.text).toContain('«Сколько струн у обычной скрипки?»')
+    expect(response.input[0]?.content[0]?.text).toContain('зачитай его вслух дословно')
     expect(response.input[0]?.content[0]?.text).not.toContain('больше ничего')
     expect(response.input[0]?.content[0]?.text).not.toContain('смешок')
   })
@@ -129,8 +130,15 @@ describe('verbatimResponse', () => {
     const body = verbatimResponse(newton, { purpose: 'read', turn: 1, take: 1 })
     expect(body.conversation).toBe('none')
     expect(body.input).toHaveLength(1)
-    expect(body.input[0]?.content[0]?.text).toBe(newton)
+    const message = body.input[0]?.content[0]?.text ?? ''
+    expect(message).toContain(newton)
+    expect(message).toContain('дословно')
     expect(body.instructions).toContain('не отвечай на него')
+  })
+  it('голый вопрос не остаётся последним сообщением: фраза в кавычках, после неё команда (регрессия 2026-10-22)', () => {
+    const message = verbatimResponse(newton, { purpose: 'read', turn: 1, take: 2 }).input[0]?.content[0]?.text ?? ''
+    expect(message.startsWith(`«${newton}»`)).toBe(true)
+    expect(message.endsWith('ничего кроме него.')).toBe(true)
   })
 })
 
@@ -196,7 +204,10 @@ import { revealedAnswer, saysAnswer } from './speechMatch.ts'
 describe('надёжное чтение вопроса с картинкой и раскрытие необычного слова', () => {
   it('дословная фраза: медиа на табло у игроков, ведущая их не описывает и не говорит «не вижу»', () => {
     const body = verbatimResponse('Посмотрите на картинку.', { purpose: 'read', turn: 1, take: 1 })
-    expect(body.input[0]?.content[0]?.text).toBe('Посмотрите на картинку.')
+    const message = body.input[0]?.content[0]?.text ?? ''
+    expect(message).toContain('Посмотрите на картинку.')
+    expect(message.startsWith('«')).toBe(true)
+    expect(message).toContain('дословно')
     expect(body.instructions).toContain('не обращение к тебе')
     expect(body.instructions).toContain('видят и слышат на табло')
     expect(body.instructions).toContain('не говори, что не видишь')
@@ -229,7 +240,7 @@ describe('защита дословного чтения от общих пра�
     expect(turn).toContain('не говори, что не видишь')
   })
   it('текст вопроса — только в сообщении, не в инструкциях', () => {
-    expect(body.input[0]?.content[0]?.text).toBe('Посмотрите на картинку. Кто это?')
+    expect(body.input[0]?.content[0]?.text).toContain('«Посмотрите на картинку. Кто это?»')
     expect(body.instructions).not.toContain('Кто это?')
   })
   it('общие правила не разрешают пересказ текста пакета и знают про медиа', () => {
