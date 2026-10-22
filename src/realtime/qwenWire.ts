@@ -44,7 +44,7 @@ export function qwenTool(tool: unknown): Loose {
 }
 
 export function qwenSessionBody(
-  overrides: { instructions?: string; modalities?: string[]; tools?: readonly unknown[]; vadExtras?: boolean } = {},
+  overrides: { instructions?: string; modalities?: string[]; tools?: readonly unknown[]; vadExtras?: boolean; interruptResponse?: boolean } = {},
 ): Loose {
   return {
     modalities: overrides.modalities ?? ['text', 'audio'],
@@ -56,7 +56,7 @@ export function qwenSessionBody(
     turn_detection:
       overrides.vadExtras === false
         ? { type: 'semantic_vad' }
-        : { type: 'semantic_vad', create_response: false, interrupt_response: false },
+        : { type: 'semantic_vad', create_response: false, interrupt_response: overrides.interruptResponse ?? false },
     tools: (overrides.tools ?? sessionTools).map(qwenTool),
   }
 }
@@ -83,6 +83,11 @@ export function qwenTranslateOutbound(event: object, options: { vadExtras?: bool
     const modalities = responseOnlyText(response) ? ['text'] : ['text', 'audio']
     const instructions = text(response.instructions) || hostInstructions
     const message = inputTextOf(response.input)
+    // Обращение «Имя, отвечайте» — единственная реплика, по правилам игры обрываемая речью
+    // отвечающего без порогов: в этом ходе разрешаем серверу видеть речь во время output
+    // и обрывать его самому (полудуплекс DashScope иначе не отдаёт speech_started, пока
+    // звучит обращение; микс модели всё равно слышит только отвечающего).
+    const interruptResponse = text(asRecord(response.metadata).purpose) === 'buzzCall'
     const events: object[] = []
     if (message) {
       events.push({
@@ -97,6 +102,7 @@ export function qwenTranslateOutbound(event: object, options: { vadExtras?: bool
         modalities,
         tools: Array.isArray(response.tools) ? response.tools : undefined,
         vadExtras: options.vadExtras,
+        interruptResponse,
       }),
     })
     events.push({ type: 'response.create' })
@@ -339,10 +345,16 @@ export class QwenWire implements VoiceWire {
   private micStream: MediaStream | null = null
   private player = new TrackPlayer(
     (event) => this.emit(event),
-    () => this.responseId,
+    () => this.speakingId,
   )
   private opened = false
-  private responseId = ''
+  /**
+   * Последний ответ, чьё аудио могло звучать. response.done у DashScope приходит раньше,
+   * чем дорожка замолкает (живая партия 22.10: response.done на 30.8 с, «Вася, твой ход»
+   * ещё играет): прежняя логика гасила id на done, и probe переставал замечать тишину —
+   * «говорит» залипало до нашего обрыва. Отдельный id не гасим: probe доигрывает фразу.
+   */
+  private speakingId = ''
   private vadExtrasBroken = false
   private relayEndpoint = ''
   private sessionChannel: RTCDataChannel | null = null
@@ -369,7 +381,7 @@ export class QwenWire implements VoiceWire {
     const relayValue = typeof this.relay === 'function' ? this.relay() : this.relay
     this.relayEndpoint = qwenRelayEndpoint(relayValue)
     this.sink = sink
-    this.responseId = ''
+    this.speakingId = ''
     this.vadExtrasBroken = false
     let mic: MediaStream
     if (options?.captureMic !== false) {
@@ -436,6 +448,7 @@ export class QwenWire implements VoiceWire {
   close(): void {
     this.opened = false
     this.sessionChannel = null
+    this.speakingId = ''
     this.player.close()
     for (const track of this.micStream?.getAudioTracks() ?? []) track.stop()
     this.micStream = null
@@ -534,9 +547,10 @@ export class QwenWire implements VoiceWire {
     }
     const type = text(parsed.type)
     if (type === 'session.created' && channel) this.sessionChannel = channel
-    if (type === 'response.created' || type === 'response.done') {
+    if (type === 'response.created' && parsed.response) {
       const id = text(asRecord(parsed.response).id)
-      if (id) this.responseId = type === 'response.created' ? id : ''
+      // speakingId переживает done: дорожка ещё играет (см. поле выше).
+      if (id) this.speakingId = id
     }
     if (this.retryVadExtras(parsed, type)) return
     const event = qwenTranslateInbound(parsed)

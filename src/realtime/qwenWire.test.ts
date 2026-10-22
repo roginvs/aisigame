@@ -49,6 +49,29 @@ describe('qwen wire: исходящие', () => {
     expect(body.turn_detection).toEqual({ type: 'semantic_vad' })
   })
 
+  it('обращение «Имя, отвечайте» разрешает серверу обрывать себя, другие ходы — нет', () => {
+    const buzzCall = qwenTranslateOutbound({
+      type: 'response.create',
+      response: { metadata: { purpose: 'buzzCall' } },
+    })
+    expect((buzzCall.events[0] as { session: { turn_detection: Record<string, unknown> } }).session.turn_detection).toEqual(
+      { type: 'semantic_vad', create_response: false, interrupt_response: true },
+    )
+    const select = qwenTranslateOutbound({
+      type: 'response.create',
+      response: { metadata: { purpose: 'select' } },
+    })
+    expect((select.events[0] as { session: { turn_detection: Record<string, unknown> } }).session.turn_detection).toEqual(
+      { type: 'semantic_vad', create_response: false, interrupt_response: false },
+    )
+    expect(qwenSessionBody({ interruptResponse: true }).turn_detection).toEqual(
+      { type: 'semantic_vad', create_response: false, interrupt_response: true },
+    )
+    expect(qwenSessionBody().turn_detection).toEqual(
+      { type: 'semantic_vad', create_response: false, interrupt_response: false },
+    )
+  })
+
   it('инструменты переносятся во вложенный function', () => {
     const tool = qwenTool({
       type: 'function',

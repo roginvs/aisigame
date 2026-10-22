@@ -68,6 +68,8 @@ export type GameControllerActions = {
   remindMutedAnswerer: (playerName: string) => void
   /** Речь без кнопки по уровню звука: playerId из дорожки Jitsi. */
   speechWithoutBuzzer: (playerId: number) => void
+  /** Начало реплики по уровню звука (дорожка Jitsi): во время попытки — заговорил отвечающий. */
+  speechEpisode: (playerId: number | null) => void
   /** Запасной commit (fa584db п. 1): реплика уровня Jitsи кончилась, а модель о речи не знает. */
   answerSilentCommit: (playerId: number | null, durationMs: number) => void
   /** Выбор вопроса: модель сама формулирует короткую фразу, каждый раз новую. */
@@ -2163,6 +2165,27 @@ export function attachController(options: {
   }
 
   /**
+   * Начало реплики по уровням Jitsi (модельная VAD может её не заметить — живая партия 22.10).
+   * Во время попытки заговорил отвечающий: обрываем обращение ведущей («Вася, отвечайте») и
+   * подсказку про микрофон, как по VAD. Форму машины не трогаем: реплику принимает запасной
+   * commit по концу эпизода или штатная модельная VAD, кто раньше.
+   * Вне попытки — прежний путь уровней: напоминание про кнопку в открытом окне.
+   */
+  function speechEpisode(playerId: number | null): void {
+    const snapshot = actor.getSnapshot()
+    const path = statePath(snapshot.value)
+    if (path !== 'answering.waiting') {
+      if (playerId !== null) speechWithoutBuzzer(playerId)
+      return
+    }
+    const context = snapshot.context
+    if (playerId === null) playerId = context.activePlayerId
+    if (context.activePlayerId !== playerId) return
+    if (!answerAttemptLive()) return
+    client.interruptSpeech('игрок заговорил на ответе')
+  }
+
+  /**
    * Запасной commit (план fa584db п. 1): модельная VAD промахнулась и `speech_started` не приходила,
    * а уровни Jitsi видели реплику того, чей ход, и она закончилась. Коммитим буфер сами: клиент
    * делает `input_audio_buffer.commit` и по `committed` отдаёт синтетический конец речи — реплика
@@ -2215,6 +2238,7 @@ export function attachController(options: {
   onActions?.({
     chatAnswer,
     speechWithoutBuzzer,
+    speechEpisode,
     answerSilentCommit,
     remindMutedAnswerer(playerName) {
       if (statePath(actor.getSnapshot().value) !== 'answering.waiting') return

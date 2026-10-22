@@ -529,8 +529,51 @@ describe('attachController answer listening', () => {
     actor.stop()
   })
 
-  it('запасной commit: модель молчит, уровень показал реплику хода — коммитим буфер, один на попытку', async () => {
+  it('эпизод уровней на попытке обрывает обращение, форму машины не меняет', async () => {
     const client = new MockRealtimeClient()
+    const interrupt = vi.spyOn(client, 'interruptSpeech')
+    const { actor, stop, actions } = await boot(client)
+    actor.send({ type: 'QUESTION_SELECTED', themeId: 'p', value: 400 })
+    await vi.advanceTimersByTimeAsync(gameConfig.cellFlashMs + 80)
+    actor.send({ type: 'BUZZER_PRESSED', playerId: 1 })
+    expect(statePath(actor.getSnapshot().value)).toBe('answering.waiting')
+    interrupt.mockClear()
+
+    // Чужой игрок — молчим; неопознанный и активный — обрываем обращение ведущей.
+    actions().speechEpisode(2)
+    expect(interrupt).not.toHaveBeenCalled()
+    actions().speechEpisode(1)
+    expect(interrupt).toHaveBeenCalledWith('игрок заговорил на ответе')
+    interrupt.mockClear()
+    actions().speechEpisode(null)
+    expect(interrupt).toHaveBeenCalledTimes(1)
+    // Форма машины не меняется: реплику ждут модельная VAD или запасной commit.
+    expect(statePath(actor.getSnapshot().value)).toBe('answering.waiting')
+
+    stop()
+    actor.stop()
+  })
+
+  it('эпизод уровней вне попытки — прежний путь напоминания про кнопку', async () => {
+    const client = new MockRealtimeClient()
+    const interrupt = vi.spyOn(client, 'interruptSpeech')
+    const requestSpeech = vi.spyOn(client, 'requestSpeech')
+    const { actor, stop, actions } = await boot(client)
+    actor.send({ type: 'QUESTION_SELECTED', themeId: 'p', value: 400 })
+    await vi.advanceTimersByTimeAsync(gameConfig.cellFlashMs + 80)
+    expect(statePath(actor.getSnapshot().value)).toBe('buzzing.open')
+    interrupt.mockClear()
+
+    actions().speechEpisode(2)
+    expect(interrupt).not.toHaveBeenCalled()
+    const cue = String(requestSpeech.mock.calls.at(-1)?.[2] ?? '')
+    expect(cue).toContain('Игрок 2')
+
+    stop()
+    actor.stop()
+  })
+
+  it('запасной commit: модель молчит, уровень показал реплику хода — коммитим буфер, один на попытку', async () => {    const client = new MockRealtimeClient()
     const forceInputCommit = vi.spyOn(client, 'forceInputCommit')
     const { actor, stop, actions } = await boot(client)
     actor.send({ type: 'QUESTION_SELECTED', themeId: 'p', value: 400 })

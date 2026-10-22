@@ -51,7 +51,7 @@ export const meterMarkerLegend: Array<[MeterMarkerGroup, string]> = [
 ]
 
 export function meterLegendText(): string {
-  return ['Что слышит модель (выход микшера). Серый отрезок — вход модели закрыт, в модель не ушло. Сверху горизонтальные полосы «от начала до конца», у каждого типа своя строка; остальное — вертикальные метки:', ...meterMarkerLegend.map(([g, label]) => `${colorName(g)} — ${label}`)].join('\n')
+  return ['Что слышит модель (выход микшера). Серый отрезок — вход модели закрыт, в модель не ушло. Полоса у нижнего края: светлая — вход модели открыт, серая — закрыт. Сверху горизонтальные полосы «от начала до конца», у каждого типа своя строка; остальное — вертикальные метки:', ...meterMarkerLegend.map(([g, label]) => `${colorName(g)} — ${label}`)].join('\n')
 }
 
 function colorName(group: MeterMarkerGroup): string {

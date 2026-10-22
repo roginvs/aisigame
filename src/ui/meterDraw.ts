@@ -16,6 +16,18 @@ export function meterLevel(samples: Uint8Array): number {
 export const METER_WIDTH = 320
 /** Полупрозрачная серая вуаль поверх отрезка, когда вход модели закрыт. */
 export const CLOSED_OVERLAY = 'rgba(148, 163, 184, 0.35)'
+/**
+ * Постоянный след «что слышит модель» (дамп 16-16-30, решение автора): тонкая полоса у
+ * нижнего края на всей ширине. Светлая — вход модели открыт, тёмно-серая — закрыт. Видна
+ * всегда, даже при полной тишине, из состояния mic каждого столбца — не из trace-событий.
+ */
+export const INPUT_BAND_H = 3
+export const INPUT_OPEN_COLOR = '#4ade80'
+export const INPUT_CLOSED_COLOR = '#4b5563'
+
+export function inputBandColor(open: boolean): string {
+  return open ? INPUT_OPEN_COLOR : INPUT_CLOSED_COLOR
+}
 
 /** Вход модели открыт только при mic === 'live' (client.setMicEnabled). */
 export function modelInputOpen(mic: string): boolean {

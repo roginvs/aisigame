@@ -156,6 +156,10 @@ export class RealtimeClient {
     isolated: boolean
     tool?: { name: string }
     audioItemId?: string
+    /** Ответы, созданные до этого запроса: их поздние done — чужие (провайдер без метки хода). */
+    staleResponses: Set<string>
+    /** Повтор хода, когда ответ пришёл без вызова функции (Qwen иногда отвечает текстом). */
+    retries: number
   } | null = null
   /** Isolated tool calls use conversation:none — their call_id is not in the session. */
   private lastToolIsolated = false
@@ -779,7 +783,12 @@ export class RealtimeClient {
     const audioReady = Boolean(audioItemId && isolated && this.judgmentCapabilities().isolatedAudioReference &&
       this.audioItems.status(this.audioItems.reference(audioItemId)).ready)
     if (audioItemId) diag('слух', `${name}: ${audioReady ? 'со звуком реплики' : 'без звука (только текст)'}`, { audioItemId })
-    this.pendingTool = { purpose, turn, name, instructions, isolated, tool, audioItemId: audioReady ? audioItemId : undefined }
+    this.pendingTool = {
+      purpose, turn, name, instructions, isolated, tool,
+      audioItemId: audioReady ? audioItemId : undefined,
+      staleResponses: new Set(this.activeResponses),
+      retries: 0,
+    }
     this.sendToolRequest('text')
   }
 
@@ -1186,6 +1195,30 @@ export class RealtimeClient {
     const call = readToolCall(response)
     const earlyMeta = asRecord(response.metadata)
     const earlyPurpose = typeof earlyMeta.purpose === 'string' ? earlyMeta.purpose : ''
+    const toolResponseId = typeof response.id === 'string' ? response.id : ''
+    const pendingTool = this.pendingTool
+    // Ответ без метки хода (Qwen не эхомит metadata): пока ждём функцию, такой done — наш;
+    // чужие (прежде отменённые) опознаём по снимку идущих ответов на момент запроса.
+    const unmarkedToolDone = pendingTool && !this.speech && Number.isNaN(Number(earlyMeta.turn))
+      && !(toolResponseId && pendingTool.staleResponses.has(toolResponseId))
+    if (!call && pendingTool && unmarkedToolDone) {
+      // Модель ответила текстом/пусто вместо вызова: текст не пишем в чат, один повтор
+      // той же подсказки, потом быстрый отказ контроллеру (у judge/finalJudge нулевой
+      // call — сразу вердикт, там отдаём штатному таймауту).
+      if (pendingTool.retries < 1) {
+        pendingTool.retries += 1
+        const status = typeof response.status === 'string' ? response.status : 'completed'
+        pushTrace('note', `${pendingTool.name}: ответ без вызова функции (${status}) — повторяю ход`)
+        this.sendToolRequest(this.toolMode)
+        return
+      }
+      pushTrace('note', `${pendingTool.name}: ответ без вызова функции и после повтора — отдаю ходу`)
+      this.pendingTool = null
+      if (pendingTool.purpose === 'select' || pendingTool.purpose === 'catPick' || pendingTool.purpose === 'specialBid') {
+        this.onToolCall(null, toolPurposes[pendingTool.name] ?? pendingTool.purpose, pendingTool.turn)
+      }
+      return
+    }
     if (!call && !this.speech?.expect && earlyPurpose !== 'read') {
       for (const { line, itemId } of assistantUtterances(response)) this.publishHostLine(line, earlyPurpose, itemId)
     }
@@ -1196,12 +1229,21 @@ export class RealtimeClient {
       const turn = Number(earlyMeta.turn)
       const purpose = toolPurposes[call.name]!
       const pending = this.pendingTool
+      const responseId = toolResponseId
       if (pending && !Number.isNaN(turn) && turn !== pending.turn) {
         pushTrace('note', `поздний ${call.name} turn=${turn}, жду ${pending.turn}`)
         return
       }
+      if (pending && Number.isNaN(turn) && responseId && pending.staleResponses.has(responseId)) {
+        // Провайдер без метки хода в response.done (Qwen): опознаём свой запрос по id ответа.
+        pushTrace('note', `поздний ${call.name} без метки хода (ответ ${responseId}), жду ${pending.turn}`)
+        return
+      }
       if (pending && (Number.isNaN(turn) || turn === pending.turn)) this.pendingTool = null
-      this.onToolCall(call, purpose, Number.isNaN(turn) ? -1 : turn)
+      // Qwen (DashScope) не возвращает metadata хода в ответе: вызов без метки — это
+      // единственный летящий запрос-функция (аудио-судья уходит раньше своим путём,
+      // у речи tool_choice 'none' и вызовов не бывает). Приписываем ожидающему ходу.
+      this.onToolCall(call, purpose, Number.isNaN(turn) ? (pending ? pending.turn : -1) : turn)
       return
     }
     if (!this.speech) return

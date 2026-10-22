@@ -2,7 +2,7 @@ import { useEffect, useRef, useState, type MouseEvent } from 'react'
 import { meterHitTolerancePx } from '../options.ts'
 import { getLinkStatus, getTrace, pushTrace, subscribeTrace } from '../debug/trace.ts'
 import { createMarkerCollector, hitTest, type MeterHit, meterLegendText, meterMarkerColors, meterMarkerLegend, type MeterMarker } from './meterMarkers.ts'
-import { CLOSED_OVERLAY, OUTPUT_WAVE_COLOR, drawMarkers, HEIGHT, meterLevel, modelInputOpen, waveColor, WIDTH } from './meterDraw.ts'
+import { CLOSED_OVERLAY, INPUT_BAND_H, OUTPUT_WAVE_COLOR, drawMarkers, HEIGHT, inputBandColor, meterLevel, modelInputOpen, waveColor, WIDTH } from './meterDraw.ts'
 
 /**
  * Индикатор того, что реально слышит модель: история уровня выхода микшера
@@ -82,6 +82,12 @@ export function ModelInputMeter({ getAnalyser, getLevel, getOutLevel }: { getAna
           ctx.fillStyle = OUTPUT_WAVE_COLOR
           ctx.fillRect(x, 0, 1, h)
         }
+      }
+      // Постоянный след «что слышит модель»: поверх вуали, чтобы светлая/серая читались и на закрытых окнах.
+      for (let x = 0; x < WIDTH; x += 1) {
+        const i = (head + x) % WIDTH
+        ctx.fillStyle = inputBandColor(open[i] === 1)
+        ctx.fillRect(x, HEIGHT - INPUT_BAND_H, 1, INPUT_BAND_H)
       }
       hitsRef.current = drawMarkers(ctx, markers, times, head)
     }
