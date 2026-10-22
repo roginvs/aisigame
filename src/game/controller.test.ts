@@ -573,7 +573,8 @@ describe('attachController answer listening', () => {
     actor.stop()
   })
 
-  it('запасной commit: модель молчит, уровень показал реплику хода — коммитим буфер, один на попытку', async () => {    const client = new MockRealtimeClient()
+  it('запасной commit: модель молчит, уровень показал реплику хода — коммитим буфер, один на попытку', async () => {
+    const client = new MockRealtimeClient()
     const forceInputCommit = vi.spyOn(client, 'forceInputCommit')
     const { actor, stop, actions } = await boot(client)
     actor.send({ type: 'QUESTION_SELECTED', themeId: 'p', value: 400 })

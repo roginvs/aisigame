@@ -69,6 +69,9 @@ export function qwenTranslateOutbound(event: object, options: { vadExtras?: bool
   const type = text(record.type)
   if (type === 'session.update') {
     const body = asRecord(record.session)
+    // Скорость и подсказки распознавателю у Qwen фиксированы. Их частичные OpenAI-обновления
+    // приходят и ПОСЛЕ response.create: нельзя заменять ими инструкции и tools текущего хода.
+    if (typeof body.instructions !== 'string' && !Array.isArray(body.tools)) return { events: [], drop: true }
     return {
       events: [
         {
@@ -154,17 +157,18 @@ export function qwenTranslateInbound(event: object): object | null {
     return { type, item_id: text(record.item_id), transcript }
   }
   if (type === 'response.audio_transcript.delta') {
-    return { type: 'response.output_audio_transcript.delta', response_id: text(record.response_id), delta: text(record.delta) }
+    return { ...record, type: 'response.output_audio_transcript.delta', response_id: text(record.response_id), delta: text(record.delta) }
   }
   if (type === 'response.audio_transcript.done') {
     return {
+      ...record,
       type: 'response.output_audio_transcript.done',
       response_id: text(record.response_id),
       transcript: text(record.transcript),
     }
   }
   if (type === 'response.text.done') {
-    return { type: 'response.output_text.done', response_id: text(record.response_id), text: text(record.text) }
+    return { ...record, type: 'response.output_text.done', response_id: text(record.response_id), text: text(record.text) }
   }
   if (type === 'response.audio.delta' || type === 'response.audio.done') {
     // Звук идёт дорожкой WebRTC, куски по каналу игре не нужны.
@@ -216,6 +220,9 @@ export class TrackPlayer {
   private graphStream: MediaStream | null = null
   private timer: number | null = null
   private speaking = false
+  private speakingId = ''
+  private stoppedId = ''
+  private finishedResponses = new Set<string>()
   private quiet = 0
   private hostTap: MediaStreamAudioDestinationNode | null = null
   private level = 0
@@ -238,6 +245,8 @@ export class TrackPlayer {
       this.speaking = false
       this.quiet = 0
     }
+    this.level = 0
+    this.teardownGraph()
     const track = stream.getAudioTracks()[0]
     if (!track) return
     const ctx = gameAudioContext()
@@ -245,7 +254,6 @@ export class TrackPlayer {
     // Тот же трек в <audio> и в Web Audio на Chromium глушит элемент (у конференции
     // та же беда, там для модели клонируют дорожки): в граф — анализатору и потоку
     // «Ведущей» в комнату — уходит клон, элемент играет оригинал.
-    this.teardownGraph()
     const clone = track.clone()
     this.graphStream = new MediaStream([clone])
     const source = ctx.createMediaStreamSource(this.graphStream)
@@ -279,21 +287,20 @@ export class TrackPlayer {
     for (const value of data) sum += value * value
     const rms = Math.sqrt(sum / (data.length || 1))
     this.level = Math.min(1, rms * 4)
-    if (!this.turn()) return
+    const responseId = this.turn()
     if (!this.speaking) {
+      if (!responseId || responseId === this.stoppedId) return
       if (rms >= 0.015) {
         this.speaking = true
-        this.emit({ type: 'output_audio_buffer.started', response_id: this.turn() })
+        this.speakingId = responseId
+        this.emit({ type: 'output_audio_buffer.started', response_id: responseId })
       }
       return
     }
     if (rms < 0.006) {
       this.quiet += 1
-      if (this.quiet >= 3) {
-        this.speaking = false
-        this.quiet = 0
-        this.emit({ type: 'output_audio_buffer.stopped', response_id: this.turn() })
-      }
+      // Пауза между словами — не конец реплики. Ждём и конца генерации, и тишины дорожки.
+      if (this.quiet >= 3 && this.finishedResponses.has(this.speakingId)) this.cut()
     } else {
       this.quiet = 0
     }
@@ -301,10 +308,19 @@ export class TrackPlayer {
 
   /** Модель обрывается сама (отмена): гасим текущее «говорит» без ожидания тишины. */
   cut(): void {
+    this.stoppedId = this.speakingId || this.turn()
     if (!this.speaking) return
     this.speaking = false
     this.quiet = 0
-    this.emit({ type: 'output_audio_buffer.stopped', response_id: this.turn() })
+    const responseId = this.speakingId
+    this.speakingId = ''
+    this.emit({ type: 'output_audio_buffer.stopped', response_id: responseId })
+  }
+
+  responseDone(responseId: string): void {
+    if (!responseId) return
+    this.finishedResponses.add(responseId)
+    if (this.finishedResponses.size > 50) this.finishedResponses.delete(this.finishedResponses.values().next().value!)
   }
 
   setMuted(muted: boolean): void {
@@ -334,11 +350,18 @@ export class TrackPlayer {
     this.teardownGraph()
     this.hostTap = null
     this.speaking = false
+    this.speakingId = ''
+    this.stoppedId = ''
+    this.finishedResponses.clear()
+    this.quiet = 0
+    this.level = 0
     this.audio.pause()
+    this.audio.srcObject = null
   }
 }
 
 export class QwenWire implements VoiceWire {
+  readonly supportsInputCommit = true
   private sink: VoiceSink | null = null
   private pc: RTCPeerConnection | null = null
   private dc: RTCDataChannel | null = null
@@ -358,6 +381,7 @@ export class QwenWire implements VoiceWire {
   private vadExtrasBroken = false
   private relayEndpoint = ''
   private sessionChannel: RTCDataChannel | null = null
+  private lastSession: Loose = {}
   private readonly model: string
   private readonly endpoint: string | (() => string)
   private readonly relay: string | (() => string)
@@ -382,6 +406,7 @@ export class QwenWire implements VoiceWire {
     this.relayEndpoint = qwenRelayEndpoint(relayValue)
     this.sink = sink
     this.speakingId = ''
+    this.lastSession = {}
     this.vadExtrasBroken = false
     let mic: MediaStream
     if (options?.captureMic !== false) {
@@ -527,6 +552,8 @@ export class QwenWire implements VoiceWire {
     if (!dc || dc.readyState !== 'open') return false
     try {
       dc.send(JSON.stringify(event))
+      const record = asRecord(event)
+      if (record.type === 'session.update') this.lastSession = asRecord(record.session)
     } catch {
       return false
     }
@@ -552,6 +579,7 @@ export class QwenWire implements VoiceWire {
       // speakingId переживает done: дорожка ещё играет (см. поле выше).
       if (id) this.speakingId = id
     }
+    if (type === 'response.done') this.player.responseDone(text(asRecord(parsed.response).id))
     if (this.retryVadExtras(parsed, type)) return
     const event = qwenTranslateInbound(parsed)
     if (event) this.emit(event)
@@ -569,8 +597,11 @@ export class QwenWire implements VoiceWire {
     const message = text(error.message)
     if (!/turn_detection/i.test(param) && !/turn_detection/i.test(message)) return false
     this.vadExtrasBroken = true
-    this.dcSend({ type: 'session.update', session: qwenSessionBody({ vadExtras: false }) })
-    return false
+    // Откатываем только отвергнутые поля: инструкции и tools уже относятся к текущему ходу.
+    return this.dcSend({
+      type: 'session.update',
+      session: { ...this.lastSession, turn_detection: { type: 'semantic_vad' } },
+    })
   }
 }
 

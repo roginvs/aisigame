@@ -475,14 +475,16 @@ export class RealtimeClient {
   }
 
   /** Запасной commit (fa584db п. 1): модельная VAD промахнулась, а уровни Jitsi показывают реплику — коммитим буфер сами. */
-  forceInputCommit(durationMs: number): void {
-    if (this.wire) {
+  forceInputCommit(durationMs: number): boolean {
+    if (this.wire && !this.wire.supportsInputCommit) {
       pushTrace('note', 'запасной commit: провод этого провайдера не даёт input_audio_buffer.commit, реплика остаётся на его VAD')
-      return
+      return false
     }
-    if (this.pendingForcedUtterance) return
+    if (this.pendingForcedUtterance) return false
     this.pendingForcedUtterance = { durationMs }
-    this.send({ type: 'input_audio_buffer.commit' })
+    const sent = this.send({ type: 'input_audio_buffer.commit' })
+    if (!sent) this.pendingForcedUtterance = null
+    return sent
   }
 
   setMicEnabled(enabled: boolean): void {
@@ -826,6 +828,7 @@ export class RealtimeClient {
     this.wire?.close()
     this.inputStartedAt = null
     this.inputItemId = null
+    this.pendingForcedUtterance = null
     this.itemPrompts.reset()
     this.transcripts.clear()
     this.hostItemsInChat.clear()
@@ -895,6 +898,7 @@ export class RealtimeClient {
 
   private send(event: object): boolean {
     const type = eventType(event)
+    if (type === 'input_audio_buffer.clear') this.pendingForcedUtterance = null
     if (this.wire) {
       if (!this.wireOpen) {
         pushTrace('note', `не отправлено, канал закрыт: ${type}`, event)
@@ -920,6 +924,9 @@ export class RealtimeClient {
   private sendToolRequest(mode: 'text' | 'audio'): void {
     const pending = this.pendingTool
     if (!pending) return
+    // Повтор или смена modalities отменяет предыдущую генерацию этого же хода.
+    // Её поздний done не должен расходовать новый повтор или присваивать ему вызов.
+    for (const id of this.activeResponses) pending.staleResponses.add(id)
     this.cancelActiveResponse()
     const response = pending.isolated
       ? isolatedToolResponse({
@@ -1201,10 +1208,11 @@ export class RealtimeClient {
     // чужие (прежде отменённые) опознаём по снимку идущих ответов на момент запроса.
     const unmarkedToolDone = pendingTool && !this.speech && Number.isNaN(Number(earlyMeta.turn))
       && !(toolResponseId && pendingTool.staleResponses.has(toolResponseId))
-    if (!call && pendingTool && unmarkedToolDone) {
+    if (pendingTool && unmarkedToolDone && (!call || call.name !== pendingTool.name)) {
       // Модель ответила текстом/пусто вместо вызова: текст не пишем в чат, один повтор
       // той же подсказки, потом быстрый отказ контроллеру (у judge/finalJudge нулевой
       // call — сразу вердикт, там отдаём штатному таймауту).
+      if (toolResponseId) pendingTool.staleResponses.add(toolResponseId)
       if (pendingTool.retries < 1) {
         pendingTool.retries += 1
         const status = typeof response.status === 'string' ? response.status : 'completed'

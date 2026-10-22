@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { getTrace, subscribeChatEdits, type ChatLineEdit } from '../debug/trace.ts'
 import { RealtimeClient } from './client.ts'
 import twoItems from './fixtures/clarify-two-items.json'
+import { qwenTranslateInbound } from './qwenWire.ts'
 
 class FakeAudio { autoplay = false; muted = false; srcObject = null; pause() {} }
 type Harness = { dc: unknown; wireOpen: boolean; handleMessage(raw: string): void }
@@ -20,6 +21,16 @@ beforeEach(() => {
 afterEach(() => { client.stopSession(); vi.useRealTimers(); vi.unstubAllGlobals(); vi.restoreAllMocks() })
 
 describe('чат ведущей: одна реплика — одна строка', () => {
+  it('Qwen: transcript.done и response.done одной реплики не дублируют строку', () => {
+    const cursor = getTrace().at(-1)?.id ?? 0
+    client.requestSpeech('clarify', 1, 'Попроси выбрать ещё раз.')
+    feed({ type: 'response.created', response: { id: 'r1' } })
+    feed(qwenTranslateInbound({ type: 'response.audio_transcript.done', response_id: 'r1', item_id: 'm1', transcript: 'Выберите вопрос.' })!)
+    feed({ type: 'response.done', response: { id: 'r1', output: [{ id: 'm1', type: 'message', content: [{ type: 'audio', transcript: 'Выберите вопрос.' }] }] } })
+    const host = getTrace().filter((e) => e.id > cursor && e.kind === 'chat' && e.title === 'Ведущая')
+    expect(host).toHaveLength(1)
+  })
+
   it('ответ из двух сказанных реплик (живая игра 14.10, 20:40:11): обе в чате ровно по разу', () => {
     const cursor = getTrace().at(-1)?.id ?? 0
     client.requestSpeech('clarify', 28, 'Попроси выбрать ещё раз.')

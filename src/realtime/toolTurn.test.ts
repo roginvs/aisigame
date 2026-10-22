@@ -94,6 +94,43 @@ describe('вызов функции без метки хода (Qwen/DashScope)'
     expect(notesFrom(cursor).some((n) => n.includes('отдаю ходу'))).toBe(true)
   })
 
+  it('поздний done после смены text на audio не запускает лишний повтор', () => {
+    const onToolCall = vi.fn()
+    client.onToolCall = onToolCall
+    client.requestTool('select', 5, 'selectQuestion', 'выбери')
+    feed({ type: 'response.created', response: { id: 'q1' } })
+    feed({ type: 'error', error: { message: 'unsupported output modality' } })
+    feed({ type: 'response.created', response: { id: 'q2' } })
+    feed({ type: 'response.done', response: { id: 'q1', status: 'cancelled', output: [] } })
+    expect(sent.filter((e) => e.type === 'response.create')).toHaveLength(2)
+    feed({ type: 'response.done', response: { id: 'q2', status: 'completed', output: [selectCall('selectQuestion')] } })
+    expect(onToolCall).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({ name: 'selectQuestion' }), 'select', 5)
+  })
+
+  it('дубликат done первого ответа не расходует повтор и не отказывает текущему ходу', () => {
+    const onToolCall = vi.fn()
+    client.onToolCall = onToolCall
+    client.requestTool('select', 5, 'selectQuestion', 'выбери')
+    const done = { type: 'response.done', response: { id: 'q1', status: 'completed', output: [] } }
+    feed(done)
+    feed(done)
+    expect(onToolCall).not.toHaveBeenCalled()
+    expect(sent.filter((e) => e.type === 'response.create')).toHaveLength(2)
+    feed({ type: 'response.done', response: { id: 'q2', status: 'completed', output: [selectCall('selectQuestion')] } })
+    expect(onToolCall).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({ name: 'selectQuestion' }), 'select', 5)
+  })
+
+  it('чужой инструмент не принимается за запрошенный выбор — повторяем ожидаемый', () => {
+    const onToolCall = vi.fn()
+    client.onToolCall = onToolCall
+    client.requestTool('select', 5, 'selectQuestion', 'выбери')
+    feed({ type: 'response.done', response: { id: 'q1', status: 'completed', output: [selectCall('auctionBid')] } })
+    expect(onToolCall).not.toHaveBeenCalled()
+    expect(sent.filter((e) => e.type === 'response.create')).toHaveLength(2)
+    feed({ type: 'response.done', response: { id: 'q2', status: 'completed', output: [selectCall('selectQuestion')] } })
+    expect(onToolCall).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({ name: 'selectQuestion' }), 'select', 5)
+  })
+
   it('done с помеченным чужим turn не трогается — путь OpenAI не менялся', () => {
     const cursor = getTrace().at(-1)?.id ?? 0
     const calls: Array<{ turn: number }> = []

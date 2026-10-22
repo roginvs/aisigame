@@ -233,4 +233,11 @@ describe('qwen wire: входящие', () => {
     }
     expect(qwenTranslateInbound(done)).toEqual(done)
   })
+
+  it('перевод реплик сохраняет item_id для дедупликации и обрезки чата', () => {
+    for (const type of ['response.audio_transcript.delta', 'response.audio_transcript.done', 'response.text.done']) {
+      expect(qwenTranslateInbound({ type, response_id: 'r1', item_id: 'm1', output_index: 0, content_index: 0 }))
+        .toMatchObject({ response_id: 'r1', item_id: 'm1', output_index: 0, content_index: 0 })
+    }
+  })
 })

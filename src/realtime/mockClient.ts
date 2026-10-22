@@ -112,7 +112,7 @@ export class MockRealtimeClient implements GameVoice {
   }
 
   /** Мок сам имитирует начало/конец речи — запасной commit не нужен, остаётся заглушкой для тестов. */
-  forceInputCommit(_durationMs: number): void {}
+  forceInputCommit(_durationMs: number): boolean { return true }
 
   /** Последняя суженная схема инструмента — для тестов. */
   lastTool: { name: string } | null = null

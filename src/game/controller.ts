@@ -2203,13 +2203,13 @@ export function attachController(options: {
     if (durationMs < fallbackCommitMinMs) return
     // Модель в этот момент уже слушает эту реплику (speech_started была) или коммитил в этой попытке.
     if (openSpeechItemId !== null || fallbackCommitAttempt === context.attemptId) return
+    if (!client.forceInputCommit(durationMs)) return
     fallbackCommitAttempt = context.attemptId
     pushTrace('note', 'модель молчит, микрофонный уровень показал реплику — делаем запасной commit', {
       playerId,
       attemptId: context.attemptId,
       speechMs: Math.round(durationMs),
     })
-    client.forceInputCommit(durationMs)
   }
 
   /**

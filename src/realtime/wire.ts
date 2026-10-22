@@ -5,6 +5,8 @@ export type VoiceOpenOptions = {
 
 /** Транспорт ведущей. Сессия говорит событиями OpenAI Realtime, провод переводит их в протокол модели. */
 export interface VoiceWire {
+  /** Провод принимает ручной input_audio_buffer.commit и возвращает committed. */
+  readonly supportsInputCommit?: boolean
   open(apiKey: string, sink: VoiceSink, options?: VoiceOpenOptions): Promise<void>
   send(event: object): boolean
   close(): void

@@ -6,7 +6,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 // иначе участник «Ведущая» публикуется тишиной и её не слышит никто.
 const fake = vi.hoisted(() => {
   const destination = { stream: '?dest' }
-  const analyser = { fftSize: 2048, getFloatTimeDomainData: vi.fn() }
+  const analyser = { fftSize: 2048, getFloatTimeDomainData: vi.fn<(data: Float32Array) => void>() }
   const source: { connect: ReturnType<typeof vi.fn>; disconnect: ReturnType<typeof vi.fn> } = {
     connect: vi.fn(),
     disconnect: vi.fn(),
@@ -56,14 +56,16 @@ describe('TrackPlayer: поток ведущей в комнату', () => {
     fake.source.disconnect.mockClear()
     fake.ctx.createMediaStreamSource.mockClear()
     fake.ctx.createMediaStreamDestination.mockClear()
+    fake.analyser.getFloatTimeDomainData.mockReset()
+    vi.useRealTimers()
     vi.unstubAllGlobals()
   })
 
-  function player(): TrackPlayer {
+  function player(emit: (event: object) => void = () => undefined, turn: () => string = () => 'resp_example'): TrackPlayer {
     vi.stubGlobal('Audio', FakeAudio)
     vi.stubGlobal('MediaStream', FakeMediaStream)
     vi.stubGlobal('window', globalThis)
-    return new TrackPlayer(() => undefined, () => 'resp_example')
+    return new TrackPlayer(emit, turn)
   }
 
   it('комната просит поток позже ontrack: destination подключается к живому графу', () => {
@@ -111,5 +113,33 @@ describe('TrackPlayer: поток ведущей в комнату', () => {
     p.attach(streamWithTrack('dashscope'))
     expect(p.outputLevel()).toBe(0)
     p.close()
+  })
+
+  it('пауза в речи до response.done не закрывает фразу; тишина после done закрывает', () => {
+    vi.useFakeTimers()
+    const emit = vi.fn()
+    const p = player(emit, () => 'r1')
+    p.attach(streamWithTrack('dashscope'))
+    fake.analyser.getFloatTimeDomainData.mockImplementation((data) => { data.fill(0.1) })
+    vi.advanceTimersByTime(100)
+    expect(emit).toHaveBeenCalledExactlyOnceWith({ type: 'output_audio_buffer.started', response_id: 'r1' })
+    fake.analyser.getFloatTimeDomainData.mockImplementation((data) => { data.fill(0) })
+    vi.advanceTimersByTime(600)
+    expect(emit).toHaveBeenCalledTimes(1)
+    p.responseDone('r1')
+    vi.advanceTimersByTime(100)
+    expect(emit).toHaveBeenLastCalledWith({ type: 'output_audio_buffer.stopped', response_id: 'r1' })
+    p.close()
+  })
+
+  it('close освобождает audio и сбрасывает измеренный уровень', () => {
+    vi.useFakeTimers()
+    const p = player()
+    p.attach(streamWithTrack('dashscope'))
+    fake.analyser.getFloatTimeDomainData.mockImplementation((data) => { data.fill(0.1) })
+    vi.advanceTimersByTime(100)
+    expect(p.outputLevel()).toBeGreaterThan(0)
+    p.close()
+    expect(p.outputLevel()).toBe(0)
   })
 })
