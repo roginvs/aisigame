@@ -251,6 +251,26 @@ describe('вызов функции без метки хода (Qwen/DashScope)'
     expect(outputs[0]?.item).toMatchObject({ call_id: 'call_2' })
   })
 
+  it('обрыв речи не отменяет ожидающий инструмент', () => {
+    const onToolCall = vi.fn()
+    client.onToolCall = onToolCall
+    client.requestTool('select', 5, 'selectQuestion', 'выбери')
+    client.interruptSpeech('игрок заговорил')
+    feed({ type: 'response.created', response: { id: 'own' } })
+    feed({ type: 'response.done', response: { id: 'own', status: 'completed', output: [selectCall('selectQuestion')] } })
+    expect(onToolCall).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({ name: 'selectQuestion' }), 'select', 5)
+  })
+
+  it('новая реплика после инструмента не принимает его старый вызов', () => {
+    const onToolCall = vi.fn()
+    client.onToolCall = onToolCall
+    client.requestTool('select', 5, 'selectQuestion', 'выбери')
+    client.requestSpeech('announce', 6, 'Скажи итог')
+    feed({ type: 'response.created', response: { id: 'stale' } })
+    feed({ type: 'response.done', response: { id: 'stale', status: 'completed', output: [selectCall('selectQuestion')] } })
+    expect(onToolCall).not.toHaveBeenCalled()
+  })
+
   it('ошибка конкретной отправки до created снимает только её место в очереди', () => {
     const onToolCall = vi.fn()
     client.onToolCall = onToolCall

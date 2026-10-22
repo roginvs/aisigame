@@ -708,7 +708,6 @@ export class RealtimeClient {
     })
     this.markCut(this.speech, `оборвали мы: ${reason || 'без причины'}`)
     this.responseRequests.cancel(this.speech?.responseToken ?? null)
-    this.responseRequests.cancel(this.pendingTool?.responseToken ?? null)
     this.speech = null
     this.pendingSpeak = null
     this.clearFlushTimer()
