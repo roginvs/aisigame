@@ -206,6 +206,8 @@ export function qwenRelayEndpoint(value: string): string {
 class TrackPlayer {
   private readonly audio = new Audio()
   private analyser: AnalyserNode | null = null
+  private source: MediaStreamAudioSourceNode | null = null
+  private graphStream: MediaStream | null = null
   private timer: number | null = null
   private speaking = false
   private quiet = 0
@@ -233,7 +235,14 @@ class TrackPlayer {
     if (!track) return
     const ctx = gameAudioContext()
     void ctx.resume()
-    const source = ctx.createMediaStreamSource(new MediaStream([track]))
+    // Тот же трек в <audio> и в Web Audio на Chromium глушит элемент (у конференции
+    // та же беда, там для модели клонируют дорожки): в граф — анализатору и потоку
+    // «Ведущей» в комнату — уходит клон, элемент играет оригинал.
+    this.teardownGraph()
+    const clone = track.clone()
+    this.graphStream = new MediaStream([clone])
+    const source = ctx.createMediaStreamSource(this.graphStream)
+    this.source = source
     const analyser = ctx.createAnalyser()
     analyser.fftSize = 512
     source.connect(analyser)
@@ -241,6 +250,16 @@ class TrackPlayer {
     // Комната может запросить поток раньше ontrack: подключаю destination, когда она уже ждёт.
     if (this.hostTap) source.connect(this.hostTap)
     this.timer = window.setInterval(() => this.probe(), 100)
+  }
+
+  private teardownGraph(): void {
+    this.source?.disconnect()
+    this.source = null
+    if (this.graphStream) {
+      for (const track of this.graphStream.getAudioTracks()) track.stop()
+      this.graphStream = null
+    }
+    this.analyser = null
   }
 
   private probe(): void {
@@ -295,7 +314,7 @@ class TrackPlayer {
   close(): void {
     if (this.timer !== null) window.clearInterval(this.timer)
     this.timer = null
-    this.analyser = null
+    this.teardownGraph()
     this.hostTap = null
     this.speaking = false
     this.audio.pause()
