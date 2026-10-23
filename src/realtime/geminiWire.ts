@@ -21,6 +21,21 @@ type Loose = Record<string, unknown>
 const socketPath =
   'wss://generativelanguage.googleapis.com/ws/google.ai.generativelanguage.v1beta.GenerativeService.BidiGenerateContent'
 
+/**
+ * Схемы функций чистятся от полей OpenAI-стиля: сервер Gemini отвергает setup
+ * с «Invalid JSON payload received. Unknown name "additionalProperties"».
+ */
+function geminiSchema(schema: unknown): unknown {
+  if (Array.isArray(schema)) return schema.map((item) => geminiSchema(item))
+  if (!schema || typeof schema !== 'object') return schema
+  const out: Record<string, unknown> = {}
+  for (const [key, value] of Object.entries(schema)) {
+    if (key === 'additionalProperties') continue
+    out[key] = geminiSchema(value)
+  }
+  return out
+}
+
 /** `resumptionHandle` — токен прошлой сессии: reconnect продолжает её контекст вместо новой. */
 export function geminiSetup(model: string, thinking: boolean, options: { resumptionHandle?: string } = {}): object {
   return {
@@ -36,7 +51,7 @@ export function geminiSetup(model: string, thinking: boolean, options: { resumpt
           functionDeclarations: sessionTools.map((tool) => ({
             name: tool.name,
             description: tool.description,
-            parameters: tool.parameters,
+            parameters: geminiSchema(tool.parameters),
             ...(thinking ? { behavior: 'NON_BLOCKING' } : {}),
           })),
         },

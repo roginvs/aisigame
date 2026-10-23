@@ -18,6 +18,9 @@ describe('gemini wire', () => {
     // Длинная партия: сжатие контекста включено, сервер присылает токены восстановления.
     expect(live.setup.contextWindowCompression).toEqual({ slidingWindow: {} })
     expect(live.setup.sessionResumption).toEqual({})
+    // Схемы функций без полей OpenAI-стиля: Gemini отвергает additionalProperties.
+    const parameters = JSON.stringify(live.setup.tools)
+    expect(parameters).not.toContain('additionalProperties')
 
     const thinking = geminiSetup('gemini-3.8-live-extended-thinking', true) as typeof live
     expect(thinking.setup.generationConfig.thinkingConfig).toEqual({ thinkingLevel: 'low' })
