@@ -7,18 +7,28 @@ import { geminiTempoRule } from '../options.ts'
 const inputRate = 16_000
 const outputRate = 24_000
 
+/** Переподключение: не больше попыток, задержка растёт и ограничена сверху. */
+const reconnectMaxAttempts = 5
+const reconnectBaseDelayMs = 500
+const reconnectMaxDelayMs = 8_000
+/** Столько попыток с токеном; дальше — новая сессия без восстановления контекста. */
+const resumptionTokenAttempts = 2
+/** Сколько ждать setupComplete: молчащее соединение считается неудачей, а не зависанием. */
+const setupConfirmTimeoutMs = 15_000
+
 type Loose = Record<string, unknown>
 
 const socketPath =
   'wss://generativelanguage.googleapis.com/ws/google.ai.generativelanguage.v1beta.GenerativeService.BidiGenerateContent'
 
-export function geminiSetup(model: string, thinking: boolean): object {
+/** `resumptionHandle` — токен прошлой сессии: reconnect продолжает её контекст вместо новой. */
+export function geminiSetup(model: string, thinking: boolean, options: { resumptionHandle?: string } = {}): object {
   return {
     setup: {
       model: `models/${model}`,
       generationConfig: {
         responseModalities: ['AUDIO'],
-        ...(thinking ? { thinkingConfig: { thinkingLevel: 'LOW' } } : {}),
+        ...(thinking ? { thinkingConfig: { thinkingLevel: 'low' } } : {}),
       },
       systemInstruction: { parts: [{ text: `${hostInstructions}\n\n${geminiTempoRule}` }] },
       tools: [
@@ -33,8 +43,30 @@ export function geminiSetup(model: string, thinking: boolean): object {
       ],
       inputAudioTranscription: { languageCodes: ['ru-RU'] },
       outputAudioTranscription: {},
+      // Длинная партия: сжатие контекста скользящим окном снимает лимит длительности сессии,
+      // а sessionResumption переносит ту же сессию на новое соединение (~10 минут жизни).
+      contextWindowCompression: { slidingWindow: {} },
+      sessionResumption: options.resumptionHandle ? { handle: options.resumptionHandle } : {},
     },
   }
+}
+
+/** Текст причины закрытия сокета; пусто, если сервер не оставил ни код, ни пояснения. */
+export function geminiCloseNote(code: number, reason: string): string {
+  const clean = reason.trim()
+  if (clean) return clean
+  if (code !== 1000 && code !== 1005 && code !== 1006) return `код ${code}`
+  return ''
+}
+
+/** Ключ, квота, права и отсутствие модели повторами не лечатся — связь падает сразу. */
+export function geminiFatalClose(reason: string): boolean {
+  return /api[ _]?key|unauthenticated|unauthorized|permission|denied|quota|exhausted|resource_exhausted|not found|not supported|unsupported|deprecat|billing/i.test(reason)
+}
+
+/** Похоже, сервер отверг именно токен восстановления: следующая попытка — без него. */
+export function geminiResumptionRejected(reason: string): boolean {
+  return /resum|handle|expired|invalid/i.test(reason)
 }
 
 export function absorbTranscript(current: string, next: string): string {
@@ -70,7 +102,6 @@ export class GeminiWire implements VoiceWire {
   private socket: WebSocket | null = null
   private mic: PcmMic | null = null
   private player: PcmPlayer
-  private opened = false
   private responseId = ''
   private said = ''
   private heard = ''
@@ -81,6 +112,24 @@ export class GeminiWire implements VoiceWire {
   private toolTurn = false
   private readonly model: string
   private readonly thinking: boolean
+  /** Текущий токен восстановления: сервер обновляет его в sessionResumptionUpdate. */
+  private resumptionHandle: string | null = null
+  /** setupComplete уже был: значит, разрыв сокета — это разрыв живой сессии, а не неудавшийся вход. */
+  private sessionLive = false
+  /** close() по воле клиента: переподключаться не надо. */
+  private closing = false
+  private apiKey = ''
+  /** Сокет умер, попытка восстановления ждёт своей очереди или идёт. */
+  private reconnecting = false
+  private reconnectAttempts = 0
+  private reconnectTimer: number | null = null
+  /** События игры, посланные в разрыв: доставляются после setupComplete ровно один раз. */
+  private outbox: object[] = []
+  /** Подтверждение setup текущего сокета; rejecting — причина от close-кадра. */
+  private confirmed: Promise<void> = new Promise((resolve) => resolve())
+  private confirmResolve: (() => void) | null = null
+  private confirmReject: ((reason: Error) => void) | null = null
+  private confirmTimer: number | null = null
 
   constructor(model: string, thinking: boolean) {
     this.model = model
@@ -95,6 +144,13 @@ export class GeminiWire implements VoiceWire {
   async open(apiKey: string, sink: VoiceSink, options?: { captureMic?: boolean }): Promise<void> {
     this.close()
     this.sink = sink
+    this.apiKey = apiKey
+    this.closing = false
+    this.sessionLive = false
+    this.resumptionHandle = null
+    this.reconnecting = false
+    this.reconnectAttempts = 0
+    this.outbox = []
     this.responseId = ''
     this.said = ''
     this.heard = ''
@@ -108,7 +164,7 @@ export class GeminiWire implements VoiceWire {
       throw new Error(micError(error))
     }
     this.mic = mic
-    await this.openSocket(apiKey)
+    await this.openSocket(apiKey, null)
   }
 
   send(event: object): boolean {
@@ -123,7 +179,7 @@ export class GeminiWire implements VoiceWire {
     if (type === 'input_audio_buffer.clear') return true
     if (type === 'response.cancel') {
       this.player.stop()
-      return this.socketSend({ clientContent: { turnComplete: false } })
+      return this.deliver({ clientContent: { turnComplete: false } })
     }
     if (type === 'response.create') {
       const cue = responseCue(event)
@@ -131,7 +187,7 @@ export class GeminiWire implements VoiceWire {
       this.said = ''
       this.responseId = `gem-${Date.now()}`
       if (!cue.text) return false
-      return this.socketSend({
+      return this.deliver({
         clientContent: {
           turns: [{ role: 'user', parts: [{ text: cue.text }] }],
           turnComplete: true,
@@ -152,7 +208,7 @@ export class GeminiWire implements VoiceWire {
         }
       }
       if (!response || typeof response !== 'object') response = { result: response }
-      return this.socketSend({
+      return this.deliver({
         toolResponse: { functionResponses: [{ id, name, response }] },
       })
     }
@@ -181,7 +237,16 @@ export class GeminiWire implements VoiceWire {
   }
 
   close(): void {
-    this.opened = false
+    this.closing = true
+    this.sessionLive = false
+    this.reconnecting = false
+    this.reconnectAttempts = 0
+    this.outbox = []
+    if (this.reconnectTimer !== null) {
+      window.clearTimeout(this.reconnectTimer)
+      this.reconnectTimer = null
+    }
+    this.clearConfirm()
     this.player.stop()
     this.mic?.close()
     this.mic = null
@@ -198,10 +263,19 @@ export class GeminiWire implements VoiceWire {
     })
   }
 
-  private openSocket(apiKey: string): Promise<void> {
+  private openSocket(apiKey: string, resumption: string | null): Promise<void> {
     const socket = new WebSocket(`${socketPath}?key=${encodeURIComponent(apiKey)}`)
     this.socket = socket
     socket.binaryType = 'blob'
+    // Подтверждение setup этого сокета: reject закрывает попытку переподключения,
+    // а до client-ового session.updated ждать нельзя — open() обязан resolve по отправке setup.
+    this.confirmed = new Promise<void>((resolve, reject) => {
+      this.confirmResolve = resolve
+      this.confirmReject = reject
+    })
+    this.confirmed.catch(() => {})
+    // Сервер может замолчать на полуоткрытом соединении: без таймаута попытка зависнет навсегда.
+    this.confirmTimer = window.setTimeout(() => this.failConfirm('Gemini не подтвердил настройки'), setupConfirmTimeoutMs)
     return new Promise((resolve, reject) => {
       let settled = false
       const rejectOnce = (message: string) => {
@@ -210,30 +284,132 @@ export class GeminiWire implements VoiceWire {
         reject(new Error(message))
       }
       socket.addEventListener('open', () => {
-        if (!this.socketSend(geminiSetup(this.model, this.thinking))) {
+        if (!this.socketSend(geminiSetup(this.model, this.thinking, resumption ? { resumptionHandle: resumption } : {}))) {
           rejectOnce('Канал Gemini не открылся')
           return
         }
         settled = true
-        this.opened = true
         resolve()
       })
       socket.addEventListener('message', (event) => {
-        void this.onMessage(event.data)
+        if (this.socket === socket) void this.onMessage(event.data)
       })
-      socket.addEventListener('error', () => {
-        if (this.opened) this.sink?.closed('Соединение с Gemini прервалось')
-        else rejectOnce('Соединение с Gemini прервалось')
-      })
-      socket.addEventListener('close', () => {
-        if (!this.opened) {
-          rejectOnce('Канал Gemini закрылся')
+      socket.addEventListener('close', (event) => {
+        if (this.socket === socket) this.socket = null
+        const note = geminiCloseNote(event.code, typeof event.reason === 'string' ? event.reason : '')
+        const message = note ? `Канал Gemini закрылся: ${note}` : 'Канал Gemini закрылся'
+        // setup не подтверждён: ждущий connect увидит причину сразу, без 15-секундного таймаута
+        this.failConfirm(message)
+        if (!settled) {
+          rejectOnce(message)
           return
         }
-        this.opened = false
-        this.sink?.closed('Канал Gemini закрылся')
+        // Разрыв живой сессии; неудача самой попытки переподключения идёт через её промис.
+        if (this.sessionLive && !this.reconnecting) this.handleDisconnect(note)
       })
     })
+  }
+
+  /** Отправка сейчас или в отложенную очередь, пока соединение восстанавливается. */
+  private deliver(message: object): boolean {
+    const socket = this.socket
+    if (socket && socket.readyState === WebSocket.OPEN) return this.socketSend(message)
+    if (this.reconnecting) {
+      this.outbox.push(message)
+      return true
+    }
+    return false
+  }
+
+  private flushOutbox(): void {
+    const pending = this.outbox
+    this.outbox = []
+    for (const message of pending) this.socketSend(message)
+  }
+
+  /** setup так и не подтверждён: сообщить ждущему причину и погасить ожидание. */
+  private failConfirm(message: string): void {
+    if (this.confirmReject === null) return
+    const reject = this.confirmReject
+    this.clearConfirm()
+    this.emit({ type: 'session.wait-failed', message })
+    reject(new Error(message))
+  }
+
+  private clearConfirm(): void {
+    if (this.confirmTimer !== null) {
+      window.clearTimeout(this.confirmTimer)
+      this.confirmTimer = null
+    }
+    this.confirmResolve = null
+    this.confirmReject = null
+  }
+
+  /** Сокет живой сессии закрылся. Фатальная причина роняет связь, остальное — переподключение. */
+  private handleDisconnect(note: string): void {
+    if (this.closing) return
+    if (geminiFatalClose(note)) {
+      this.failLink(note ? `Gemini оборвал сессию: ${note}` : 'Gemini оборвал сессию')
+      return
+    }
+    this.scheduleReconnect(note)
+  }
+
+  private scheduleReconnect(note: string): void {
+    if (this.reconnectTimer !== null) return
+    this.reconnectAttempts += 1
+    if (this.reconnectAttempts > reconnectMaxAttempts) {
+      this.failLink(`Gemini не восстановился за ${reconnectMaxAttempts} попыток${note ? `: ${note}` : ''}`)
+      return
+    }
+    const delay = Math.min(reconnectBaseDelayMs * 2 ** (this.reconnectAttempts - 1), reconnectMaxDelayMs)
+    this.emit({ type: 'gemini.reconnect', attempt: this.reconnectAttempts, delayMs: delay, reason: note })
+    this.reconnecting = true
+    this.reconnectTimer = window.setTimeout(() => {
+      this.reconnectTimer = null
+      void this.reconnectNow()
+    }, delay)
+  }
+
+  private async reconnectNow(): Promise<void> {
+    if (this.closing) return
+    const handle = this.resumptionHandle
+    try {
+      await this.openSocket(this.apiKey, handle)
+      await this.confirmed
+      this.reconnecting = false
+      this.reconnectAttempts = 0
+      // Токен мог не приняться: сессия теперь новая, контекст модели пуст —
+      // следующий ход принесёт свои инструкции, как после перезагрузки страницы.
+      this.emit({ type: 'gemini.reconnected', resumed: Boolean(handle) })
+      this.flushOutbox()
+      return
+    } catch (error) {
+      if (this.closing) return
+      const message = error instanceof Error ? error.message : 'Канал Gemini закрылся'
+      const note = message.replace(/^Канал Gemini закрылся: /, '')
+      if (geminiFatalClose(note)) {
+        this.failLink(`Gemini не принял переподключение: ${note}`)
+        return
+      }
+      // Похоже на отказ токена восстановления — следующая попытка начнёт новую сессию.
+      if (handle && (geminiResumptionRejected(note) || this.reconnectAttempts >= resumptionTokenAttempts)) {
+        this.resumptionHandle = null
+      }
+      this.scheduleReconnect(note)
+    }
+  }
+
+  /** Переподключение исчерпано или бессмысленно: связь падает, игру ведёт контроллер. */
+  private failLink(message: string): void {
+
+    this.reconnecting = false
+    this.outbox = []
+    if (this.reconnectTimer !== null) {
+      window.clearTimeout(this.reconnectTimer)
+      this.reconnectTimer = null
+    }
+    this.sink?.closed(message)
   }
 
   private async onMessage(data: unknown): Promise<void> {
@@ -246,9 +422,17 @@ export class GeminiWire implements VoiceWire {
       return
     }
     if ('setupComplete' in message) {
+      this.sessionLive = true
+      const resolve = this.confirmResolve
+      this.clearConfirm()
+      resolve?.()
       this.emit({ type: 'session.updated' })
       return
     }
+    // Сервер обновляет токен восстановления; храним только помеченный resumable.
+    const update = asRecord(message.sessionResumptionUpdate)
+    const newHandle = text(update.newHandle)
+    if (newHandle && update.resumable === true) this.resumptionHandle = newHandle
     if (message.usageMetadata && typeof message.usageMetadata === 'object') {
       this.usage = message.usageMetadata as Loose
     }
@@ -260,7 +444,11 @@ export class GeminiWire implements VoiceWire {
     }
     const content = asRecord(message.serverContent)
     if (Object.keys(content).length) this.onContent(content)
-    if (message.goAway) this.sink?.closed('Gemini закрывает сессию')
+    if (message.goAway) {
+      // Сервер скоро закроет соединение (~10 минут жизни): ждём его close и переподключаемся.
+      const left = text(asRecord(message.goAway).timeLeft)
+      this.emit({ type: 'gemini.goaway', timeLeft: left })
+    }
   }
 
   private onVoice(activity: Loose): void {
