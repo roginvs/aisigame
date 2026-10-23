@@ -94,8 +94,14 @@ await page.waitForTimeout(6000)
 // Точная привязка мастера: включим CDP Target перед стартом. Проще: после старта партии
 // возьмём пиды рендереров, появившиеся ПОСЛЕ первого мастера... мастер открылся раньше всех.
 // Вместо эвристик: меряем все пиды; горячий мастер-пид определяем перебором.
-// Практично: мастер запускался первым → его pid — наименьший из текущих.const pidsAll = rendererPids().sort((a, b) => a - b)
+// Практично: мастер запускался первым → его pid — наименьший из текущих.
+const pidsAll = rendererPids().sort((a, b) => a - b)
 const masterPid = pidsAll[0]
+if (!masterPid) {
+  console.log('НЕ НАЙДЕНЫ рендереры Playwright Chromium: ps не видит --type=renderer')
+  await browser.close()
+  process.exit(3)
+}
 console.log('мастер pid (самый ранний рендерер):', masterPid)
 
 let { total, rows } = await cpuFraction(masterPid, SAMPLE_S)
