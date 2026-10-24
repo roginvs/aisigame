@@ -106,6 +106,73 @@ describe('запасной commit: модель молчит, коммитим �
     expect(client.forceInputCommit(1600)).toBe(true)
   })
 
+  it('включение микрофона не сбрасывает уже открытую реплику, ни в проводе, ни в WebRTC', () => {
+    const sent: string[] = []
+    const wire: VoiceWire = {
+      supportsInputCommit: true,
+      open: async () => {},
+      send(event: object) {
+        const type = (event as { type?: string }).type
+        if (type) sent.push(type)
+        return true
+      },
+      close: () => {},
+      setMicEnabled: () => {},
+      setOutputMuted: () => {},
+      attachHostOutput: () => {},
+      setInputStream: () => {},
+    }
+    const client = new RealtimeClient({ wire })
+    harness(client).wireOpen = true
+    const clears = () => sent.filter((type) => type === 'input_audio_buffer.clear').length
+    client.setMicEnabled(true)
+    expect(clears()).toBe(1)
+    harness(client).handleMessage(JSON.stringify({ type: 'input_audio_buffer.speech_started', item_id: 'open-1' }))
+    client.setMicEnabled(false)
+    client.setMicEnabled(true)
+    expect(clears()).toBe(1)
+    harness(client).handleMessage(JSON.stringify({ type: 'input_audio_buffer.speech_stopped', item_id: 'open-1', audio_end_ms: 800 }))
+    client.setMicEnabled(false)
+    client.setMicEnabled(true)
+    expect(clears()).toBe(2)
+    client.forceInputCommit(1400)
+    client.setMicEnabled(false)
+    client.setMicEnabled(true)
+    expect(clears()).toBe(2)
+    client.discardInputAudio()
+    expect(clears()).toBe(3)
+
+    const web: string[] = []
+    const webClient = new RealtimeClient()
+    const opened = harness(webClient)
+    const track = { enabled: false, kind: 'audio' }
+    opened.dc = {
+      readyState: 'open',
+      onmessage: null,
+      send(data: string) {
+        const event = JSON.parse(data) as { type?: string }
+        if (event.type) web.push(event.type)
+      },
+    }
+    const bits = webClient as unknown as {
+      mic: { getAudioTracks(): Array<{ enabled: boolean }> }
+      pc: { getSenders(): Array<{ track: { kind: string; enabled: boolean } | null }> }
+    }
+    bits.mic = { getAudioTracks: () => [track] }
+    bits.pc = { getSenders: () => [{ track }] }
+    const webClears = () => web.filter((type) => type === 'input_audio_buffer.clear').length
+    webClient.setMicEnabled(true)
+    expect(webClears()).toBe(1)
+    opened.handleMessage(JSON.stringify({ type: 'input_audio_buffer.speech_started', item_id: 'open-2' }))
+    webClient.setMicEnabled(false)
+    webClient.setMicEnabled(true)
+    expect(webClears()).toBe(1)
+    opened.handleMessage(JSON.stringify({ type: 'input_audio_buffer.speech_stopped', item_id: 'open-2', audio_end_ms: 800 }))
+    webClient.setMicEnabled(false)
+    webClient.setMicEnabled(true)
+    expect(webClears()).toBe(2)
+  })
+
   it('провод провайдера (Grok/Gemini) коммит не шлёт — реплика остаётся на его VAD', () => {
     const sent: string[] = []
     const wire = {

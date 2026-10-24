@@ -500,7 +500,7 @@ export class RealtimeClient {
         return
       }
       this.onLink({ mic: enabled ? 'live' : 'muted' })
-      if (enabled && !wasLive) this.send({ type: 'input_audio_buffer.clear' })
+      if (enabled && !wasLive) this.clearStaleInput()
       return
     }
     if (!this.mic || !this.pc) return
@@ -518,7 +518,21 @@ export class RealtimeClient {
       return
     }
     this.onLink({ mic: enabled ? 'live' : 'muted' })
-    if (enabled && !wasLive) this.send({ type: 'input_audio_buffer.clear' })
+    if (enabled && !wasLive) this.clearStaleInput()
+  }
+
+  /**
+   * Включение микрофона сбрасывает хвост прошлой реплики. Уже открытую
+   * (speech_started или наш commit, ответа committed ещё нет) не трогаем:
+   * clear стёр бы её, а второй commit при живой VAD может дать пустой item.
+   * Конец пришлёт серверная VAD или уже отправленный commit.
+   */
+  private clearStaleInput(): void {
+    if (this.inputStartedAt !== null || this.pendingForcedUtterance) {
+      diag('слух', 'микрофон включён поверх открытой реплики — буфер не сбрасываем')
+      return
+    }
+    this.send({ type: 'input_audio_buffer.clear' })
   }
 
   setOutputMuted(muted: boolean): void {
