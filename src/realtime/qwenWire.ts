@@ -2,6 +2,7 @@ import { hostInstructions } from '../config.ts'
 import { gameAudioContext } from '../audio/beep.ts'
 import { createSilentMicStream } from './pcm.ts'
 import { sessionTools } from './tools.ts'
+import { summarizeAudioSender, type ModelSenderStats } from './senderStats.ts'
 import type { VoiceOpenOptions, VoiceSink, VoiceWire } from './wire.ts'
 
 /**
@@ -468,6 +469,10 @@ export class QwenWire implements VoiceWire {
     if (!sender) return
     const track = stream?.getAudioTracks()[0] ?? this.micStream?.getAudioTracks()[0] ?? null
     if (track) void sender.replaceTrack(track)
+  }
+
+  inputSenderStats(): Promise<ModelSenderStats | null> {
+    return this.pc ? summarizeAudioSender(this.pc) : Promise.resolve(null)
   }
 
   close(): void {

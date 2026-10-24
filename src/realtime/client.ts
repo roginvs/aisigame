@@ -16,6 +16,7 @@ import { AudioItems, type AudioReference, type AudioItemReady } from './audioIte
 import { audioJudgmentCapable, type JudgmentCapabilities, type JudgeRequestContext } from './judgmentRequest.ts'
 import { sessionTools, toolPurposes } from './tools.ts'
 import { createSilentMicStream } from './pcm.ts'
+import { summarizeAudioSender, type ModelSenderStats } from './senderStats.ts'
 import type { VoiceWire } from './wire.ts'
 import { ItemPrompts, echoesAnyPrompt } from './itemPrompts.ts'
 import { ResponseRequests } from './responseRequests.ts'
@@ -454,6 +455,16 @@ export class RealtimeClient {
       analyser.disconnect()
       clone.stop()
     }
+  }
+
+  /**
+   * Один снимок getStats исходящего звука к модели. Провод без WebRTC возвращает null.
+   * Игра это не ждёт и не читает.
+   */
+  inputSenderStats(): Promise<ModelSenderStats | null> {
+    if (this.wire) return this.wire.inputSenderStats?.() ?? Promise.resolve(null)
+    if (!this.pc) return Promise.resolve(null)
+    return summarizeAudioSender(this.pc)
   }
 
   /** null — снова микрофон из connect(); иначе replaceTrack на отправителе WebRTC. */
@@ -1053,8 +1064,15 @@ export class RealtimeClient {
       return
     }
     const type = typeof event.type === 'string' ? event.type : 'unknown'
-    if (type.endsWith('.delta')) logTrace('in', type, deltaNote(event))
-    else pushTrace('in', type, event)
+    // Гонка отмены: ответ уже кончился. В лог не пишем — это шум, не сбой связи.
+    // Остальные error и invalid_request_error по-прежнему попадают в trace.
+    const cancelNotActive =
+      (type === 'error' || type === 'invalid_request_error') &&
+      asRecord(event.error).code === 'response_cancel_not_active'
+    if (!cancelNotActive) {
+      if (type.endsWith('.delta')) logTrace('in', type, deltaNote(event))
+      else pushTrace('in', type, event)
+    }
     this.audioItems.observe(event)
     this.sessionUpdatedWaiter?.(event)
     if (type === 'session.updated') this.sessionUpdatedWaiter = null
@@ -1896,6 +1914,7 @@ export type GameVoice = Pick<
   | 'stopSession'
   | 'attachHostOutput'
   | 'setInputStream'
+  | 'inputSenderStats'
 >
 
 function forkHostStream(stream: MediaStream): MediaStream {

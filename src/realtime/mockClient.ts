@@ -152,6 +152,10 @@ export class MockRealtimeClient implements GameVoice {
 
   setInputStream(_stream: MediaStream | null): void {}
 
+  inputSenderStats(): Promise<null> {
+    return Promise.resolve(null)
+  }
+
   setTranscriptionPrompt(prompt: string): void {
     this.itemPrompts.set(prompt)
   }

@@ -1,4 +1,5 @@
 import { createBroadcastMedia, type ConferenceHandle } from './media.ts'
+import type { ModelSenderStats } from '../realtime/senderStats.ts'
 import { BroadcastChannelTransport } from './transport.ts'
 
 export async function createConferenceTransport(input: {
@@ -11,6 +12,8 @@ export async function createConferenceTransport(input: {
   onError?: (message: string) => void
   onSoundsLost?: (message: string) => void
   onSoundsRestored?: () => void
+  /** Мастер: снимок WebRTC-отправителя звука в модель, когда закрывается окно слушания. */
+  readModelSenderStats?: () => Promise<ModelSenderStats | null>
 }): Promise<ConferenceHandle> {
   const displayName = input.displayName ?? 'Игрок'
   if (input.useBroadcast) {
@@ -52,5 +55,6 @@ export async function createConferenceTransport(input: {
     onError: input.onError,
     onSoundsLost: input.onSoundsLost,
     onSoundsRestored: input.onSoundsRestored,
+    readModelSenderStats: input.readModelSenderStats,
   })
 }

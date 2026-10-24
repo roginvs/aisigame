@@ -861,6 +861,7 @@ export default function App() {
         onError: conferenceConnectionFailed,
         onSoundsLost: gameSoundsLost,
         onSoundsRestored: gameSoundsRestored,
+        readModelSenderStats: () => voiceClientRef.current?.inputSenderStats() ?? Promise.resolve(null),
       })
       attachConferenceHandle(handle)
       if (!useBroadcast && handle.publishSoundsStream) {

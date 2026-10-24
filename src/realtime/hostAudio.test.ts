@@ -14,6 +14,7 @@ import { demoPack } from '../game/questions.ts'
 import { outputFlushWaitMs } from './playback.ts'
 import { RealtimeClient } from './client.ts'
 import { conversationLineFromTrace } from '../conference/traceConversation.ts'
+import { getTrace } from '../debug/trace.ts'
 
 class FakeAudio {
   muted = false
@@ -408,10 +409,18 @@ describe('host audio completion', () => {
       tools.push({ call, purpose, turn })
     }
     client!.requestTool('select', 3, 'selectQuestion', 'Вызови selectQuestion.', true)
+    const mark = getTrace().at(-1)?.id ?? 0
+    const fresh = () => JSON.stringify(getTrace().filter((entry) => entry.id > mark))
     feed({ type: 'error', error: { code: 'response_cancel_not_active', message: 'Cancellation failed: no active response' } })
+    feed({ type: 'invalid_request_error', error: { code: 'response_cancel_not_active', message: 'Cancellation failed: no active response' } })
     expect(tools).toEqual([])
+    expect(fresh()).not.toContain('response_cancel_not_active')
     feed({ type: 'error', error: { code: 'server_error', message: 'The server had an error' } })
     expect(tools).toEqual([{ call: null, purpose: 'select', turn: 3 }])
+    const after = fresh()
+    expect(after).toContain('server_error')
+    expect(after).toContain('Ошибка API')
+    expect(after).not.toContain('response_cancel_not_active')
     feed({ type: 'error', error: { code: 'server_error', message: 'again' } })
     expect(tools).toHaveLength(1)
   })

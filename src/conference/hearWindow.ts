@@ -10,6 +10,8 @@ export type HearSample = {
   peak: number
   /** RMS после гейна — то, что этот источник реально добавил в поток модели. */
   postRms: number
+  /** Доля отсчётов кадра с |x| ≥ порога клиппинга (0..1). */
+  clip: number
   jitsi: number | null
 }
 
@@ -24,6 +26,7 @@ type SourceStats = {
   jitsiSpeaking: number
   gainOn: number
   silentRun: number
+  clipSum: number
 }
 
 export type HearWindowSummary = {
@@ -40,6 +43,8 @@ export type HearWindowSummary = {
     peak: number
     jitsiPeak: number | null
     jitsiSpeakingMs: number
+    /** Средняя доля клиппинга по замерам окна. */
+    clipShare: number
   }>
 }
 
@@ -62,7 +67,7 @@ export function createHearWindow(focus: string | false | null, startedAt: number
       for (const sample of samples) {
         let item = stats.get(sample.key)
         if (!item) {
-          item = { participantId: sample.participantId, samples: 0, heardSamples: 0, rmsSum: 0, postSum: 0, peak: 0, jitsiPeak: -1, jitsiSpeaking: 0, gainOn: 0, silentRun: 0 }
+          item = { participantId: sample.participantId, samples: 0, heardSamples: 0, rmsSum: 0, postSum: 0, peak: 0, jitsiPeak: -1, jitsiSpeaking: 0, gainOn: 0, silentRun: 0, clipSum: 0 }
           stats.set(sample.key, item)
         }
         item.participantId = sample.participantId
@@ -70,6 +75,7 @@ export function createHearWindow(focus: string | false | null, startedAt: number
         item.rmsSum += sample.rms
         item.postSum += sample.postRms
         item.peak = Math.max(item.peak, sample.peak)
+        item.clipSum += sample.clip
         if (sample.gain === 1) item.gainOn += 1
         const speaking = sample.jitsi !== null && sample.jitsi >= SPEAKING_LEVEL
         if (sample.jitsi !== null) item.jitsiPeak = Math.max(item.jitsiPeak, sample.jitsi)
@@ -96,19 +102,27 @@ export function createHearWindow(focus: string | false | null, startedAt: number
           peak: round(item.peak),
           jitsiPeak: item.jitsiPeak < 0 ? null : round(item.jitsiPeak),
           jitsiSpeakingMs: item.jitsiSpeaking * hearWindowSampleMs,
+          clipShare: round(item.samples ? item.clipSum / item.samples : 0),
         })),
       }
     },
   }
 }
 
-/** RMS и пик по временным отсчётам анализатора (float, -1..1). */
-export function levelOf(data: Float32Array): { rms: number; peak: number } {
+/** |отсчёт| на этом уровне и выше считаем клиппингом (полная шкала ±1). */
+const clipAbs = 0.98
+
+/** RMS, пик и доля клиппинга по временным отсчётам анализатора (float, -1..1). Один проход. */
+export function levelOf(data: Float32Array): { rms: number; peak: number; clip: number } {
   let sum = 0
   let peak = 0
+  let clipped = 0
   for (const value of data) {
+    const abs = Math.abs(value)
     sum += value * value
-    peak = Math.max(peak, Math.abs(value))
+    if (abs > peak) peak = abs
+    if (abs >= clipAbs) clipped += 1
   }
-  return { rms: data.length ? Math.sqrt(sum / data.length) : 0, peak }
+  const length = data.length
+  return { rms: length ? Math.sqrt(sum / length) : 0, peak, clip: length ? clipped / length : 0 }
 }

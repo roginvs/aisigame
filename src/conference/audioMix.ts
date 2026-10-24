@@ -21,9 +21,9 @@ export type MicMixer = {
   /** AnalyserNode на той же шине, что уходит модели (только отвод, поток не меняет). */
   meter: () => AnalyserNode
   /** Уровни каждого источника до гейна (для диагностики окна «модель слушает»). */
-  levels: () => Array<{ key: string; rms: number; peak: number; gain: 0 | 1; postRms: number }>
+  levels: () => Array<{ key: string; rms: number; peak: number; clip: number; gain: 0 | 1; postRms: number }>
   /** Уровень шины — тот же узел, что рисует индикатор «что слышит модель» и уходит в модель. */
-  busLevel: () => { rms: number; peak: number }
+  busLevel: () => { rms: number; peak: number; clip: number }
   /** Пересоздать источник (новый клон) при следующем update — лечение «немого клона». */
   reattach: (key: string) => void
   dispose: () => void
@@ -231,22 +231,22 @@ export function createMicMixer(onSource: (event: MixerSourceEvent) => void = () 
       return analyser
     },
     levels() {
-      const out: Array<{ key: string; rms: number; peak: number; gain: 0 | 1; postRms: number }> = []
+      const out: Array<{ key: string; rms: number; peak: number; clip: number; gain: 0 | 1; postRms: number }> = []
       const read = (tap: AnalyserNode | null) => {
-        if (!tap || typeof tap.getFloatTimeDomainData !== 'function') return { rms: 0, peak: 0 }
+        if (!tap || typeof tap.getFloatTimeDomainData !== 'function') return { rms: 0, peak: 0, clip: 0 }
         const data = new Float32Array(tap.fftSize)
         tap.getFloatTimeDomainData(data)
         return levelOf(data)
       }
       for (const [key, source] of sources) {
-        const { rms, peak } = read(source.analyser)
-        out.push({ key, rms, peak, gain: source.level, postRms: read(source.postAnalyser).rms })
+        const { rms, peak, clip } = read(source.analyser)
+        out.push({ key, rms, peak, clip, gain: source.level, postRms: read(source.postAnalyser).rms })
       }
       return out
     },
     busLevel() {
       const tap = this.meter()
-      if (typeof tap.getFloatTimeDomainData !== 'function') return { rms: 0, peak: 0 }
+      if (typeof tap.getFloatTimeDomainData !== 'function') return { rms: 0, peak: 0, clip: 0 }
       const data = new Float32Array(tap.fftSize)
       tap.getFloatTimeDomainData(data)
       return levelOf(data)

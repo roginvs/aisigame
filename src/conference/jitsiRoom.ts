@@ -28,6 +28,7 @@ import { noteTileLevel, resetTileLevels } from './tileLevels.ts'
 import { PACK_CHANNEL_HIGH_WATER_BYTES, PACK_CHANNEL_LOW_WATER_BYTES } from './chunks.ts'
 import { jitsiVideoLive, mediaStreamTrackFromJitsi, micTrackIsDead } from './micTrack.ts'
 import { pushTrace } from '../debug/trace.ts'
+import { noteModelSenderStats, type ModelSenderStats } from '../realtime/senderStats.ts'
 
 type JitsiMeetJS = {
   init: (options: unknown) => void
@@ -369,6 +370,8 @@ export async function connectJitsiConference(input: {
   /** После успешного повторного подключения «Звуков игры». */
   onSoundsRestored?: () => void
   onError?: (message: string) => void
+  /** Один getStats отправителя звука в модель при закрытии окна слушания. Игру не ждёт. */
+  readModelSenderStats?: () => Promise<ModelSenderStats | null>
 }): Promise<ConferenceHandle> {
   const base = input.jitsiBase.replace(/\/+$/, '')
   await loadScript(`${base}/libs/lib-jitsi-meet.min.js`)
@@ -511,6 +514,7 @@ export async function connectJitsiConference(input: {
     const names = namesOf(summary.sources.map((src) => src.participantId))
     pushTrace('note', 'Модель: окно слушания (уровни микса)', names && Object.keys(names).length ? { ...summary, names } : summary)
     hearWindow = null
+    noteModelSenderStats(input.readModelSenderStats)
   }
 
   function sampleHearWindow(): void {
@@ -520,7 +524,7 @@ export async function connectJitsiConference(input: {
       return { ...item, participantId, jitsi: participantId ? jitsiLevels.get(participantId) ?? 0 : null }
     })
     const bus = modelMixer.busLevel()
-    samples.push({ key: 'bus', participantId: 'модель', gain: 1, rms: bus.rms, peak: bus.peak, postRms: bus.rms, jitsi: null })
+    samples.push({ key: 'bus', participantId: 'модель', gain: 1, rms: bus.rms, peak: bus.peak, clip: bus.clip, postRms: bus.rms, jitsi: null })
     for (const key of hearWindow.add(samples)) {
       if (key === 'bus' || key === 'local') {
         pushTrace('note', 'Модель: Jitsi слышит речь, а в миксе тишина', { key })

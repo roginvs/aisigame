@@ -1,3 +1,5 @@
+import type { ModelSenderStats } from './senderStats.ts'
+
 export type VoiceOpenOptions = {
   /** false — тихий поток без разрешения микрофона (конференция до кнопки в панели). */
   captureMic?: boolean
@@ -18,6 +20,8 @@ export interface VoiceWire {
   outputLevel?(): number
   attachHostOutput(handler: (stream: MediaStream) => void): void
   setInputStream(stream: MediaStream | null): void
+  /** Снимок исходящего аудио WebRTC. Нет соединения — метод можно не реализовывать. */
+  inputSenderStats?(): Promise<ModelSenderStats | null>
 }
 
 export type VoiceSink = {
