@@ -7,7 +7,7 @@ import type { JudgeRequestContext, JudgmentInputMode } from '../realtime/judgmen
 import { attachController } from './controller.ts'
 import { gameMachine, statePath } from './machine.ts'
 import type { QuestionPack } from './types.ts'
-import { answerMs, answerSilenceDecideMs as quietMs } from '../options.ts'
+import { answerMs, answerSilenceDecideMs as quietMs, transcriptWaitMs } from '../options.ts'
 
 vi.mock('../audio/beep.ts', () => ({ playTimeoutBeep: vi.fn(), unlockAudio: vi.fn() }))
 const pack: QuestionPack = {
@@ -67,6 +67,9 @@ describe('audio judging gameplay', () => {
     expect(answerLines()).toHaveLength(1)
     expect(lines('Игрок')).toEqual(['пылесосел'])
     expect(lines('Оценка')).toEqual(['Статус: correct\nУслышала: пылесосел'])
+    expect(audio.mock.calls[0]![1]).toContain('Распознаватель записал «пылесос и осел»')
+    expect(audio.mock.calls[0]![1]).toContain('Не ставь correct только потому, что запись совпала с эталоном')
+    expect(audio.mock.calls[0]![1]).not.toContain('Текст транскрипции не предоставлен')
     expect(audio.mock.calls[0]![1]).not.toContain('Реплика игрока:')
     expect(audio.mock.calls[0]![1]).not.toContain('ПУБЛИЧНЫЙ')
   })
@@ -197,6 +200,39 @@ describe('audio judging gameplay', () => {
     expect(score()).toBe(0); expect(lines('Оценка')).toHaveLength(0)
     client.finish(); await vi.advanceTimersByTimeAsync(180 + quietMs)
     expect(score()).toBe(100); expect(lines('Оценка')).toHaveLength(1)
+  })
+  it('includes a transcript that arrives while the audio request is still open', async () => {
+    const client = new MockRealtimeClient()
+    const audio = vi.spyOn(client, 'requestAudioJudgment')
+    await boot(client, 'audio')
+    const item = client.hearAudioWithoutTranscript('Бетельгейзе')
+    await vi.advanceTimersByTimeAsync(80)
+    client.deliverTranscript(item, 'Вот ёпта.')
+    await vi.advanceTimersByTimeAsync(200)
+    expect(audio.mock.calls[0]![1]).toContain('Распознаватель записал «Вот ёпта.»')
+    expect(audio.mock.calls[0]![1]).not.toContain('Реплика игрока:')
+    expect(audio.mock.calls[0]![1]).not.toContain('Текст транскрипции не предоставлен')
+  })
+  it('still asks the audio judge when the recognizer never writes a line', async () => {
+    const client = new MockRealtimeClient()
+    const audio = vi.spyOn(client, 'requestAudioJudgment')
+    const wait = vi.spyOn(client, 'waitForTranscript')
+    await boot(client, 'audio')
+    client.hearAudioWithoutTranscript('шум')
+    await vi.advanceTimersByTimeAsync(transcriptWaitMs(1000) + 200)
+    expect(wait).toHaveBeenCalled()
+    expect(audio).toHaveBeenCalled()
+    expect(audio.mock.calls[0]![1]).toContain('Текст транскрипции не предоставлен')
+    expect(audio.mock.calls[0]![1]).not.toContain('Распознаватель записал')
+  })
+  it('shadow request gets the same recognizer hint', async () => {
+    const client = new MockRealtimeClient()
+    const audio = vi.spyOn(client, 'requestAudioJudgment')
+    await boot(client, 'shadow')
+    client.hearAudio('пылесосел', 'Вот ёпта.')
+    await vi.advanceTimersByTimeAsync(180 + quietMs)
+    expect(audio.mock.calls[0]![1]).toContain('Распознаватель записал «Вот ёпта.»')
+    expect(audio.mock.calls[0]![1]).not.toContain('Реплика игрока:')
   })
   it('does not wait for ASR when the accepted audio item is already ready', async () => {
     const client = new MockRealtimeClient()
@@ -335,10 +371,11 @@ describe('подтверждение эталона ждёт расшифров�
     const { score, notes } = await boot(client, 'audio')
     client.hearAudio('пылесосел', '', 3000, 0.95, 'late-item')
     ;(client as unknown as { transcripts: Map<string, unknown> }).transcripts.delete('late-item')
-    await vi.advanceTimersByTimeAsync(200)
-    client.finish({ status: 'ambiguous', heard: 'пылесосел', reason: 'не уверена' })
+    // Запрос аудио ждёт эту расшифровку, чтобы отдать её в том же вызове. Поздняя строка всё ещё эталон.
     await vi.advanceTimersByTimeAsync(2000)
     client.deliverTranscript('late-item', 'пылесосел', 0.95)
+    await vi.advanceTimersByTimeAsync(80)
+    client.finish({ status: 'ambiguous', heard: 'пылесосел', reason: 'не уверена' })
     await vi.advanceTimersByTimeAsync(200 + quietMs)
     expect(notes().some((e) => e.title.startsWith('аудио и расшифровка обе дали эталон'))).toBe(true)
     expect(score()).toBe(100)

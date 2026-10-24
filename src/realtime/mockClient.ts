@@ -6,7 +6,7 @@ import { clearLivePlayerLine, pushHostLine, pushPlayerLine, pushTrace, setLivePl
 import { ItemPrompts, echoesAnyPrompt } from './itemPrompts.ts'
 import { nearHomophone, sharesAnswer } from '../game/judgment.ts'
 import type { GameVoice, LinkStatus, ToolCall } from './client.ts'
-import type { StoredTranscript } from './utterance.ts'
+import { transcriptOf, type StoredTranscript } from './utterance.ts'
 import { recordResponseUsage, resetUsage } from './usage.ts'
 
 const speechPauseMs = 40
@@ -189,6 +189,10 @@ export class MockRealtimeClient implements GameVoice {
 
   setSpeechMs(ms: number): void {
     this.speechMs = ms
+  }
+
+  peekTranscript(itemId: string | null): { text: string; arrived: boolean; confidence: number | null } | null {
+    return transcriptOf(itemId, this.transcripts)
   }
 
   waitForTranscript(
@@ -399,6 +403,21 @@ export class MockRealtimeClient implements GameVoice {
   /** Тесты: только конец речи с известным itemId, без started (запоздавший VAD). */
   emitSpeechStopped(itemId: string, durationMs: number): void {
     this.onSpeechStopped({ durationMs, itemId })
+  }
+
+  /** Тесты: звук реплики уже committed, расшифровки ещё нет. */
+  hearAudioWithoutTranscript(audioText: string, durationMs = 1000): string {
+    const itemId = `mock-item-${++this.itemSeq}`
+    this.audioTexts.set(itemId, audioText)
+    this.audioItems.observe({ type: 'input_audio_buffer.speech_started', item_id: itemId })
+    this.itemPrompts.started(itemId)
+    this.onSpeechStarted({ itemId })
+    window.setTimeout(() => {
+      this.audioItems.observe({ type: 'input_audio_buffer.speech_stopped', item_id: itemId })
+      this.audioItems.observe({ type: 'input_audio_buffer.committed', item_id: itemId })
+      this.onSpeechStopped({ durationMs, itemId })
+    }, speechPauseMs)
+    return itemId
   }
 
   /** Тесты: started/stopped сразу, транскрипт позже через deliverTranscript. */

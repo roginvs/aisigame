@@ -620,6 +620,11 @@ export class RealtimeClient {
     this.playerChatAllowed.delete(itemId)
   }
 
+  /** Уже пришедшая расшифровка, без ожидания. null — события completed ещё не было. */
+  peekTranscript(itemId: string | null): { text: string; arrived: boolean; confidence: number | null } | null {
+    return transcriptOf(itemId, this.transcripts)
+  }
+
   waitForTranscript(
     itemId: string | null,
     timeoutMs: number,
@@ -1883,6 +1888,7 @@ export type GameVoice = Pick<
   | 'allowPlayerChat'
   | 'suppressPlayerChat'
   | 'waitForTranscript'
+  | 'peekTranscript'
   | 'interruptSpeech'
   | 'requestSpeech'
   | 'requestTool'

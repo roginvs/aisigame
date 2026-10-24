@@ -64,7 +64,7 @@
 | speech_stopped | Сохраняем duration/id; принимаем только свою utterance; PLAYER_SPEECH_FINISHED переводит в judging как сейчас |
 | Item готов | Реестр подтверждает server commit/добавленное user input_audio сообщение в этой же session generation; оценка может стартовать без transcript.completed |
 | Audio request | Только metadata текущей попытки, исходный вопрос/эталоны и reference принятого item |
-| Transcript arrived | Сохраняем ASR отдельно; не запускаем вторую оценку и не заменяем услышанное аудиосудьёй |
+| Transcript arrived | Сохраняем ASR отдельно; не запускаем вторую оценку и не заменяем услышанное аудиосудьёй. Если строка уже есть (или успевает прийти в обычное ожидание расшифровки, не дольше часов оценки), она уходит в тот же `requestAudioJudgment` как подсказка: звук может быть речью, а не шумом. Совпадение строки с эталоном само по себе не correct; при расхождении решает аудио |
 | Result | Сверяем request/session/item/attempt/turn/phase, валидируем status/ids, применяем единственный authoritative результат через машину |
 | Attempt closed | Инвалидируем обработчики; освобождаем временные ссылки/ожидания. Late ASR/result уже не меняют результат |
 
