@@ -121,15 +121,22 @@ describe('чужой ход', () => {
     expect(toolCalls).toEqual([{ purpose: 'select', turn: 5, name: 'selectQuestion' }])
   })
 
-  it('Gemini: done функции без metadata и без response.created не применяется', () => {
+  it('Gemini: голый done без created не применяется; created провода без метки хода — применяется', () => {
     const cursor = getTrace().at(-1)?.id ?? 0
-    // Так сейчас испускает geminiWire.onTool: response.done, id, function_call, без metadata и без created.
     play([
       { kind: 'tool', purpose: 'select', turn: 5, name: 'selectQuestion', instructions: 'выбери' },
-      { kind: 'in', wire: 'gemini', events: [{ type: 'response.done', response: { id: 'gem-1', status: 'completed', output: [selectCall('selectQuestion')] } }] },
+      { kind: 'in', wire: 'gemini', events: [{ type: 'response.done', response: { id: 'gem-bare', status: 'completed', output: [selectCall('selectQuestion')] } }] },
     ])
     expect(toolCalls).toEqual([])
     expect(notesSince(cursor).some((title) => title.includes('без метки хода'))).toBe(true)
+    // geminiWire после response.create сам шлёт response.created со своим id и без metadata.
+    play([
+      { kind: 'in', wire: 'gemini', events: [
+        { type: 'response.created', response: { id: 'gem-1', status: 'in_progress', output: [] } },
+        { type: 'response.done', response: { id: 'gem-1', status: 'completed', output: [selectCall('selectQuestion')] } },
+      ] },
+    ])
+    expect(toolCalls).toEqual([{ purpose: 'select', turn: 5, name: 'selectQuestion' }])
   })
 })
 

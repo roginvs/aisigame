@@ -118,6 +118,8 @@ export class GeminiWire implements VoiceWire {
   private mic: PcmMic | null = null
   private player: PcmPlayer
   private responseId = ''
+  /** Два хода в одну миллисекунду не должны делить id: клиент второй created отбросит. */
+  private responseSerial = 0
   private said = ''
   private heard = ''
   private heardId: string | null = null
@@ -200,14 +202,23 @@ export class GeminiWire implements VoiceWire {
       const cue = responseCue(event)
       this.toolTurn = Boolean(cue.tool)
       this.said = ''
-      this.responseId = `gem-${Date.now()}`
+      this.responseId = `gem-${Date.now()}-${++this.responseSerial}`
       if (!cue.text) return false
-      return this.deliver({
+      const sent = this.deliver({
         clientContent: {
           turns: [{ role: 'user', parts: [{ text: cue.text }] }],
           turnComplete: true,
         },
       })
+      if (!sent) return false
+      // Сервер Gemini не шлёт response.created и не эхомит метку хода.
+      // Провод сообщает свой id без metadata: клиент связывает его с этой отправкой.
+      // Метку turn не выдумываем — инвариант 9, контроллер не чинится под один дамп.
+      this.emit({
+        type: 'response.created',
+        response: { id: this.responseId, status: 'in_progress', output: [] },
+      })
+      return true
     }
     if (type === 'conversation.item.create') {
       const item = asRecord(record.item)

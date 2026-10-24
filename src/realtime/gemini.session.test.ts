@@ -106,6 +106,27 @@ describe('Gemini: длинные сессии — сжатие контекст�
     return socket
   }
 
+  it('ход функции: провод сообщает response.created без метки, done несёт тот же id', async () => {
+    const socket = await liveSession()
+    expect(wire.send({
+      type: 'response.create',
+      response: {
+        instructions: 'Выбери ячейку',
+        tool_choice: { type: 'function', name: 'selectQuestion' },
+        metadata: { purpose: 'select', turn: '5' },
+      },
+    })).toBe(true)
+    const created = received.find((event) => event.type === 'response.created') as { response?: { id?: string; metadata?: unknown } } | undefined
+    expect(created?.response?.id).toMatch(/^gem-/)
+    expect(created?.response?.metadata).toBeUndefined()
+    socket.message({ toolCall: { functionCalls: [{ id: 'c1', name: 'selectQuestion', args: { theme: 'Сказки' } }] } })
+    await vi.advanceTimersByTimeAsync(0)
+    const done = received.find((event) => event.type === 'response.done') as { response?: { id?: string; metadata?: unknown; output?: Array<{ name?: string }> } } | undefined
+    expect(done?.response?.id).toBe(created?.response?.id)
+    expect(done?.response?.metadata).toBeUndefined()
+    expect(done?.response?.output?.[0]?.name).toBe('selectQuestion')
+  })
+
   it('штатное закрытие соединения переподключается последним resumable-токеном', async () => {
     const socket = await liveSession()
     socket.message({ sessionResumptionUpdate: { resumable: true, newHandle: 'tok-1' } })
