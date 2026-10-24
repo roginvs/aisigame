@@ -341,7 +341,15 @@ export function attachController(options: {
       if (keepVoiceSession?.() && hostTalking) armLobbyBargeIn(itemId)
       return
     }
-    if (earlyAnswerCue(path) && hostTalking) {
+    if (earlyAnswerCue(path)) {
+      if (!hostTalking) {
+        // Ход финалиста печатный: у turnCue нет голосового ответа.
+        if (path === 'turnCue') return
+        // Апелляция и «повтори» до первого звука ведущей: окно ответа сразу, ту же фразу несём.
+        earlyAnswer = true
+        actor.send({ type: 'PLAYER_SPEECH_STARTED' })
+        return
+      }
       diag('окно', 'речь поверх обращения ведущей — ждём, не эхо ли', { path, itemId })
       armBargeIn(itemId, () => statePath(actor.getSnapshot().value) === path, 'ответ', () => {
         earlyAnswer = true

@@ -7,7 +7,7 @@ import { getTrace } from '../debug/trace.ts'
 import type { ToolCall } from '../realtime/client.ts'
 import { MockRealtimeClient } from '../realtime/mockClient.ts'
 vi.mock('../audio/beep.ts', () => ({ playTimeoutBeep: vi.fn(), unlockAudio: vi.fn() }))
-import { attachController, mutedMicCue, specialListening, type GameControllerActions } from './controller.ts'
+import { LOBBY_BARGE_IN_MIN_MS, attachController, mutedMicCue, specialListening, type GameControllerActions } from './controller.ts'
 import { jokeCoin } from './jokeCoin.ts'
 import { gameMachine, statePath } from './machine.ts'
 import type { Question, QuestionPack } from './types.ts'
@@ -775,6 +775,95 @@ describe('attachController answer listening', () => {
     expect(statePath(actor.getSnapshot().value)).toBe('answering.settling')
     actions().answerSilentCommit(1, 1400)
     expect(forceInputCommit).toHaveBeenCalledTimes(1)
+
+    stop()
+    actor.stop()
+  })
+
+  async function openAppeal(client: MockRealtimeClient, appealSpeechMs?: number) {
+    const booted = await boot(client)
+    const { actor } = booted
+    actor.send({ type: 'QUESTION_SELECTED', themeId: 'p', value: 400 })
+    await vi.advanceTimersByTimeAsync(gameConfig.cellFlashMs + 80)
+    actor.send({ type: 'BUZZER_PRESSED', playerId: 1 })
+    actor.send({ type: 'PLAYER_SPEECH_FINISHED' })
+    actor.send({ type: 'ANSWER_SETTLED' })
+    const judged = actor.getSnapshot().context
+    actor.send({
+      type: 'ANSWER_JUDGED',
+      judgment: {
+        questionId: judged.activeQuestionId!,
+        playerId: judged.activePlayerId!,
+        attemptId: judged.attemptId,
+        status: 'incorrect',
+        heard: 'мимо',
+        reason: 'не то',
+      },
+    })
+    const appeal = actor.getSnapshot().context.appeal
+    if (!appeal) throw new Error('окно апелляции не открылось')
+    if (appealSpeechMs) client.setSpeechMs(appealSpeechMs)
+    actor.send({ type: 'APPEAL_REQUESTED', questionId: appeal.questionId, windowId: appeal.windowId, playerId: 1, requestId: 'appeal-1' })
+    return booted
+  }
+
+  it('апелляция: речь до звука ведущей сразу открывает ответ и засчитывается', async () => {
+    const client = new MockRealtimeClient()
+    const { actor, stop } = await openAppeal(client)
+    expect(statePath(actor.getSnapshot().value)).toBe('appealCue')
+    client.interruptSpeech('тест: ведущая ещё не начала')
+    client.onSpeechStarted({ itemId: 'appeal-early' })
+    expect(statePath(actor.getSnapshot().value).startsWith('answering')).toBe(true)
+    client.onSpeechStopped({ durationMs: 1200, itemId: 'appeal-early' })
+    client.deliverTranscript('appeal-early', 'ответ')
+    await vi.advanceTimersByTimeAsync(answerSilenceDecideMs + 400)
+    expect(actor.getSnapshot().context.players[0]?.score).toBe(400)
+
+    stop()
+    actor.stop()
+  })
+
+  it('апелляция: пока ведущая уже говорит, ответ по-прежнему ждёт порог перебивания', async () => {
+    const client = new MockRealtimeClient()
+    const { actor, stop } = await openAppeal(client, 10_000)
+    expect(statePath(actor.getSnapshot().value)).toBe('appealCue')
+    client.onSpeechStarted({ itemId: 'appeal-over' })
+    expect(statePath(actor.getSnapshot().value)).toBe('appealCue')
+    await vi.advanceTimersByTimeAsync(LOBBY_BARGE_IN_MIN_MS - 50)
+    expect(statePath(actor.getSnapshot().value)).toBe('appealCue')
+    await vi.advanceTimersByTimeAsync(80)
+    expect(statePath(actor.getSnapshot().value).startsWith('answering')).toBe(true)
+
+    stop()
+    actor.stop()
+  })
+
+  it('повтори до звука ведущей сразу открывает новую попытку', async () => {
+    const client = new MockRealtimeClient()
+    const { actor, stop } = await boot(client)
+    actor.send({ type: 'QUESTION_SELECTED', themeId: 'p', value: 400 })
+    await vi.advanceTimersByTimeAsync(gameConfig.cellFlashMs + 80)
+    actor.send({ type: 'BUZZER_PRESSED', playerId: 1 })
+    actor.send({ type: 'PLAYER_SPEECH_FINISHED' })
+    actor.send({ type: 'ANSWER_SETTLED' })
+    const context = actor.getSnapshot().context
+    actor.send({
+      type: 'ANSWER_JUDGED',
+      judgment: {
+        questionId: context.activeQuestionId!,
+        playerId: context.activePlayerId!,
+        attemptId: context.attemptId,
+        status: 'near_miss',
+        heard: 'почти',
+        reason: 'созвучно',
+      },
+    })
+    expect(statePath(actor.getSnapshot().value)).toBe('announcing.speaking')
+    const attemptBefore = actor.getSnapshot().context.attemptId
+    client.interruptSpeech('тест: обращение ещё не звучит')
+    client.onSpeechStarted({ itemId: 'repeat-early' })
+    expect(statePath(actor.getSnapshot().value).startsWith('answering')).toBe(true)
+    expect(actor.getSnapshot().context.attemptId).toBe(attemptBefore + 1)
 
     stop()
     actor.stop()
