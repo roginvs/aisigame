@@ -204,7 +204,7 @@ export class RealtimeClient {
   onAudioFinished: (info: { purpose: string; turn: number }) => void = () => {}
   onToolCall: (call: ToolCall | null, purpose: string, turn: number) => void = () => {}
   onSpeechStarted: (info?: { itemId: string | null }) => void = () => {}
-  onSpeechStopped: (info: { durationMs: number; itemId: string | null }) => void = () => {}
+  onSpeechStopped: (info: { durationMs: number; itemId: string | null; forced?: boolean }) => void = () => {}
 
   constructor(options: { model?: string; wire?: VoiceWire | null } = {}) {
     this.model = options.model ?? gameConfig.model
@@ -1201,7 +1201,7 @@ export class RealtimeClient {
       const itemId = readItemId(event)
       diag('слух', 'запасной commit принят', { itemId, speechMs: Math.round(forced.durationMs) })
       if (itemId) this.speechStoppedAt.set(itemId, performance.now())
-      this.onSpeechStopped({ durationMs: forced.durationMs, itemId })
+      this.onSpeechStopped({ durationMs: forced.durationMs, itemId, forced: true })
       return
     }
     if (type === 'input_audio_buffer.speech_started') {

@@ -629,6 +629,172 @@ describe('attachController answer listening', () => {
     actor.stop()
   })
 
+  it('запасной commit в ответе принимает синтетический конец, даже если речь началась до открытия попытки', async () => {
+    const client = new MockRealtimeClient()
+    const { actor, stop, actions } = await boot(client)
+    actor.send({ type: 'QUESTION_SELECTED', themeId: 'p', value: 400 })
+    await vi.advanceTimersByTimeAsync(gameConfig.cellFlashMs + 80)
+    actor.send({ type: 'BUZZER_PRESSED', playerId: 1 })
+    expect(statePath(actor.getSnapshot().value)).toBe('answering.waiting')
+
+    actions().answerSilentCommit(1, 1400)
+    // Длительность эпизода уходит раньше arm: без пометки forced такая реплика отбрасывается.
+    client.onSpeechStopped({ durationMs: 1400, itemId: 'fallback-answer', forced: true })
+    expect(statePath(actor.getSnapshot().value)).toBe('answering.settling')
+    expect(getTrace().some((entry) => entry.kind === 'note' && entry.title.includes('в оценку'))).toBe(true)
+
+    stop()
+    actor.stop()
+  })
+
+  it('запасной commit выбора: только выбирающий, один раз за заход в слушание', async () => {
+    const client = new MockRealtimeClient()
+    const forceInputCommit = vi.spyOn(client, 'forceInputCommit')
+    const { actor, stop, actions } = await boot(client)
+    expect(statePath(actor.getSnapshot().value)).toBe('choosing.listening')
+    const chooserId = actor.getSnapshot().context.chooserId
+    const other = chooserId === 1 ? 2 : 1
+
+    actions().answerSilentCommit(other, 1400)
+    actions().answerSilentCommit(chooserId, 300)
+    expect(forceInputCommit).not.toHaveBeenCalled()
+    actions().answerSilentCommit(null, 1400)
+    expect(forceInputCommit).toHaveBeenCalledTimes(1)
+    expect(forceInputCommit).toHaveBeenCalledWith(1400)
+    actions().answerSilentCommit(chooserId, 1400)
+    expect(forceInputCommit).toHaveBeenCalledTimes(1)
+    expect(statePath(actor.getSnapshot().value)).toBe('choosing.listening')
+
+    stop()
+    actor.stop()
+  })
+
+  it('запасной commit кота и ставки — слушающему, на автоставке аукциона при объявлении нет', async () => {
+    const catQuestion: Question = {
+      ...cell('c-200', 'c', 'КОТ', 200),
+      cat: { source: 'cat', theme: '', price: { kind: 'range', min: 100, max: 500, step: 100 }, knows: 'after', options: [100, 500] },
+    }
+    const auctionQuestion: Question = { ...cell('a-200', 'a', 'АУКЦИОН', 200), auction: { source: 'auction' } }
+    const questions = {
+      ...pack,
+      questions: [...pack.questions, catQuestion, auctionQuestion],
+    }
+    const client = new MockRealtimeClient()
+    const forceInputCommit = vi.spyOn(client, 'forceInputCommit')
+    const { actor, stop, actions } = await boot(client, questions)
+    const giverId = actor.getSnapshot().context.chooserId
+    actor.send({ type: 'QUESTION_SELECTED', themeId: 'c', value: 200 })
+    expect(statePath(actor.getSnapshot().value)).toBe('cat.announcing')
+    const stranger = giverId === 1 ? 2 : 1
+    actions().answerSilentCommit(stranger, 1400)
+    expect(forceInputCommit).not.toHaveBeenCalled()
+    actions().answerSilentCommit(giverId, 1400)
+    expect(forceInputCommit).toHaveBeenCalledTimes(1)
+    actions().answerSilentCommit(giverId, 1600)
+    expect(forceInputCommit).toHaveBeenCalledTimes(1)
+
+    const recipientId = [1, 2, 3].find((id) => id !== giverId) ?? 1
+    actor.send({ type: 'CAT_RECIPIENT', playerId: recipientId })
+    expect(statePath(actor.getSnapshot().value)).toBe('cat.staking.asking')
+    actions().answerSilentCommit(giverId, 1400)
+    expect(forceInputCommit).toHaveBeenCalledTimes(1)
+    actions().answerSilentCommit(recipientId, 1400)
+    expect(forceInputCommit).toHaveBeenCalledTimes(2)
+
+    actor.send({ type: 'RESET_GAME' })
+    actor.send({ type: 'START_GAME', pack: questions })
+    await vi.advanceTimersByTimeAsync(80)
+    actor.send({ type: 'QUESTION_SELECTED', themeId: 'a', value: 200 })
+    expect(statePath(actor.getSnapshot().value)).toBe('auction.announcing')
+    expect(actor.getSnapshot().context.special?.autoStake).toBe(true)
+    const beforeAuto = forceInputCommit.mock.calls.length
+    actions().answerSilentCommit(null, 1400)
+    actions().answerSilentCommit(actor.getSnapshot().context.chooserId, 1400)
+    expect(forceInputCommit.mock.calls.length).toBe(beforeAuto)
+
+    actor.send({ type: 'RESET_GAME' })
+    actor.send({
+      type: 'START_GAME',
+      pack: questions,
+      players: [
+        { id: 1, name: 'Игрок 1', score: 0 },
+        { id: 2, name: 'Игрок 2', score: 5000 },
+        { id: 3, name: 'Игрок 3', score: 0 },
+      ],
+    })
+    await vi.advanceTimersByTimeAsync(80)
+    const openerId = actor.getSnapshot().context.chooserId
+    actor.send({ type: 'QUESTION_SELECTED', themeId: 'a', value: 200 })
+    expect(statePath(actor.getSnapshot().value)).toBe('auction.announcing')
+    expect(actor.getSnapshot().context.special?.autoStake).toBe(false)
+    actions().answerSilentCommit(openerId === 1 ? 3 : 1, 1400)
+    expect(forceInputCommit).toHaveBeenCalledTimes(beforeAuto)
+    actions().answerSilentCommit(openerId, 1400)
+    expect(forceInputCommit).toHaveBeenCalledTimes(beforeAuto + 1)
+
+    stop()
+    actor.stop()
+  })
+
+  it('запасной commit на «повтори» открывает попытку и принимает синтетический конец', async () => {
+    const client = new MockRealtimeClient()
+    const forceInputCommit = vi.spyOn(client, 'forceInputCommit')
+    const interrupt = vi.spyOn(client, 'interruptSpeech')
+    const { actor, stop, actions } = await boot(client)
+    actor.send({ type: 'QUESTION_SELECTED', themeId: 'p', value: 400 })
+    await vi.advanceTimersByTimeAsync(gameConfig.cellFlashMs + 80)
+    actor.send({ type: 'BUZZER_PRESSED', playerId: 1 })
+    actor.send({ type: 'PLAYER_SPEECH_FINISHED' })
+    actor.send({ type: 'ANSWER_SETTLED' })
+    const context = actor.getSnapshot().context
+    actor.send({
+      type: 'ANSWER_JUDGED',
+      judgment: {
+        questionId: context.activeQuestionId!,
+        playerId: context.activePlayerId!,
+        attemptId: context.attemptId,
+        status: 'near_miss',
+        heard: 'почти',
+        reason: 'созвучно',
+      },
+    })
+    expect(statePath(actor.getSnapshot().value)).toBe('announcing.speaking')
+    expect(actor.getSnapshot().context.announceKind).toBe('repeat')
+    const attemptBefore = actor.getSnapshot().context.attemptId
+    interrupt.mockClear()
+
+    actions().answerSilentCommit(2, 1400)
+    expect(forceInputCommit).not.toHaveBeenCalled()
+    expect(statePath(actor.getSnapshot().value)).toBe('announcing.speaking')
+    actions().answerSilentCommit(1, 1400)
+    expect(statePath(actor.getSnapshot().value).startsWith('answering')).toBe(true)
+    expect(actor.getSnapshot().context.attemptId).toBe(attemptBefore + 1)
+    expect(forceInputCommit).toHaveBeenCalledTimes(1)
+    expect(interrupt).toHaveBeenCalledWith('запасной commit: речь до конца обращения')
+    client.onSpeechStopped({ durationMs: 1400, itemId: 'fallback-repeat', forced: true })
+    expect(statePath(actor.getSnapshot().value)).toBe('answering.settling')
+    actions().answerSilentCommit(1, 1400)
+    expect(forceInputCommit).toHaveBeenCalledTimes(1)
+
+    stop()
+    actor.stop()
+  })
+
+  it('запасной commit не срабатывает в окне кнопки', async () => {
+    const client = new MockRealtimeClient()
+    const forceInputCommit = vi.spyOn(client, 'forceInputCommit')
+    const { actor, stop, actions } = await boot(client)
+    actor.send({ type: 'QUESTION_SELECTED', themeId: 'p', value: 400 })
+    await vi.advanceTimersByTimeAsync(gameConfig.cellFlashMs + 80)
+    expect(statePath(actor.getSnapshot().value)).toBe('buzzing.open')
+    actions().answerSilentCommit(1, 1400)
+    actions().answerSilentCommit(null, 1400)
+    expect(forceInputCommit).not.toHaveBeenCalled()
+
+    stop()
+    actor.stop()
+  })
+
   it('два одинаковых имени: чат другого игрока и участника без игрового id не засчитывается', async () => {
     const client = new MockRealtimeClient()
     const { actor, stop, actions } = await boot(client)

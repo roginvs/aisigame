@@ -160,8 +160,14 @@ export function attachController(options: {
   let answerTurn: AnswerUtterance[] = []
   let answerTurnAttempt: number | null = null
   let answerSeq = 0
-  /** Запасной commit сделан максимум один на попытку (fa584db п. 1). */
-  let fallbackCommitAttempt: number | null = null
+  /** Запасной commit: один на окно (`a:` попытка, `c:` выбор, `s:` кот/аукцион). */
+  let fallbackCommitKey: string | null = null
+  /**
+   * Попытка, которую открыл запасной commit. Синтетический конец речи принимаем
+   * только в неё: поздний commit выбора не должен засчитать уже новую попытку,
+   * а речь, начатая до arm (просьба повторить), — должна.
+   */
+  let fallbackArmedAttempt: number | null = null
 
   /** Долгая реплика с живым VAD, которую модель не разобрала: от 1,5 с «слегка», от 2,5 с «сильно». */
   function suspicionOverUnintelligible(durationMs: number, label: string, detail: Record<string, unknown>): void {
@@ -384,7 +390,7 @@ export function attachController(options: {
       actor.send({ type: 'PLAYER_SPEECH_STARTED' })
     }
   }
-  client.onSpeechStopped = ({ durationMs, itemId }) => {
+  client.onSpeechStopped = ({ durationMs, itemId, forced }) => {
     const path = statePath(actor.getSnapshot().value)
     if (path === 'stopped' || path === 'paused') return
     // Разбор без перехода (эхо, шум, чужая попытка, лобби) гасит ухо сам; переход гасит подписка.
@@ -422,7 +428,7 @@ export function attachController(options: {
       return
     }
     if (path === 'answering.waiting' || path === 'answering.hearing' || path === 'answering.settling') {
-      if (!acceptAnswerSpeech(durationMs, itemId, speechStartedAt)) {
+      if (!acceptAnswerSpeech(durationMs, itemId, speechStartedAt, forced)) {
         client.suppressPlayerChat(itemId)
         settle()
         return
@@ -445,6 +451,16 @@ export function attachController(options: {
     }
     if (deferredBargeIn(path)) {
       clearLobbyBargeIn()
+      // Запасной commit на переспросе: реплику разбираем сразу. Подтверждение
+      // barge-in ждёт расшифровку и при пустой бросает фразу, хотя звук уже в буфере.
+      if (forced && path === 'choosing.clarifying') {
+        settle(considerChoice(durationMs, itemId))
+        return
+      }
+      if (forced && specialClarifying(path)) {
+        settle(considerSpecial(path, durationMs, itemId))
+        return
+      }
       settle(confirmBargeIn(path, durationMs, itemId))
       return
     }
@@ -1069,9 +1085,14 @@ export function attachController(options: {
    * Речь ответа своей попытки: после открытия попытки, с окна кнопки,
    * или та же utterance, что уже шла в момент buzz.
    */
-  function acceptAnswerSpeech(durationMs: number, itemId: string | null, speechStartedAt: number): boolean {
+  function acceptAnswerSpeech(durationMs: number, itemId: string | null, speechStartedAt: number, forced = false): boolean {
     if (!answerAttemptLive()) {
       pushTrace('note', 'поздняя речь ответа отброшена: чужая попытка')
+      return false
+    }
+    if (forced) {
+      if (fallbackArmedAttempt === actor.getSnapshot().context.attemptId) return true
+      pushTrace('note', 'запасной commit не этой попытки — реплику не беру')
       return false
     }
     if (answerCarryItemId && itemId && itemId === answerCarryItemId) return true
@@ -2191,30 +2212,85 @@ export function attachController(options: {
   }
 
   /**
-   * Запасной commit (план fa584db п. 1): модельная VAD промахнулась и `speech_started` не приходила,
-   * а уровни Jitsi видели реплику того, чей ход, и она закончилась. Коммитим буфер сами: клиент
-   * делает `input_audio_buffer.commit` и по `committed` отдаёт синтетический конец речи — реплика
-   * идёт обычным путём попытки (транскрипт/аудио-судья, счёт меняет машина). Максимум один на попытку.
+   * Кто сейчас должен говорить и ключ «один commit на это окно».
+   * Неопознанный участник — тот, кого ждём. Чужой игрок, окно кнопки, финал и автоставка — нет.
    */
-  function answerSilentCommit(playerId: number | null, durationMs: number): void {
-    const snapshot = actor.getSnapshot()
-    const path = statePath(snapshot.value)
-    if (!path.startsWith('answering')) return
-    const context = snapshot.context
-    // Реплика от неопознанного участника: во время попытки это почти наверняка активный игрок.
-    if (playerId === null) playerId = context.activePlayerId
-    if (context.activePlayerId !== playerId) return
-    if (!answerAttemptLive()) return
-    if (durationMs < fallbackCommitMinMs) return
-    // Модель в этот момент уже слушает эту реплику (speech_started была) или коммитил в этой попытке.
-    if (openSpeechItemId !== null || fallbackCommitAttempt === context.attemptId) return
-    if (!client.forceInputCommit(durationMs)) return
-    fallbackCommitAttempt = context.attemptId
+  function fallbackSlot(path: string, context: GameContext, playerId: number | null): { key: string; playerId: number; attemptId: number | null; rearm: boolean } | null {
+    if (path.startsWith('answering')) {
+      const speaker = playerId ?? context.activePlayerId
+      if (speaker === null || speaker !== context.activePlayerId || !answerAttemptLive()) return null
+      return { key: `a:${context.attemptId}`, playerId: speaker, attemptId: context.attemptId, rearm: false }
+    }
+    if (path === 'choosing.listening' || path === 'choosing.clarifying') {
+      const speaker = playerId ?? context.chooserId
+      if (speaker !== context.chooserId) return null
+      return { key: `c:${choiceEpoch}`, playerId: speaker, attemptId: null, rearm: false }
+    }
+    if (specialListening(path) || specialClarifying(path)) {
+      const special = context.special
+      if (special?.kind === 'auction' && special.autoStake && path === 'auction.announcing') return null
+      const listener = specialListenerId(path, context)
+      if (listener === null) return null
+      const speaker = playerId ?? listener
+      if (speaker !== listener) return null
+      return { key: `s:${specialEpoch}`, playerId: speaker, attemptId: null, rearm: false }
+    }
+    // Просьба повторить: окно ответа ещё не открыто, речь по уровню уже кончилась.
+    if (isAnnounceSpeakingPath(path) && context.announceKind === 'repeat' && !context.appeal?.activePlayerId) {
+      const speaker = playerId ?? context.activePlayerId
+      if (speaker === null || speaker !== context.activePlayerId) return null
+      return { key: '', playerId: speaker, attemptId: null, rearm: true }
+    }
+    return null
+  }
+
+  function commitFallback(key: string, playerId: number, durationMs: number, attemptId: number | null): boolean {
+    if (!client.forceInputCommit(durationMs)) return false
+    fallbackCommitKey = key
+    if (attemptId !== null) fallbackArmedAttempt = attemptId
     pushTrace('note', 'модель молчит, микрофонный уровень показал реплику — делаем запасной commit', {
       playerId,
-      attemptId: context.attemptId,
+      attemptId,
       speechMs: Math.round(durationMs),
+      window: key,
     })
+    return true
+  }
+
+  /**
+   * Запасной commit (план fa584db п. 1): модельная VAD промахнулась и `speech_started` не приходила,
+   * а уровни Jitsi видели реплику того, кто сейчас говорит, и она закончилась. Коммитим буфер сами:
+   * клиент делает `input_audio_buffer.commit` и по `committed` отдаёт синтетический конец речи.
+   * Окна: ответ, выбор ячейки, кот, ставка аукциона, просьба повторить. Один commit на окно.
+   * Уже открытую моделью реплику не коммитим второй раз. На «повтори» сначала открываем попытку,
+   * иначе синтетический конец придёт в объявление и пропадёт.
+   */
+  function answerSilentCommit(playerId: number | null, durationMs: number): void {
+    if (durationMs < fallbackCommitMinMs) return
+    // Модель уже слушает эту реплику (speech_started была) — второй commit даст пустой item.
+    if (openSpeechItemId !== null) return
+    const snapshot = actor.getSnapshot()
+    const path = statePath(snapshot.value)
+    const context = snapshot.context
+    const slot = fallbackSlot(path, context, playerId)
+    if (!slot) return
+    if (!slot.rearm && fallbackCommitKey === slot.key) return
+    if (slot.rearm) {
+      earlyAnswer = true
+      client.interruptSpeech('запасной commit: речь до конца обращения')
+      actor.send({ type: 'PLAYER_SPEECH_STARTED' })
+      const next = actor.getSnapshot()
+      if (!statePath(next.value).startsWith('answering')) {
+        earlyAnswer = false
+        return
+      }
+      const attemptId = next.context.attemptId
+      const key = `a:${attemptId}`
+      if (fallbackCommitKey === key) return
+      commitFallback(key, slot.playerId, durationMs, attemptId)
+      return
+    }
+    commitFallback(slot.key, slot.playerId, durationMs, slot.attemptId)
   }
 
   /**

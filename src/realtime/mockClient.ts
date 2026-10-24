@@ -46,7 +46,7 @@ export class MockRealtimeClient implements GameVoice {
   onAudioFinished: (info: { purpose: string; turn: number }) => void = () => {}
   onToolCall: (call: ToolCall | null, purpose: string, turn: number) => void = () => {}
   onSpeechStarted: (info?: { itemId: string | null }) => void = () => {}
-  onSpeechStopped: (info: { durationMs: number; itemId: string | null }) => void = () => {}
+  onSpeechStopped: (info: { durationMs: number; itemId: string | null; forced?: boolean }) => void = () => {}
 
   private audioItems = new AudioItems()
   private audioTexts = new Map<string, string>()

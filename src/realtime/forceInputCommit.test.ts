@@ -49,7 +49,7 @@ describe('запасной commit: модель молчит, коммитим �
     expect(stopped).not.toHaveBeenCalled()
     feed({ type: 'input_audio_buffer.committed', item_id: 'item-9' })
     expect(stopped).toHaveBeenCalledTimes(1)
-    expect(stopped).toHaveBeenCalledWith({ durationMs: 1400, itemId: 'item-9' })
+    expect(stopped).toHaveBeenCalledWith({ durationMs: 1400, itemId: 'item-9', forced: true })
     // Обычный коммит серверной VAD (не наш) ничего не синтезирует.
     feed({ type: 'input_audio_buffer.committed', item_id: 'item-10' })
     expect(stopped).toHaveBeenCalledTimes(1)
@@ -82,7 +82,7 @@ describe('запасной commit: модель молчит, коммитим �
     expect(client.forceInputCommit(1400)).toBe(true)
     expect(send).toHaveBeenCalledWith({ type: 'input_audio_buffer.commit' })
     harness(client).handleMessage(JSON.stringify({ type: 'input_audio_buffer.committed', item_id: 'q1' }))
-    expect(stopped).toHaveBeenCalledWith({ durationMs: 1400, itemId: 'q1' })
+    expect(stopped).toHaveBeenCalledWith({ durationMs: 1400, itemId: 'q1', forced: true })
   })
 
   it('сброс аудиобуфера снимает ожидание commit: поздний committed не становится ответом', () => {
@@ -95,7 +95,7 @@ describe('запасной commit: модель молчит, коммитим �
     expect(stopped).not.toHaveBeenCalled()
     expect(client.forceInputCommit(1600)).toBe(true)
     feed({ type: 'input_audio_buffer.committed', item_id: 'new' })
-    expect(stopped).toHaveBeenCalledExactlyOnceWith({ durationMs: 1600, itemId: 'new' })
+    expect(stopped).toHaveBeenCalledExactlyOnceWith({ durationMs: 1600, itemId: 'new', forced: true })
   })
 
   it('закрытие сессии снимает незавершённый commit перед новым подключением', () => {
