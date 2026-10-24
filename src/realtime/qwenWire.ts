@@ -1,4 +1,5 @@
 import { hostInstructions } from '../config.ts'
+import { readIsolateSessionHistory } from './models.ts'
 import { gameAudioContext } from '../audio/beep.ts'
 import { createSilentMicStream } from './pcm.ts'
 import { sessionTools } from './tools.ts'
@@ -16,8 +17,9 @@ import type { VoiceOpenOptions, VoiceSink, VoiceWire } from './wire.ts'
  * — response.create у DashScope «голый»: инструкции хода у него только в сессии,
  *   поэтому ход = conversation.item.create (реплика-подсказка) + session.update
  *   (инструкции хода в сессию) + response.create без payload;
- * — изолированных ответов conversation:none у него нет: контекст партии модель видит весь,
- *   подсказки ходов написаны самодостаточно, но оценку надо проверять на живой партии;
+ * — изолированных ответов conversation:none у него нет. Чтение и оценка при флаге
+ *   `isolateSessionHistory` не кладут текст в conversation.item.create: он только
+ *   в инструкциях сессии и заменяется следующим ходом. Выключение флага возвращает item;
  * — расшифровка игрока идёт с окном text+stash — переводим в OpenAI-поле transcript;
  * — доп. поля turn_detection (create_response/interrupt_response) не документированы
  *   для клиента: шлём их, а при ошибке сервера повторяем обновление без них;
@@ -64,8 +66,11 @@ export function qwenSessionBody(
 
 export type QwenOutbound = { events: object[]; clearOutput?: boolean; drop?: boolean }
 
+/** Чтение и оценка: в тексте вопрос или эталон. В историю сессии их не кладём. */
+const sessionIsolatedPurposes = new Set(['read', 'judge', 'finalJudge'])
+
 /** Ход модели в DashScope: событие OpenAI-формы → очередь событий провода. */
-export function qwenTranslateOutbound(event: object, options: { vadExtras?: boolean } = {}): QwenOutbound {
+export function qwenTranslateOutbound(event: object, options: { vadExtras?: boolean; isolateHistory?: boolean } = {}): QwenOutbound {
   const record = asRecord(event)
   const type = text(record.type)
   if (type === 'session.update') {
@@ -85,15 +90,18 @@ export function qwenTranslateOutbound(event: object, options: { vadExtras?: bool
   if (type === 'response.create') {
     const response = asRecord(record.response)
     const modalities = responseOnlyText(response) ? ['text'] : ['text', 'audio']
-    const instructions = text(response.instructions) || hostInstructions
     const message = inputTextOf(response.input)
+    const purpose = text(asRecord(response.metadata).purpose)
+    // Пустой флаг — включено. Текст хода только в инструкциях сессии: следующий ход их заменит.
+    const isolate = options.isolateHistory !== false && sessionIsolatedPurposes.has(purpose)
+    const instructions = text(response.instructions) || hostInstructions
     // Обращение «Имя, отвечайте» — единственная реплика, по правилам игры обрываемая речью
     // отвечающего без порогов: в этом ходе разрешаем серверу видеть речь во время output
     // и обрывать его самому (полудуплекс DashScope иначе не отдаёт speech_started, пока
     // звучит обращение; микс модели всё равно слышит только отвечающего).
-    const interruptResponse = text(asRecord(response.metadata).purpose) === 'buzzCall'
+    const interruptResponse = purpose === 'buzzCall'
     const events: object[] = []
-    if (message) {
+    if (message && !isolate) {
       events.push({
         type: 'conversation.item.create',
         item: { type: 'message', role: 'user', content: [{ type: 'input_text', text: message }] },
@@ -102,7 +110,7 @@ export function qwenTranslateOutbound(event: object, options: { vadExtras?: bool
     events.push({
       type: 'session.update',
       session: qwenSessionBody({
-        instructions,
+        instructions: isolate && message ? `${instructions}\n\n${message}` : instructions,
         modalities,
         tools: Array.isArray(response.tools) ? response.tools : undefined,
         vadExtras: options.vadExtras,
@@ -427,7 +435,10 @@ export class QwenWire implements VoiceWire {
   }
 
   send(event: object): boolean {
-    const outbound = qwenTranslateOutbound(event, { vadExtras: !this.vadExtrasBroken })
+    const outbound = qwenTranslateOutbound(event, {
+      vadExtras: !this.vadExtrasBroken,
+      isolateHistory: readIsolateSessionHistory(),
+    })
     if (outbound.drop) return true
     let ok = true
     for (const item of outbound.events) {

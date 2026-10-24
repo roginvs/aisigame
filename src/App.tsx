@@ -61,11 +61,13 @@ import {
   hrefAfterModelSwitch,
   markModelSwitch,
   readProviderKey,
+  readIsolateSessionHistory,
   readQwenEndpoint,
   readQwenRelay,
   readVoiceModelId,
   takeModelSwitchNotice,
   voiceById,
+  writeIsolateSessionHistory,
   writeProviderKey,
   writeQwenEndpoint,
   writeQwenRelay,
@@ -134,6 +136,7 @@ export default function App() {
   const [qwenKey, setQwenKey] = useState(() => readProviderKey('qwen'))
   const [qwenEndpoint, setQwenEndpoint] = useState(() => readQwenEndpoint())
   const [qwenRelay, setQwenRelay] = useState(() => readQwenRelay())
+  const [isolateHistory, setIsolateHistory] = useState(() => readIsolateSessionHistory())
   const [showKey, setShowKey] = useState(false)
   const [link, setLink] = useState<LinkStatus>(initialLink)
   const catalogIds = packCatalog.map((item) => item.id)
@@ -1267,6 +1270,11 @@ export default function App() {
         onQwenEndpoint={rememberQwenEndpoint}
         qwenRelay={qwenRelay}
         onQwenRelay={rememberQwenRelay}
+        isolateHistory={isolateHistory}
+        onIsolateHistory={(enabled) => {
+          setIsolateHistory(enabled)
+          writeIsolateSessionHistory(enabled)
+        }}
         onToggleKey={() => setShowKey((value) => !value)}
         onClearKey={() => rememberKey('')}
         onPack={choosePack}

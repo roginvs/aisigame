@@ -1,4 +1,5 @@
 import { hostInstructions, withoutHostRules } from '../config.ts'
+import { readIsolateSessionHistory } from './models.ts'
 import { base64ToPcm, pcmToBase64, PcmMic, PcmPlayer } from './pcm.ts'
 import { sessionTools } from './tools.ts'
 import type { VoiceSink, VoiceWire } from './wire.ts'
@@ -112,6 +113,75 @@ export function responseCue(event: object): { text: string; tool: string } {
   return { text: parts.join('\n').trim(), tool }
 }
 
+/** Чтение и оценка: вопрос или эталон. В историю clientContent их не кладём. */
+const sessionIsolatedPurposes = new Set(['read', 'judge', 'finalJudge'])
+
+export function geminiBaseInstruction(): string {
+  return `${hostInstructions}\n\n${geminiTempoRule}`
+}
+
+function geminiIsolatedTrigger(tool: string): string {
+  if (tool) return `Выполни инструкцию этого хода и вызови ${tool}. Текст инструкции игрокам не зачитывай.`
+  return 'Зачитай игрокам текст этого хода из инструкции, символ в символ, и ничего больше.'
+}
+
+export type GeminiTurnPlan = {
+  messages: object[]
+  /** Инструкция сессии заменена текстом хода: следующий обычный ход её вернёт. */
+  isolated: boolean
+}
+
+/**
+ * Ход Gemini 3.8. Чтение и оценка при флаге кладут текст в systemInstruction
+ * (`contextUpdate` — она заменяется следующим ходом), а в историю уходит короткая команда.
+ * Обычный ход после такого возвращает базовую инструкцию ведущей.
+ */
+export function geminiOutboundTurns(
+  event: object,
+  options: { isolateHistory: boolean; historyIsolated: boolean },
+): GeminiTurnPlan {
+  const record = asRecord(event)
+  if (text(record.type) !== 'response.create') return { messages: [], isolated: options.historyIsolated }
+  const response = asRecord(record.response)
+  const cue = responseCue(event)
+  if (!cue.text) return { messages: [], isolated: options.historyIsolated }
+  const purpose = text(asRecord(response.metadata).purpose)
+  const isolate = options.isolateHistory && sessionIsolatedPurposes.has(purpose)
+  if (isolate) {
+    return {
+      isolated: true,
+      messages: [
+        {
+          contextUpdate: {
+            systemInstruction: { parts: [{ text: `${geminiBaseInstruction()}\n\n${cue.text}` }] },
+          },
+        },
+        {
+          clientContent: {
+            turns: [{ role: 'user', parts: [{ text: geminiIsolatedTrigger(cue.tool) }] }],
+            turnComplete: true,
+          },
+        },
+      ],
+    }
+  }
+  const messages: object[] = []
+  if (options.historyIsolated) {
+    messages.push({
+      contextUpdate: {
+        systemInstruction: { parts: [{ text: geminiBaseInstruction() }] },
+      },
+    })
+  }
+  messages.push({
+    clientContent: {
+      turns: [{ role: 'user', parts: [{ text: cue.text }] }],
+      turnComplete: true,
+    },
+  })
+  return { messages, isolated: false }
+}
+
 export class GeminiWire implements VoiceWire {
   private sink: VoiceSink | null = null
   private socket: WebSocket | null = null
@@ -127,6 +197,8 @@ export class GeminiWire implements VoiceWire {
   private names = new Map<string, string>()
   private usage: Loose | null = null
   private toolTurn = false
+  /** Прошлый ход заменил systemInstruction текстом чтения или оценки. */
+  private historyIsolated = false
   private readonly model: string
   private readonly thinking: boolean
   /** Текущий токен восстановления: сервер обновляет его в sessionResumptionUpdate. */
@@ -169,6 +241,7 @@ export class GeminiWire implements VoiceWire {
     this.reconnectAttempts = 0
     this.outbox = []
     this.responseId = ''
+    this.historyIsolated = false
     this.said = ''
     this.heard = ''
     this.heardId = null
@@ -200,17 +273,18 @@ export class GeminiWire implements VoiceWire {
     }
     if (type === 'response.create') {
       const cue = responseCue(event)
+      const plan = geminiOutboundTurns(event, {
+        isolateHistory: readIsolateSessionHistory(),
+        historyIsolated: this.historyIsolated,
+      })
       this.toolTurn = Boolean(cue.tool)
       this.said = ''
       this.responseId = `gem-${Date.now()}-${++this.responseSerial}`
-      if (!cue.text) return false
-      const sent = this.deliver({
-        clientContent: {
-          turns: [{ role: 'user', parts: [{ text: cue.text }] }],
-          turnComplete: true,
-        },
-      })
-      if (!sent) return false
+      if (!cue.text || plan.messages.length === 0) return false
+      for (const message of plan.messages) {
+        if (!this.deliver(message)) return false
+      }
+      this.historyIsolated = plan.isolated
       // Сервер Gemini не шлёт response.created и не эхомит метку хода.
       // Провод сообщает свой id без metadata: клиент связывает его с этой отправкой.
       // Метку turn не выдумываем — инвариант 9, контроллер не чинится под один дамп.

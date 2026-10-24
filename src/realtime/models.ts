@@ -116,3 +116,28 @@ export function readQwenRelay(storage: Storage = localStorage): string {
 export function writeQwenRelay(value: string, storage: Storage = localStorage): void {
   storage.setItem(qwenRelayStorageKey, value)
 }
+
+/**
+ * Не копить текст чтения и оценки в истории сессии Qwen и Gemini.
+ * Пустое значение — включено. «0» — выключено, ход снова пишется в историю.
+ * OpenAI и Grok не читают этот флаг: у них ход и так вне основной истории.
+ */
+export const isolateSessionHistoryKey = 'aisigame.isolateSessionHistory'
+
+export function readIsolateSessionHistory(storage?: Pick<Storage, 'getItem'>): boolean {
+  try {
+    const store = storage ?? globalThis.localStorage
+    return store.getItem(isolateSessionHistoryKey) !== '0'
+  } catch {
+    return true
+  }
+}
+
+export function writeIsolateSessionHistory(enabled: boolean, storage?: Pick<Storage, 'setItem'>): void {
+  try {
+    const store = storage ?? globalThis.localStorage
+    store.setItem(isolateSessionHistoryKey, enabled ? '1' : '0')
+  } catch {
+    // Текущая страница всё равно держит переключатель в состоянии.
+  }
+}

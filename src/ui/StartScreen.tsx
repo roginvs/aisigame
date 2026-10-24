@@ -31,6 +31,8 @@ export function StartScreen(props: {
   onQwenEndpoint: (value: string) => void
   qwenRelay: string
   onQwenRelay: (value: string) => void
+  isolateHistory: boolean
+  onIsolateHistory: (enabled: boolean) => void
   onToggleKey: () => void
   onClearKey: () => void
   onPack: (id: string) => void
@@ -73,6 +75,8 @@ export function StartScreen(props: {
     onQwenEndpoint,
     qwenRelay,
     onQwenRelay,
+    isolateHistory,
+    onIsolateHistory,
     onToggleKey,
     onClearKey,
     onPack,
@@ -229,6 +233,20 @@ export function StartScreen(props: {
                       DashScope не пускает браузер напрямую (нет CORS), поэтому обмен SDP идёт через релей:
                       «/qwen-relay» под dev-сервером этого проекта или адрес своего Worker (deploy — relay/README.md).
                       Пусто — прямой вызов, без релея сайт не подключится.
+                    </p>
+                  </>
+                ) : null}
+                {voiceById(modelId).provider === 'qwen' || voiceById(modelId).provider === 'google' ? (
+                  <>
+                    <div className="row">
+                      <button type="button" className="ghost" onClick={() => onIsolateHistory(!isolateHistory)}>
+                        {isolateHistory ? 'Вопрос и эталон не копятся в истории' : 'Вопрос и эталон остаются в истории'}
+                      </button>
+                    </div>
+                    <p className="status-line">
+                      Только Qwen и Gemini, включено по умолчанию. Текст чтения и оценки живёт в инструкции
+                      этого хода и заменяется следующим. OpenAI и Grok так уже устроены и кнопку не показывают.
+                      Выключите, если на чтении или оценке модель молчит.
                     </p>
                   </>
                 ) : null}

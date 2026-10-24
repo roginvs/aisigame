@@ -10,6 +10,8 @@ import {
   takeModelSwitchNotice,
   voiceById,
   voiceModelStorageKey,
+  readIsolateSessionHistory,
+  writeIsolateSessionHistory,
   writeProviderKey,
   writeVoiceModelId,
 } from './models.ts'
@@ -53,6 +55,15 @@ describe('voice models', () => {
     expect(keyFieldLabel('google')).toBe('Ключ Google')
     expect(voiceById('gemini-3.8-live-extended-thinking').thinking).toBe(true)
     expect(voiceById('mock').provider).toBe('mock')
+  })
+
+  it('изоляция истории Qwen и Gemini включена, пока её явно не выключили', () => {
+    const storage = memory()
+    expect(readIsolateSessionHistory(storage)).toBe(true)
+    writeIsolateSessionHistory(false, storage)
+    expect(readIsolateSessionHistory(storage)).toBe(false)
+    writeIsolateSessionHistory(true, storage)
+    expect(readIsolateSessionHistory(storage)).toBe(true)
   })
 
   it('смена модели в партии убирает mock из адреса и оставляет пометку на один заход', () => {

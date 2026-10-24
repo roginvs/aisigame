@@ -5,6 +5,7 @@ import { getTrace } from '../debug/trace.ts'
 import { RealtimeClient } from './client.ts'
 import { outputFlushWaitMs } from './playback.ts'
 import { eventsFromDebugDump, translateReplayInbound, type ReplayWire } from './replayDump.ts'
+import { geminiOutboundTurns } from './geminiWire.ts'
 import { qwenTranslateOutbound } from './qwenWire.ts'
 
 /**
@@ -249,5 +250,69 @@ describe('чтение на 70%', () => {
     expect(finished).toEqual(['read'])
     expect(sent.filter((event) => event.type === 'response.create')).toHaveLength(2)
     expect(notesSince(cursor).some((title) => title.startsWith('модель не прочитала'))).toBe(false)
+  })
+})
+
+describe('история чтения и оценки', () => {
+  const cell = 'Сколько струн у скрипки?'
+  const etalon = 'Эталон пакета: четыре струны.'
+
+  function typeOf(event: object): string {
+    return 'type' in event && typeof event.type === 'string' ? event.type : ''
+  }
+
+  it('Qwen: вопрос и эталон только в инструкции сессии, выключение флага возвращает item', () => {
+    const read = {
+      type: 'response.create',
+      response: {
+        metadata: { purpose: 'read', turn: '1' },
+        instructions: 'Зачитай вопрос',
+        input: [{ type: 'message', role: 'user', content: [{ type: 'input_text', text: cell }] }],
+      },
+    }
+    const on = qwenTranslateOutbound(read)
+    expect(on.events.some((event) => typeOf(event) === 'conversation.item.create')).toBe(false)
+    expect(JSON.stringify(on.events)).toContain(cell)
+    const off = qwenTranslateOutbound(read, { isolateHistory: false })
+    expect(off.events.some((event) => typeOf(event) === 'conversation.item.create')).toBe(true)
+    const judge = {
+      type: 'response.create',
+      response: {
+        metadata: { purpose: 'judge', turn: '2' },
+        output_modalities: ['text'],
+        tool_choice: { type: 'function', name: 'submitAnswerJudgment' },
+        instructions: etalon,
+      },
+    }
+    const judged = qwenTranslateOutbound(judge)
+    expect(judged.events.some((event) => typeOf(event) === 'conversation.item.create')).toBe(false)
+    expect(JSON.stringify(judged.events)).toContain(etalon)
+  })
+
+  it('Gemini: вопрос в systemInstruction, в историю — команда без вопроса; следующий ход инструкцию возвращает', () => {
+    const read = {
+      type: 'response.create',
+      response: {
+        metadata: { purpose: 'read', turn: '1' },
+        instructions: 'Зачитай',
+        input: [{ type: 'message', role: 'user', content: [{ type: 'input_text', text: cell }] }],
+      },
+    }
+    const plan = geminiOutboundTurns(read, { isolateHistory: true, historyIsolated: false })
+    expect(plan.isolated).toBe(true)
+    expect(JSON.stringify(plan.messages[0])).toContain(cell)
+    expect(JSON.stringify(plan.messages[1])).not.toContain(cell)
+    expect(JSON.stringify(plan.messages[1])).toContain('Зачитай игрокам')
+    const next = geminiOutboundTurns({
+      type: 'response.create',
+      response: { metadata: { purpose: 'announce', turn: '2' }, instructions: 'Верно, Вася' },
+    }, { isolateHistory: true, historyIsolated: true })
+    expect(next.isolated).toBe(false)
+    expect(JSON.stringify(next.messages[0])).toContain('contextUpdate')
+    expect(JSON.stringify(next.messages[0])).not.toContain(cell)
+    const kept = geminiOutboundTurns(read, { isolateHistory: false, historyIsolated: false })
+    expect(kept.isolated).toBe(false)
+    expect(JSON.stringify(kept.messages)).toContain(cell)
+    expect(kept.messages.some((message) => 'contextUpdate' in message)).toBe(false)
   })
 })
