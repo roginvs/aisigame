@@ -144,7 +144,7 @@ export function attachController(options: {
   /** Когда открыли эту попытку: речь, начавшаяся раньше, отбрасывается (кроме carry). */
   let answerArmedAt = 0
   let liveSpeechItemId: string | null = null
-  /** Речь, уже шедшая в момент кнопки / buzz: засчитываем в эту попытку. */
+  /** Ранний ответ («повтори», апелляция): ту же фразу несём в попытку. Кнопка так не делает. */
   let answerCarryItemId: string | null = null
   let openSpeechItemId: string | null = null
   let openSpeechStartedAt = 0
@@ -219,6 +219,13 @@ export function attachController(options: {
   }
 
   let buzzerEarAt = 0
+  /** Реплики, сказанные до нажатия этой кнопки: в чат с пометкой, в оценку не идут. */
+  const preButtonItems = new Set<string>()
+  const filedBeforeButton = new Set<string>()
+  const heardBeforeButton: string[] = []
+  let beforeButtonRemark: string | null = null
+  let beforeButtonRemarkUsed = false
+  let buzzCueSent = false
   /** Свежая речь на выборе / ответе — не долбить подсказкой «мик выкл.». */
   let lastAnswerSpeechAt = 0
   let overRead = false
@@ -412,7 +419,7 @@ export function attachController(options: {
     lateTexts.set(itemId, text)
     tryLateCredits()
   }
-  client.onSpeechStopped = ({ durationMs, itemId, forced }) => {
+  client.onSpeechStopped = ({ durationMs, itemId, forced, beforeButton }) => {
     const path = statePath(actor.getSnapshot().value)
     if (path === 'stopped' || path === 'paused') return
     // Разбор без перехода (эхо, шум, чужая попытка, лобби) гасит ухо сам; переход гасит подписка.
@@ -450,6 +457,11 @@ export function attachController(options: {
       return
     }
     if (path === 'answering.waiting' || path === 'answering.hearing' || path === 'answering.settling') {
+      if (!forced && beforeButtonSpeech(itemId, speechStartedAt, Boolean(beforeButton))) {
+        if (itemId) preButtonItems.add(itemId)
+        settle(fileBeforeButton(durationMs, itemId))
+        return
+      }
       if (!acceptAnswerSpeech(durationMs, itemId, speechStartedAt, forced)) {
         client.suppressPlayerChat(itemId)
         settle()
@@ -1027,6 +1039,7 @@ export function attachController(options: {
       client.setMicEnabled(false)
     }
     if (path === 'reading.sealed') {
+      resetBeforeButton()
       readEpoch += 1
       const question = questionById(context.questions, context.activeQuestionId)
       const text = question ? questionSpeech(question) : ''
@@ -1047,19 +1060,33 @@ export function attachController(options: {
     }
     if ((from.startsWith('reading') || from === 'falseStartCue') && path.startsWith('answering')) client.interruptSpeech('кнопка во время чтения → ответ')
     if (path === 'buzzing.open') {
+      if (from.startsWith('announcing') || from === 'judging') resetBeforeButton()
       buzzEpoch += 1
       openBuzzerEar()
       if (from !== 'paused' && from !== 'reading.armed') armBuzzerWarning(context.phaseDurationMs ?? gameConfig.buzzerMs)
     }
     if (path !== 'paused' && !buzzerChimeLive(path)) clearBuzzerWarning()
     if (path === 'answering.waiting') {
+      const pressed = from.startsWith('buzzing') || from.startsWith('reading') || from === 'falseStartCue'
+      const openItem = openSpeechItemId
+      if (pressed && !earlyAnswer && openItem) {
+        preButtonItems.add(openItem)
+        const peeked = client.peekTranscript(openItem)
+        const heardMs = openSpeechStartedAt > 0 ? Math.max(0, Date.now() - openSpeechStartedAt) : 0
+        if (peeked?.arrived) keepOverheard(peeked.text, openItem, heardMs, peeked.confidence)
+      }
       if (!(from === 'paused' && answerTurnAttempt === context.attemptId)) armAnswerAttempt(context.attemptId)
       client.setTranscriptionPrompt(answerPromptFor(context))
       client.setMicEnabled(true)
+      if (pressed && !earlyAnswer) client.cutHeardBeforeButton(openItem)
       // Нажал кнопку — короткое обращение по имени, слух уже открыт: начало ответа обрывает ведущую.
-      const pressed = from.startsWith('buzzing') || from.startsWith('reading') || from === 'falseStartCue'
-      if (pressed && !earlyAnswer && context.activePlayerId !== null) {
-        speakWhileListening('buzzCall', buzzCallCue(playerName(context.players, context.activePlayerId)))
+      // До-кнопочная фраза, если уже известна, едет в той же реплике. Игрок уже говорит — не звучит.
+      if (pressed && !earlyAnswer) {
+        buzzCueSent = true
+        if (!answererAlreadySpeaking() && context.activePlayerId !== null) {
+          if (beforeButtonRemark) beforeButtonRemarkUsed = true
+          speakWhileListening('buzzCall', buzzCallCue(playerName(context.players, context.activePlayerId), beforeButtonRemark))
+        }
       }
       if (earlyAnswer) {
         earlyAnswer = false
@@ -1162,11 +1189,11 @@ export function attachController(options: {
     answerSource = 'text'
     attemptJudgmentMode = modeFor(actor.getSnapshot().context)
     client.gatePlayerChat(true)
-    // Кнопка посреди длинной реплики: ту же utterance несём в попытку.
-    if ((earlyAnswer || !actor.getSnapshot().context.appeal?.activePlayerId) && openSpeechItemId && openSpeechStartedAt > 0) {
+    // «Повтори» и апелляция до звука ведущей: ту же фразу несём. Кнопка до-кнопочную речь не несёт.
+    if (earlyAnswer && openSpeechItemId && openSpeechStartedAt > 0 && !preButtonItems.has(openSpeechItemId)) {
       answerCarryItemId = openSpeechItemId
       liveSpeechItemId = openSpeechItemId
-      pushTrace('note', 'речь ответа подхвачена с кнопки / buzz')
+      pushTrace('note', 'речь ответа подхвачена с раннего слуха')
     } else {
       answerCarryItemId = null
       liveSpeechItemId = null
@@ -1190,12 +1217,17 @@ export function attachController(options: {
   }
 
   /**
-   * Речь ответа своей попытки: после открытия попытки, с окна кнопки,
-   * или та же utterance, что уже шла в момент buzz.
+   * Речь ответа своей попытки: началась после открытия попытки,
+   * или та же фраза раннего слуха («повтори», апелляция).
+   * Кусок до нажатия сюда не входит.
    */
   function acceptAnswerSpeech(durationMs: number, itemId: string | null, speechStartedAt: number, forced = false): boolean {
     if (!answerAttemptLive()) {
       pushTrace('note', 'поздняя речь ответа отброшена: чужая попытка')
+      return false
+    }
+    if (itemId && preButtonItems.has(itemId)) {
+      pushTrace('note', 'речь до кнопки в попытку не берём')
       return false
     }
     if (forced) {
@@ -1209,10 +1241,100 @@ export function attachController(options: {
       return false
     }
     if (speechStartedAt >= answerArmedAt - 100) return true
-    // Речь началась в текущем окне кнопки — дожатие кнопки посреди фразы.
-    if (buzzerEarAt > 0 && speechStartedAt >= buzzerEarAt - 100) return true
     pushTrace('note', `поздняя речь ответа отброшена: началась до попытки (${durationMs} мс)`)
     return false
+  }
+
+  function resetBeforeButton(): void {
+    preButtonItems.clear()
+    filedBeforeButton.clear()
+    heardBeforeButton.length = 0
+    beforeButtonRemark = null
+    beforeButtonRemarkUsed = false
+    buzzCueSent = false
+  }
+
+  /** Игрок уже говорит ответ: комментарий про до-кнопочную речь не начинаем. */
+  function answererAlreadySpeaking(): boolean {
+    const path = statePath(actor.getSnapshot().value)
+    if (path === 'answering.hearing' || path === 'answering.settling') return true
+    return Boolean(openSpeechItemId && !preButtonItems.has(openSpeechItemId))
+  }
+
+  /** Реплика этого окна, начатая до нажатия. Чужой VAD прошлой попытки сюда не входит. */
+  function beforeButtonSpeech(itemId: string | null, speechStartedAt: number, flagged: boolean): boolean {
+    if (flagged) return true
+    if (itemId && preButtonItems.has(itemId)) return true
+    return buzzerEarAt > 0 && speechStartedAt >= buzzerEarAt - 100 && speechStartedAt < answerArmedAt - 100
+  }
+
+  function overheardMeaningful(text: string, durationMs: number, confidence: number | null): boolean {
+    const clean = text.trim()
+    if (!clean || blurtGate(clean, durationMs) === 'ignore') return false
+    if (echoesHost(clean)) return false
+    const context = actor.getSnapshot().context
+    const question = questionById(context.questions, context.activeQuestionId)
+    if (question && repeatsQuestion(clean, questionSpeech(question))) return false
+    const prompt = answerPromptFor(context)
+    if (echoesAnswerPrompt(clean, prompt) || echoesTranscriptionPrompt(clean, prompt)) return false
+    if (phantomListedAnswer(clean, prompt, durationMs, confidence)) return false
+    return true
+  }
+
+  function playerChatHas(itemId: string): boolean {
+    return getTrace().some((entry) => {
+      if (entry.kind !== 'chat') return false
+      const detail = entry.detail
+      return Boolean(detail && typeof detail === 'object' && (detail as { itemId?: unknown }).itemId === itemId)
+    })
+  }
+
+  /** До-кнопочная фраза: чат с пометкой, в оценку не идёт. Пусто, эхо и фантом отбрасываются. */
+  function keepOverheard(text: string, itemId: string | null, durationMs: number, confidence: number | null): void {
+    if (itemId && filedBeforeButton.has(itemId)) return
+    if (itemId) {
+      filedBeforeButton.add(itemId)
+      preButtonItems.add(itemId)
+    }
+    if (!overheardMeaningful(text, durationMs, confidence)) {
+      client.suppressPlayerChat(itemId)
+      return
+    }
+    if (itemId) {
+      markPlayerLine(itemId, { kind: 'beforeButton' })
+      client.suppressPlayerChat(itemId)
+    }
+    if (!itemId || !playerChatHas(itemId)) pushPlayerLine(text, itemId, null)
+    pushTrace('note', `до кнопки, не ответ: ${text.trim()}`)
+    rememberOverheard(text)
+  }
+
+  function rememberOverheard(text: string): void {
+    const clean = text.trim()
+    if (!clean) return
+    if (!heardBeforeButton.includes(clean)) heardBeforeButton.push(clean)
+    beforeButtonRemark = heardBeforeButton.join('; ').slice(0, 400)
+    offerOverheardRemark()
+  }
+
+  /** Поздняя расшифровка: та же реплика хода, если имя уже сказано и игрок ещё молчит. */
+  function offerOverheardRemark(): void {
+    if (!buzzCueSent || beforeButtonRemarkUsed || !beforeButtonRemark) return
+    const path = statePath(actor.getSnapshot().value)
+    if (!path.startsWith('answering')) return
+    if (answererAlreadySpeaking() || hostTalking) return
+    const name = playerName(actor.getSnapshot().context.players, actor.getSnapshot().context.activePlayerId)
+    beforeButtonRemarkUsed = true
+    speakWhileListening('buzzCall', buzzCallCue(name, beforeButtonRemark))
+  }
+
+  async function fileBeforeButton(durationMs: number, itemId: string | null): Promise<void> {
+    if (itemId && filedBeforeButton.has(itemId)) return
+    const questionId = actor.getSnapshot().context.activeQuestionId
+    const heard = await client.waitForTranscript(itemId, transcriptWaitMs(Math.max(durationMs, 1)))
+    if (actor.getSnapshot().context.activeQuestionId !== questionId) return
+    if (itemId && filedBeforeButton.has(itemId)) return
+    keepOverheard(heard.text, itemId, durationMs, heard.confidence)
   }
 
   function speakWhileListening(purpose: SpeechPurpose, instructions: string, expect?: string): void {
@@ -1457,7 +1579,7 @@ export function attachController(options: {
       pushTrace('note', `короткий звук ${durationMs} мс, кнопку не трогаю`)
       return
     }
-    if (!heard.arrived) pushPlayerLine('речь не распознана')
+    keepOverheard(heard.text, itemId, durationMs, heard.confidence)
     pushTrace('note', `фраза без кнопки: ${heard.text || 'речь не распознана'}`)
     actor.send({ type: 'UNBUTTONED_TALK' })
   }
@@ -1483,6 +1605,7 @@ export function attachController(options: {
       pushTrace('note', 'речь совпала с текстом вопроса, чтение не прерываю')
       return
     }
+    keepOverheard(heard.text, itemId, durationMs, heard.confidence)
     pushTrace('note', `перебили чтение: ${heard.text || 'речь не распознана'}`)
     actor.send({ type: 'TALKED_OVER' })
   }
@@ -2740,15 +2863,26 @@ export function mutedMicCue(playerName: string): string {
   })
 }
 
-/** Обращение к нажавшему кнопку: очень коротко и каждый раз по-разному, формулировку выбирает модель. */
-export function buzzCallCue(playerName: string): string {
+/**
+ * Обращение к нажавшему кнопку. Если до нажатия уже была осмысленная фраза,
+ * она в той же реплике как контекст: ведущая сама решает, отметить ли факт или промолчать.
+ * Часы ответа это не двигает. Слов фразы и эталона вслух нет.
+ */
+export function buzzCallCue(playerName: string, beforeButton?: string | null): string {
   const name = playerName.trim() || 'Игрок'
+  const overheard = beforeButton?.trim() ?? ''
   return hostCue({
-    situation: `Игрок ${name} первым нажал кнопку и сейчас будет отвечать. Его уже слушают.`,
-    goal: `Дай ${name} слово: обратись по имени, можно одним именем.`,
+    situation: overheard
+      ? `Игрок ${name} первым нажал кнопку и сейчас будет отвечать. Его уже слушают. До нажатия в комнате прозвучало: «${overheard}». Это сказано ДО кнопки: ответом не считается и на счёт не влияет. Кто говорил, по этой записи неизвестно.`
+      : `Игрок ${name} первым нажал кнопку и сейчас будет отвечать. Его уже слушают.`,
+    goal: overheard
+      ? `Дай ${name} слово. Про до-кнопочную фразу реши сама: можно одной короткой оговоркой своими словами отметить сам факт, что до кнопки уже говорили, и сразу дать слово. Если оговорка не к месту — только дай слово, без добавки.`
+      : `Дай ${name} слово: обратись по имени, можно одним именем.`,
     constraints: [
       boardSecrets,
-      'Очень коротко: имя и максимум два слова. Каждый раз формулируй иначе, не повторяй прошлое обращение. Вопрос не повторяй, правильный ответ не произноси, не подсказывай.',
+      overheard
+        ? 'До-кнопочную фразу не оценивай и не объявляй верной или неверной. Её слова и ответ пакета вслух не повторяй. Очень коротко. Вопрос не повторяй. Часы ответа не обсуждай.'
+        : 'Очень коротко: имя и максимум два слова. Каждый раз формулируй иначе, не повторяй прошлое обращение. Вопрос не повторяй, правильный ответ не произноси, не подсказывай.',
     ],
   })
 }

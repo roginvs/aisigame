@@ -196,6 +196,8 @@ function functionDone(responseId: string, call: Loose): object {
 }
 
 export class GrokWire implements VoiceWire {
+  /** События commit/clear уходят как у OpenAI. Запасной commit ответа по-прежнему выключен. */
+  readonly supportsButtonCut = true
   private sink: VoiceSink | null = null
   private socket: WebSocket | null = null
   private mic: PcmMic | null = null

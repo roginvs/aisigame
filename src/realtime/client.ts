@@ -176,6 +176,8 @@ export class RealtimeClient {
   private inputItemId: string | null = null
   /** Запасной commit: длительность реплики, которую видит уровень, а модель — нет (fa584db п. 1). */
   private pendingForcedUtterance: { durationMs: number } | null = null
+  /** Commit на кнопке: закрытый item — речь до нажатия, не ответ. */
+  private pendingBoundary: { itemId: string | null } | null = null
   private itemPrompts = new ItemPrompts()
   private promptEchoLogged = new Set<string>()
   private transcripts = new Map<string, StoredTranscript>()
@@ -205,7 +207,7 @@ export class RealtimeClient {
   onAudioFinished: (info: { purpose: string; turn: number }) => void = () => {}
   onToolCall: (call: ToolCall | null, purpose: string, turn: number) => void = () => {}
   onSpeechStarted: (info?: { itemId: string | null }) => void = () => {}
-  onSpeechStopped: (info: { durationMs: number; itemId: string | null; forced?: boolean }) => void = () => {}
+  onSpeechStopped: (info: { durationMs: number; itemId: string | null; forced?: boolean; beforeButton?: boolean }) => void = () => {}
   /** Расшифровка реплики легла в хранилище. Игра решает, не опоздала ли она. */
   onTranscript: (info: { itemId: string; text: string }) => void = () => {}
 
@@ -490,13 +492,44 @@ export class RealtimeClient {
     void sender.replaceTrack(track)
   }
 
+  /**
+   * Нажатие кнопки. Открытую реплику закрываем commit, чтобы до-кнопочный звук стал
+   * отдельным item, а ответ начался со следующего. Буфер без реплики — clear.
+   * Провод без commit/clear возвращает unsupported и ничего не шлёт.
+   */
+  cutHeardBeforeButton(openItemId: string | null): 'commit' | 'clear' | 'unsupported' {
+    if (!this.canCutInputBuffer()) {
+      pushTrace('note', 'граница кнопки: провод не закрывает входной буфер, звук до кнопки остаётся в его реплике')
+      return 'unsupported'
+    }
+    const open = Boolean(openItemId) || this.inputStartedAt !== null
+    if (open) {
+      if (this.pendingBoundary) return 'commit'
+      this.pendingBoundary = { itemId: openItemId ?? this.inputItemId }
+      if (this.pendingForcedUtterance) return 'commit'
+      const sent = this.send({ type: 'input_audio_buffer.commit' })
+      if (!sent) {
+        this.pendingBoundary = null
+        return 'unsupported'
+      }
+      return 'commit'
+    }
+    this.send({ type: 'input_audio_buffer.clear' })
+    return 'clear'
+  }
+
+  private canCutInputBuffer(): boolean {
+    if (!this.wire) return true
+    return Boolean(this.wire.supportsInputCommit || this.wire.supportsButtonCut)
+  }
+
   /** Запасной commit (fa584db п. 1): модельная VAD промахнулась, а уровни Jitsi показывают реплику — коммитим буфер сами. */
   forceInputCommit(durationMs: number): boolean {
     if (this.wire && !this.wire.supportsInputCommit) {
       pushTrace('note', 'запасной commit: провод этого провайдера не даёт input_audio_buffer.commit, реплика остаётся на его VAD')
       return false
     }
-    if (this.pendingForcedUtterance) return false
+    if (this.pendingForcedUtterance || this.pendingBoundary) return false
     this.pendingForcedUtterance = { durationMs }
     const sent = this.send({ type: 'input_audio_buffer.commit' })
     if (!sent) this.pendingForcedUtterance = null
@@ -541,7 +574,7 @@ export class RealtimeClient {
    * Конец пришлёт серверная VAD или уже отправленный commit.
    */
   private clearStaleInput(): void {
-    if (this.inputStartedAt !== null || this.pendingForcedUtterance) {
+    if (this.inputStartedAt !== null || this.pendingForcedUtterance || this.pendingBoundary) {
       diag('слух', 'микрофон включён поверх открытой реплики — буфер не сбрасываем')
       return
     }
@@ -867,6 +900,7 @@ export class RealtimeClient {
     this.inputStartedAt = null
     this.inputItemId = null
     this.pendingForcedUtterance = null
+    this.pendingBoundary = null
     this.itemPrompts.reset()
     this.transcripts.clear()
     this.hostItemsInChat.clear()
@@ -937,7 +971,10 @@ export class RealtimeClient {
 
   private send(event: object, owner?: { responseToken: number | null }): boolean {
     const type = eventType(event)
-    if (type === 'input_audio_buffer.clear') this.pendingForcedUtterance = null
+    if (type === 'input_audio_buffer.clear') {
+      this.pendingForcedUtterance = null
+      this.pendingBoundary = null
+    }
     if (!this.canSend()) {
       pushTrace('note', `не отправлено, канал закрыт: ${type}`, event)
       return false
@@ -1104,6 +1141,7 @@ export class RealtimeClient {
         // Мы сами коммитили переполненный буфер, а его уже очистили (discard/пауза) — не ошибка.
         pushTrace('note', 'запасной commit пуст: в буфере нет аудио')
         this.pendingForcedUtterance = null
+        this.pendingBoundary = null
         return
       }
       const message = readErrorMessage(event)
@@ -1232,11 +1270,23 @@ export class RealtimeClient {
     if (type === 'output_audio_buffer.cleared') this.onOutputCleared(event)
     if (type === 'conversation.item.truncated') this.onTruncated(event)
     if (type === 'input_audio_buffer.committed') {
-      // Запасной commit (fa584db п. 1): обычные коммиты серверной VAD приходят без нашего ожидания —
-      // реагируем только на свой. Реплика идёт обычным путём: синтетический speech_stopped
-      // открывает попытку через контроллер, судья получает item по этому itemId.
+      // Свой commit: граница кнопки закрывает до-кнопочный item, запасной — реплику ответа.
+      // Обычный коммит серверной VAD без нашего ожидания ничего не синтезирует.
+      const boundary = this.pendingBoundary
       const forced = this.pendingForcedUtterance
+      this.pendingBoundary = null
       this.pendingForcedUtterance = null
+      if (boundary) {
+        const itemId = readItemId(event) ?? boundary.itemId
+        const durationMs = forced?.durationMs ?? (this.inputStartedAt === null ? 0 : Math.max(0, performance.now() - this.inputStartedAt))
+        this.inputStartedAt = null
+        this.inputAudioStartMs = null
+        this.inputItemId = null
+        diag('слух', 'граница кнопки: реплика до нажатия закрыта', { itemId, speechMs: Math.round(durationMs) })
+        if (itemId) this.speechStoppedAt.set(itemId, performance.now())
+        this.onSpeechStopped({ durationMs, itemId, beforeButton: true })
+        return
+      }
       if (!forced) return
       const itemId = readItemId(event)
       diag('слух', 'запасной commit принят', { itemId, speechMs: Math.round(forced.durationMs) })
@@ -1903,6 +1953,7 @@ export type GameVoice = Pick<
   | 'outputLevel'
   | 'setLocalPlayback'
   | 'discardInputAudio'
+  | 'cutHeardBeforeButton'
   | 'forceInputCommit'
   | 'setSpeechSpeed'
   | 'setTranscriptionPrompt'

@@ -26,6 +26,8 @@ describe('grok wire', () => {
     })
     expect(grokOutbound({ type: 'output_audio_buffer.clear' })).toBe('clear-output')
     expect(grokOutbound({ type: 'response.cancel' })).toEqual({ type: 'response.cancel' })
+    expect(grokOutbound({ type: 'input_audio_buffer.commit' })).toEqual({ type: 'input_audio_buffer.commit' })
+    expect(grokOutbound({ type: 'input_audio_buffer.clear' })).toEqual({ type: 'input_audio_buffer.clear' })
     expect(keyterms('Реки, реки 100')).toEqual(['Реки', '100'])
   })
 

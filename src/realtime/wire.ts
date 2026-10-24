@@ -9,6 +9,11 @@ export type VoiceOpenOptions = {
 export interface VoiceWire {
   /** Провод принимает ручной input_audio_buffer.commit и возвращает committed. */
   readonly supportsInputCommit?: boolean
+  /**
+   * Граница кнопки: commit открытой реплики или clear хвоста.
+   * Не включает запасной commit ответа (у Grok его нет, а разрез на кнопке есть).
+   */
+  readonly supportsButtonCut?: boolean
   open(apiKey: string, sink: VoiceSink, options?: VoiceOpenOptions): Promise<void>
   send(event: object): boolean
   close(): void

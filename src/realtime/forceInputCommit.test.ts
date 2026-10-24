@@ -173,6 +173,52 @@ describe('запасной commit: модель молчит, коммитим �
     expect(webClears()).toBe(2)
   })
 
+  it('граница кнопки: открытая реплика коммитится отдельно от ответа, пустой буфер очищается', () => {
+    const { sent, feed, client } = open()
+    const stopped = vi.fn()
+    client.onSpeechStopped = stopped
+    feed({ type: 'input_audio_buffer.speech_started', item_id: 'pre' })
+    expect(client.cutHeardBeforeButton('pre')).toBe('commit')
+    expect(sent).toContain('input_audio_buffer.commit')
+    expect(stopped).not.toHaveBeenCalled()
+    feed({ type: 'input_audio_buffer.committed', item_id: 'pre' })
+    expect(stopped).toHaveBeenCalledExactlyOnceWith({ durationMs: expect.any(Number), itemId: 'pre', beforeButton: true })
+    expect(client.cutHeardBeforeButton(null)).toBe('clear')
+    expect(sent).toContain('input_audio_buffer.clear')
+  })
+
+  it('граница кнопки: провод без commit и clear ничего не шлёт', () => {
+    const send = vi.fn(() => true)
+    const wire: VoiceWire = {
+      open: async () => {}, send, close: () => {}, setMicEnabled: () => {}, setOutputMuted: () => {},
+      attachHostOutput: () => {}, setInputStream: () => {},
+    }
+    const client = new RealtimeClient({ wire })
+    harness(client).wireOpen = true
+    expect(client.cutHeardBeforeButton('pre')).toBe('unsupported')
+    expect(send).not.toHaveBeenCalled()
+  })
+
+  it('граница кнопки: Grok режет буфер, запасной commit ответа по-прежнему не шлёт', () => {
+    const sent: string[] = []
+    const wire: VoiceWire = {
+      supportsButtonCut: true,
+      open: async () => {},
+      send(event: object) {
+        const type = (event as { type?: string }).type
+        if (type) sent.push(type)
+        return true
+      },
+      close: () => {}, setMicEnabled: () => {}, setOutputMuted: () => {},
+      attachHostOutput: () => {}, setInputStream: () => {},
+    }
+    const client = new RealtimeClient({ wire })
+    harness(client).wireOpen = true
+    expect(client.forceInputCommit(1400)).toBe(false)
+    expect(client.cutHeardBeforeButton('pre')).toBe('commit')
+    expect(sent).toEqual(['input_audio_buffer.commit'])
+  })
+
   it('провод провайдера (Grok/Gemini) коммит не шлёт — реплика остаётся на его VAD', () => {
     const sent: string[] = []
     const wire = {

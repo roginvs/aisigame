@@ -31,6 +31,7 @@ describe('пометки реплики игрока', () => {
     [{ kind: 'other' }, 'не выбор', null],
     [{ kind: 'cell', cell: 'Реки 200' }, '→ Реки 200', null],
     [{ kind: 'picked', cell: 'Реки 200' }, '✓ Реки 200', null],
+    [{ kind: 'beforeButton' }, 'до кнопки', null],
   ]
   it.each(cases)('%j → «%s», тон %s', (mark, label, tone) => {
     expect(chatMarkLabel(mark)).toBe(label)

@@ -46,7 +46,7 @@ export class MockRealtimeClient implements GameVoice {
   onAudioFinished: (info: { purpose: string; turn: number }) => void = () => {}
   onToolCall: (call: ToolCall | null, purpose: string, turn: number) => void = () => {}
   onSpeechStarted: (info?: { itemId: string | null }) => void = () => {}
-  onSpeechStopped: (info: { durationMs: number; itemId: string | null; forced?: boolean }) => void = () => {}
+  onSpeechStopped: (info: { durationMs: number; itemId: string | null; forced?: boolean; beforeButton?: boolean }) => void = () => {}
   onTranscript: (info: { itemId: string; text: string }) => void = () => {}
 
   private audioItems = new AudioItems()
@@ -114,6 +114,29 @@ export class MockRealtimeClient implements GameVoice {
 
   /** Мок сам имитирует начало/конец речи — запасной commit не нужен, остаётся заглушкой для тестов. */
   forceInputCommit(_durationMs: number): boolean { return true }
+
+  /** Что граница кнопки сделала с буфером — для тестов. */
+  buttonCuts: Array<'commit' | 'clear' | 'unsupported'> = []
+  /** Сразу после разреза начать реплику ответа (игрок уже говорит). */
+  continueAfterCut: string | null = null
+  cutUnsupported = false
+
+  cutHeardBeforeButton(openItemId: string | null): 'commit' | 'clear' | 'unsupported' {
+    if (this.cutUnsupported) {
+      this.buttonCuts.push('unsupported')
+      return 'unsupported'
+    }
+    if (openItemId) {
+      this.buttonCuts.push('commit')
+      this.onSpeechStopped({ durationMs: 800, itemId: openItemId, beforeButton: true })
+    } else {
+      this.buttonCuts.push('clear')
+    }
+    const tail = this.continueAfterCut
+    this.continueAfterCut = null
+    if (tail) this.onSpeechStarted({ itemId: tail })
+    return openItemId ? 'commit' : 'clear'
+  }
 
   /** Последняя суженная схема инструмента — для тестов. */
   lastTool: { name: string } | null = null

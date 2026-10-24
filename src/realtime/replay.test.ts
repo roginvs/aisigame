@@ -1,12 +1,20 @@
+import { createActor } from 'xstate'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { gameConfig } from '../config.ts'
 import { formatDebugDump } from '../debug/trace.ts'
 import type { StoredLogEntry } from '../debug/logDb.ts'
 import { getTrace } from '../debug/trace.ts'
+import { answerSilenceDecideMs } from '../options.ts'
+import { attachController } from '../game/controller.ts'
+import { gameMachine, statePath } from '../game/machine.ts'
+import type { Question, QuestionPack } from '../game/types.ts'
 import { RealtimeClient } from './client.ts'
-import { outputFlushWaitMs } from './playback.ts'
-import { eventsFromDebugDump, translateReplayInbound, type ReplayWire } from './replayDump.ts'
 import { geminiOutboundTurns } from './geminiWire.ts'
+import { MockRealtimeClient } from './mockClient.ts'
+import { outputFlushWaitMs } from './playback.ts'
 import { qwenTranslateOutbound } from './qwenWire.ts'
+import { eventsFromDebugDump, translateReplayInbound, type ReplayWire } from './replayDump.ts'
+vi.mock('../audio/beep.ts', () => ({ playTimeoutBeep: vi.fn(), unlockAudio: vi.fn() }))
 
 /**
  * Прогонщик записанных потоков без ключа API.
@@ -14,7 +22,7 @@ import { qwenTranslateOutbound } from './qwenWire.ts'
  * перед пачкой — шаг `tool` / `speech` / `interrupt` (в дампе это строки `out`).
  * Как именно — docs/DEBUG.md, раздел «Поток из дампа».
  * Grok шлёт ту же форму, что OpenAI: отдельного провода здесь нет.
- * Счёт партии этот файл не проверяет: «строго последняя разборчивая» — answerTurn.test.ts.
+ * Счёт партии этот файл не проверяет, кроме границы кнопки в конце файла. «Строго последняя разборчивая» — answerTurn.test.ts.
  */
 
 class FakeAudio { autoplay = false; muted = false; srcObject = null; pause() {} }
@@ -314,5 +322,109 @@ describe('история чтения и оценки', () => {
     expect(kept.isolated).toBe(false)
     expect(JSON.stringify(kept.messages)).toContain(cell)
     expect(kept.messages.some((message) => 'contextUpdate' in message)).toBe(false)
+  })
+})
+
+function cell(id: string, themeId: string, themeName: string, value: number): Question {
+  return { id, roundIndex: 0, themeId, themeName, value, text: 'Вопрос', answers: ['ответ'] }
+}
+
+const boundaryPack: QuestionPack = {
+  name: 'Граница',
+  rounds: [{ index: 0, name: 'Раунд', kind: 'normal' }],
+  warnings: [],
+  questions: [cell('p-400', 'p', 'П......Ц', 400)],
+}
+
+async function bootBoundary(client: MockRealtimeClient) {
+  vi.stubGlobal('window', {
+    setTimeout: (handler: TimerHandler, timeout?: number) => globalThis.setTimeout(handler, timeout),
+    clearTimeout: (id: number) => globalThis.clearTimeout(id),
+  })
+  const actor = createActor(gameMachine)
+  actor.start()
+  const stop = attachController({
+    actor,
+    client,
+    getApiKey: () => 'test-key',
+    setLink: () => {},
+  })
+  actor.send({ type: 'START_GAME', pack: boundaryPack })
+  await vi.advanceTimersByTimeAsync(80)
+  actor.send({ type: 'QUESTION_SELECTED', themeId: 'p', value: 400 })
+  await vi.advanceTimersByTimeAsync(gameConfig.cellFlashMs + 80)
+  return { actor, stop }
+}
+
+function scoreOf(actor: ReturnType<typeof createActor<typeof gameMachine>>, playerId: number): number {
+  return actor.getSnapshot().context.players.find((player) => player.id === playerId)?.score ?? 0
+}
+
+function playerMark(text: string): string | undefined {
+  const line = getTrace().find((entry) => {
+    const detail = entry.detail as { text?: string } | undefined
+    return entry.kind === 'chat' && detail?.text === text
+  })
+  return (line?.detail as { mark?: { kind?: string } } | undefined)?.mark?.kind
+}
+
+describe('граница кнопки', () => {
+  it('до-кнопочная речь уходит только в чат и не оценивается', async () => {
+    const client = new MockRealtimeClient()
+    const speech = vi.spyOn(client, 'requestSpeech')
+    const { actor, stop } = await bootBoundary(client)
+    expect(statePath(actor.getSnapshot().value)).toBe('buzzing.open')
+    client.onSpeechStarted({ itemId: 'pre' })
+    client.deliverTranscript('pre', 'мимо темы')
+    actor.send({ type: 'BUZZER_PRESSED', playerId: 1 })
+    await vi.advanceTimersByTimeAsync(80)
+    expect(statePath(actor.getSnapshot().value)).toBe('answering.waiting')
+    expect(client.buttonCuts).toEqual(['commit'])
+    expect(scoreOf(actor, 1)).toBe(0)
+    expect(playerMark('мимо темы')).toBe('beforeButton')
+    const cue = String(speech.mock.calls.find((call) => call[0] === 'buzzCall')?.[2] ?? '')
+    expect(cue).toContain('мимо темы')
+    expect(cue).toContain('ДО кнопки')
+    expect(cue).toContain('вслух не повторяй')
+    stop()
+    actor.stop()
+  })
+
+  it('речь, начатая до кнопки и продолженная после, в ответ берёт только хвост', async () => {
+    const client = new MockRealtimeClient()
+    const { actor, stop } = await bootBoundary(client)
+    client.onSpeechStarted({ itemId: 'head' })
+    client.deliverTranscript('head', 'мимо темы')
+    client.continueAfterCut = 'tail'
+    actor.send({ type: 'BUZZER_PRESSED', playerId: 1 })
+    expect(client.buttonCuts).toEqual(['commit'])
+    expect(scoreOf(actor, 1)).toBe(0)
+    client.deliverTranscript('tail', 'ответ')
+    client.emitSpeechStopped('tail', 800)
+    await vi.advanceTimersByTimeAsync(120 + answerSilenceDecideMs)
+    expect(playerMark('мимо темы')).toBe('beforeButton')
+    expect(scoreOf(actor, 1)).toBe(400)
+    stop()
+    actor.stop()
+  })
+
+  it('комментарий не звучит, если игрок уже говорит', async () => {
+    const client = new MockRealtimeClient()
+    const { actor, stop } = await bootBoundary(client)
+    await vi.advanceTimersByTimeAsync(500)
+    client.onSpeechStarted({ itemId: 'blurt' })
+    client.deliverTranscript('blurt', 'уже говорили вслух')
+    client.emitSpeechStopped('blurt', 400)
+    await vi.advanceTimersByTimeAsync(80)
+    expect(playerMark('уже говорили вслух')).toBe('beforeButton')
+    const speech = vi.spyOn(client, 'requestSpeech')
+    client.continueAfterCut = 'tail'
+    actor.send({ type: 'BUZZER_PRESSED', playerId: 1 })
+    await vi.advanceTimersByTimeAsync(80)
+    const cues = speech.mock.calls.filter((call) => call[0] === 'buzzCall').map((call) => String(call[2]))
+    expect(cues.some((cue) => cue.includes('уже говорили вслух'))).toBe(false)
+    expect(scoreOf(actor, 1)).toBe(0)
+    stop()
+    actor.stop()
   })
 })

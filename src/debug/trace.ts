@@ -121,8 +121,9 @@ export function chatLineId(entryId: number): string {
  * Ответ: stall (заминка), noise (шум), counted (взята как ответ; verdict — вердикт оценки, без него «… оцениваю»),
  * guessing (перебор, не засчитано).
  * Выбор: noise, other (не выбор), cell (дала ячейку), picked (по ней выбрана ячейка); cell — подпись ячейки.
+ * beforeButton — сказано до нажатия, в ответ не идёт.
  */
-export type ChatMark = { kind: 'stall' | 'noise' | 'counted' | 'guessing' | 'other' | 'cell' | 'picked'; cell?: string; verdict?: JudgmentStatus }
+export type ChatMark = { kind: 'stall' | 'noise' | 'counted' | 'guessing' | 'other' | 'cell' | 'picked' | 'beforeButton'; cell?: string; verdict?: JudgmentStatus }
 
 const verdicts: readonly JudgmentStatus[] = ['correct', 'incorrect', 'near_miss', 'needs_clarification', 'ambiguous', 'unintelligible']
 
@@ -130,7 +131,7 @@ export function readChatMark(value: unknown): ChatMark | undefined {
   if (!value || typeof value !== 'object') return undefined
   const kind = (value as { kind?: unknown }).kind
   const cell = (value as { cell?: unknown }).cell
-  if (kind !== 'stall' && kind !== 'noise' && kind !== 'counted' && kind !== 'guessing' && kind !== 'other' && kind !== 'cell' && kind !== 'picked') return undefined
+  if (kind !== 'stall' && kind !== 'noise' && kind !== 'counted' && kind !== 'guessing' && kind !== 'other' && kind !== 'cell' && kind !== 'picked' && kind !== 'beforeButton') return undefined
   if (cell !== undefined && (typeof cell !== 'string' || cell.length > 120)) return undefined
   const verdict = (value as { verdict?: unknown }).verdict
   if (verdict !== undefined && (kind !== 'counted' || !verdicts.includes(verdict as JudgmentStatus))) return undefined
@@ -160,6 +161,7 @@ export function chatMarkLabel(mark: ChatMark): string {
     case 'other': return 'не выбор'
     case 'cell': return mark.cell ? `→ ${mark.cell}` : 'ячейка'
     case 'picked': return mark.cell ? `✓ ${mark.cell}` : '✓'
+    case 'beforeButton': return 'до кнопки'
   }
 }
 
@@ -206,13 +208,13 @@ export function editChatLine(entryId: number, text: string | null): void {
   for (const listener of chatEditListeners) listener({ id: chatLineId(entryId), text: clean })
 }
 
-export function pushPlayerLine(text: string, itemId?: string | null): void {
+export function pushPlayerLine(text: string, itemId?: string | null, speakerId?: number | null): void {
   const clean = text.trim()
   if (!clean) return
   const mark = itemId ? pendingMarks.get(itemId) : undefined
   if (itemId) pendingMarks.delete(itemId)
-  const speakerId = speakerSource() ?? undefined
-  pushTrace('chat', 'Игрок', { role: 'player' satisfies ChatRole, text: clean, ...(speakerId !== undefined ? { speakerId } : {}), ...(itemId ? { itemId } : {}), ...(mark ? { mark } : {}) })
+  const resolved = speakerId === undefined ? speakerSource() ?? undefined : speakerId ?? undefined
+  pushTrace('chat', 'Игрок', { role: 'player' satisfies ChatRole, text: clean, ...(resolved !== undefined ? { speakerId: resolved } : {}), ...(itemId ? { itemId } : {}), ...(mark ? { mark } : {}) })
 }
 
 /** Пометки, пришедшие раньше самой строки (подпись публикуется после оценки). */

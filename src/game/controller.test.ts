@@ -1130,27 +1130,32 @@ describe('attachController answer listening', () => {
     actor.stop()
   })
 
-  it('подхватывает речь, начатую до кнопки, в ту же попытку ответа', async () => {
+  it('речь до кнопки уходит в чат и не оценивается, после кнопки засчитывается только новая реплика', async () => {
     const client = new MockRealtimeClient()
     const { actor, stop } = await boot(client)
     actor.send({ type: 'QUESTION_SELECTED', themeId: 'p', value: 400 })
     await vi.advanceTimersByTimeAsync(gameConfig.cellFlashMs + 80)
     expect(statePath(actor.getSnapshot().value)).toBe('buzzing.open')
 
-    const itemId = 'carry-before-buzz'
+    const itemId = 'before-buzz'
+    const cursor = getTrace().at(-1)?.id ?? 0
     client.onSpeechStarted({ itemId })
+    client.deliverTranscript(itemId, 'мимо темы')
     actor.send({ type: 'BUZZER_PRESSED', playerId: 1 })
     expect(statePath(actor.getSnapshot().value)).toBe('answering.waiting')
+    await vi.advanceTimersByTimeAsync(80)
 
-    client.deliverTranscript(itemId, 'ответ')
-    client.emitSpeechStopped(itemId, 8_000)
+    expect(actor.getSnapshot().context.players.find((player) => player.id === 1)?.score).toBe(0)
+    const line = getTrace().find((entry) => {
+      const detail = entry.detail as { text?: string; mark?: { kind?: string } } | undefined
+      return entry.kind === 'chat' && detail?.text === 'мимо темы'
+    })
+    expect((line?.detail as { mark?: { kind?: string } } | undefined)?.mark?.kind).toBe('beforeButton')
+    expect(getTrace().some((entry) => entry.id > cursor && entry.kind === 'note' && String(entry.title).includes('подхвачена'))).toBe(false)
+
+    client.hear('ответ')
     await vi.advanceTimersByTimeAsync(120 + answerSilenceDecideMs)
-
     expect(actor.getSnapshot().context.players.find((player) => player.id === 1)?.score).toBe(400)
-    expect(playerLines().some((line) => line.includes('ответ'))).toBe(true)
-    expect(
-      getTrace().some((entry) => entry.kind === 'note' && String(entry.title).includes('подхвачена')),
-    ).toBe(true)
 
     stop()
     actor.stop()
