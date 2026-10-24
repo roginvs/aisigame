@@ -191,8 +191,8 @@ export function attachController(options: {
   let answerSilenceTimer = 0
   let answerDeadlineTimer = 0
   let answerOverrunTimer = 0
-  let answerDeadlineAt = 0
-  let answerPausedLeft: number | null = null
+  /** Дедлайн был снят паузой и после «Дальше» ставится заново на полную длительность, не на остаток. */
+  let answerDeadlineHeld = false
   let answerLimitHit = false
   let answerSpeechEndAt = 0
   let answerDecision: { judgment: AnswerJudgment; guessing: boolean; itemId: string | null } | { failed: true } | null = null
@@ -2037,7 +2037,7 @@ export function attachController(options: {
     answerInModel = null
     answerDecision = null
     answerLimitHit = false
-    answerPausedLeft = null
+    answerDeadlineHeld = false
     window.clearTimeout(answerModelTimer)
     window.clearTimeout(answerSilenceTimer)
     window.clearTimeout(answerDeadlineTimer)
@@ -2066,8 +2066,13 @@ export function attachController(options: {
 
   function armAnswerDeadline(ms: number): void {
     window.clearTimeout(answerDeadlineTimer)
-    answerDeadlineAt = Date.now() + ms
     answerDeadlineTimer = window.setTimeout(onAnswerDeadline, ms)
+  }
+
+  /** Полное окно ответа: то же, что полоска машины на `answering.waiting`. */
+  function answerWindowMs(): number {
+    const context = actor.getSnapshot().context
+    return context.clarifications > 0 ? gameConfig.clarifyMs : gameConfig.answerMs
   }
 
   /** Общий лимит ответа вышел. Посреди реплики — ждём её конец и оценку (со страховкой), иначе решаем сразу. */
@@ -2098,16 +2103,16 @@ export function attachController(options: {
     if (answerDeadlineTimer) {
       window.clearTimeout(answerDeadlineTimer)
       answerDeadlineTimer = 0
-      answerPausedLeft = Math.max(0, answerDeadlineAt - Date.now())
+      answerDeadlineHeld = true
     }
   }
 
   function resumeAnswerTurn(path: string): void {
     if (!answerLivePath(path) || path === 'judging') return
-    if (answerPausedLeft !== null) {
-      armAnswerDeadline(answerPausedLeft)
-      answerPausedLeft = null
-    }
+    // Автор 24 октября: пауза ставит полную длительность, не остаток. Пока реплика
+    // уже начата, этот дедлайн — единственный (машинный таймер снят при старте речи).
+    if (answerDeadlineHeld && !answerLimitHit) armAnswerDeadline(answerWindowMs())
+    answerDeadlineHeld = false
     if (answerLimitHit) {
       answerOverrunTimer = window.setTimeout(() => { answerOverrunTimer = 0; decideAnswer(true) }, answerOverrunSafetyMs)
     }
