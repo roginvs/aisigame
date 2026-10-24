@@ -28,6 +28,8 @@ type ReplayStep =
 const question = 'У цветковых растений мужские половые клетки сами никуда не идут – их несут эти мелкие зёрна: на лапках пчелы, на ветру или прямо в нос аллергику.'
 /** 13 содержательных слов из 19 — меньше порога 75% (около 70%). */
 const readAtSeventy = 'У цветковых растений мужские половые клетки сами никуда не идут – их несут эти мелкие зёрна на лапках'
+/** Почти весь вопрос, без последнего слова «аллергику»: мешок слов уже ≥75%, порядок последнего — нет. */
+const readWithoutLastWord = 'У цветковых растений мужские половые клетки сами никуда не идут – их несут эти мелкие зёрна: на лапках пчелы, на ветру или прямо в нос.'
 
 let client: RealtimeClient
 let sent: Array<Record<string, unknown>>
@@ -215,6 +217,30 @@ describe('чтение на 70%', () => {
     expect(finished).toEqual([])
     expect(sent.filter((event) => event.type === 'response.create')).toHaveLength(2)
     expect(notesSince(cursor).some((title) => title.startsWith('не та фраза'))).toBe(true)
+    expect(notesSince(cursor).some((title) => title.startsWith('модель не прочитала'))).toBe(false)
+  })
+
+  it('без последнего слова чтение не заканчивается; повтор с последним словом по порядку — да', async () => {
+    const cursor = getTrace().at(-1)?.id ?? 0
+    const meta = { purpose: 'read', turn: '64', take: '1' }
+    play([{ kind: 'speech', purpose: 'read', turn: 64, instructions: question, expect: question }])
+    play([{ kind: 'in', events: [
+      { type: 'response.created', response: { id: 'r1', status: 'in_progress', output: [], metadata: meta } },
+      { type: 'response.output_audio_transcript.done', response_id: 'r1', item_id: 'item_1', transcript: readWithoutLastWord },
+    ] }])
+    await vi.advanceTimersByTimeAsync(outputFlushWaitMs + 50)
+    expect(finished).toEqual([])
+    expect(sent.filter((event) => event.type === 'response.create')).toHaveLength(2)
+    expect(notesSince(cursor).some((title) => title.startsWith('не та фраза'))).toBe(true)
+    play([{ kind: 'in', events: [
+      { type: 'response.created', response: { id: 'r2', status: 'in_progress', output: [], metadata: { ...meta, take: '2' } } },
+      { type: 'output_audio_buffer.started', response_id: 'r2' },
+      { type: 'response.output_audio_transcript.done', response_id: 'r2', item_id: 'item_2', transcript: question },
+      { type: 'output_audio_buffer.stopped', response_id: 'r2' },
+    ] }])
+    await vi.advanceTimersByTimeAsync(3000)
+    expect(finished).toEqual(['read'])
+    expect(sent.filter((event) => event.type === 'response.create')).toHaveLength(2)
     expect(notesSince(cursor).some((title) => title.startsWith('модель не прочитала'))).toBe(false)
   })
 })

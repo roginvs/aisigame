@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { isolatedCue, isolatedToolResponse, speechMatches, speechOverruns, speechReport, verbatimResponse } from './speechMatch.ts'
+import { isolatedCue, isolatedToolResponse, speechMatches, speechOverruns, speechReport, spokenLineAccepted, verbatimResponse } from './speechMatch.ts'
 
 const newton = 'Кто сформулировал закон всемирного тяготения?'
 const melting = 'Как называется процесс, при котором вещество переходит из твердого состояния в жидкое, и наоборот?'
@@ -265,6 +265,14 @@ describe('speechMatches: числа и отчёт', () => {
   })
   it('ловит пропуск половины вопроса', () => {
     expect(speechMatches('Старейший сохранившийся глобус сделали', 'Старейший сохранившийся глобус сделали в Нюрнберге в 1492 году, и автор назвал его земным яблоком')).toBe(false)
+  })
+  it('чтение требует последнее слово по порядку, объявление эталона — нет', () => {
+    const phrase = 'Старейший сохранившийся глобус назвали земным яблоком'
+    const cut = 'Старейший сохранившийся глобус назвали земным'
+    expect(speechMatches(cut, phrase)).toBe(true)
+    expect(spokenLineAccepted('read', cut, phrase)).toBe(false)
+    expect(spokenLineAccepted('announce', cut, phrase)).toBe(true)
+    expect(spokenLineAccepted('read', phrase, phrase)).toBe(true)
   })
   it('отчёт показывает место расхождения', () => {
     expect(speechReport('Маятник в коробке', 'Маятник в коробочке')).toContain('расхождение на слове 3: ждали «коробочке», сказала «коробке»')

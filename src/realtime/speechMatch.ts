@@ -82,6 +82,15 @@ export function verbatimTailEnd(said: string, expected: string): number | null {
   return Math.min(heard.length, lastAt + 1 + (full.length - anchor - 1))
 }
 
+/**
+ * Чтение вопроса (`purpose === 'read'`) принимается, только если по порядку
+ * дозвучало последнее содержательное слово. Остальные точные фразы — по мешку 75%.
+ */
+export function spokenLineAccepted(purpose: string, said: string, expected: string): boolean {
+  if (purpose === 'read') return verbatimTailEnd(said, expected) !== null
+  return speechMatches(said, expected)
+}
+
 /** Сколько слов эталона можно «пропустить» при поиске следующего (оговорка, перестановка). */
 const overrunLookahead = 3
 

@@ -11,7 +11,7 @@ import type { HostAudioTimers, OutputCutState } from './playback.ts'
 import { openAiVadEagerness, freeReplyMaxOutputTokens, hostCutCaptionWaitMs } from '../options.ts'
 import { cutCaption, HostPace } from './hostCaption.ts'
 import { speechDurationMs } from './utterance.ts'
-import { isolatedCue, isolatedToolResponse, revealedAnswer, saysAnswer, speechMatches, speechReport, speechOverruns, verbatimResponse } from './speechMatch.ts'
+import { isolatedCue, isolatedToolResponse, revealedAnswer, saysAnswer, spokenLineAccepted, speechReport, speechOverruns, verbatimResponse } from './speechMatch.ts'
 import { AudioItems, type AudioReference, type AudioItemReady } from './audioItems.ts'
 import { audioJudgmentCapable, type JudgmentCapabilities, type JudgeRequestContext } from './judgmentRequest.ts'
 import { sessionTools, toolPurposes } from './tools.ts'
@@ -1370,7 +1370,7 @@ export class RealtimeClient {
         .join(' ')
         .trim()
       if (!said) return
-      if (!this.speech.overran && !speechMatches(said, this.speech.expect)) {
+      if (!this.speech.overran && !spokenLineAccepted(this.speech.purpose, said, this.speech.expect)) {
         this.rejectSpokenLine(responseId, said)
         return
       }
@@ -1419,7 +1419,7 @@ export class RealtimeClient {
     pushTrace('note', `ведущая сказала: ${line}`)
     if (!speech) return
     if (speech.expect) {
-      if (!speech.overran && !speechMatches(line, speech.expect)) {
+      if (!speech.overran && !spokenLineAccepted(speech.purpose, line, speech.expect)) {
         this.rejectSpokenLine(responseId, line)
         return
       }
