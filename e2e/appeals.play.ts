@@ -47,7 +47,7 @@ test('стол: повтор минуса, замена на плюс и про�
   await expect(page.getByRole('button', { name: 'Текст, 100, сыграно' })).toBeDisabled()
 })
 
-test('стол: после объявления ответа — подтверждение без переответа, отмена ничего не меняет', async ({ page }) => {
+test('стол: после объявления ответа — апелляция двойным нажатием, одно нажатие ничего не меняет', async ({ page }) => {
   if (process.env.APPEAL_MOBILE) await page.setViewportSize({ width: 390, height: 844 })
   await startTable(page)
   // Здесь несколько действий и замеры геометрии; тест не проверяет длительность окна.
@@ -60,32 +60,32 @@ test('стол: после объявления ответа — подтвер�
   await answer(page, 'Игрок 3', 'Август')
   await board(page)
   await expect(page.getByText(/Правильный ответ:/).first()).toBeVisible()
-  // Отмена: ничего не отправляется, счёт прежний.
+  // Одно нажатие мало: кнопка меняется на «Подтвердите апелляцию» и ждёт вторую кнопку.
   const tile2 = page.getByRole('group', { name: 'Игрок 2: -100' })
   const wide = await tile2.getByRole('button', { name: 'Апелляция' }).boundingBox()
   await tile2.getByRole('button', { name: 'Апелляция' }).click()
-  // Да/Нет — на месте широкой кнопки, в той же плитке, той же общей ширины.
-  const yes = await tile2.getByRole('button', { name: 'Да, мой ответ был верным' }).boundingBox()
-  const no = await tile2.getByRole('button', { name: 'Нет, не надо апелляцию' }).boundingBox()
+  // Подтверждение — та же большая кнопка, во всю ширину плитки.
+  const big = await tile2.getByRole('button', { name: 'Подтвердите апелляцию' }).boundingBox()
   await expect(tile2.getByRole('button', { name: 'Апелляция' })).toHaveCount(0)
-  expect(Math.abs(yes!.x - wide!.x)).toBeLessThan(2)
-  expect(Math.abs(no!.x + no!.width - (wide!.x + wide!.width))).toBeLessThan(2)
-  expect(Math.abs(yes!.y - no!.y)).toBeLessThan(2)
+  expect(Math.abs(big!.x - wide!.x)).toBeLessThan(2)
+  expect(Math.abs(big!.y - wide!.y)).toBeLessThan(2)
+  expect(Math.abs(big!.x + big!.width - (wide!.x + wide!.width))).toBeLessThan(2)
   if (process.env.APPEAL_SHOT) await page.screenshot({ path: process.env.APPEAL_SHOT })
-  await tile2.getByRole('button', { name: 'Нет, не надо апелляцию' }).click()
-  await expect(tile2.getByRole('button', { name: 'Апелляция' })).toBeVisible()
-  await expect(page.getByRole('button', { name: 'Да, мой ответ был верным' })).toHaveCount(0)
   await expect(page.getByRole('group', { name: 'Игрок 2: -100' })).toBeVisible()
-  // Подтверждение: поправка счёта без повторного ответа.
-  await page.getByRole('group', { name: 'Игрок 1: -100' }).getByRole('button', { name: 'Апелляция' }).click()
-  await page.getByRole('button', { name: 'Да, мой ответ был верным' }).click()
-  await expect(page.getByRole('group', { name: 'Игрок 1: 100' })).toBeVisible()
+  await expect(page.getByText(/Апелляция принята/)).toHaveCount(0)
+  // Второе нажатие той же кнопки подтверждает: поправка счёта без повторного ответа.
+  await tile2.getByRole('button', { name: 'Подтвердите апелляцию' }).click()
+  await expect(page.getByRole('group', { name: 'Игрок 2: 100' })).toBeVisible()
+  // Двойная клавиша тоже подаёт апелляцию: левый Ctrl — кнопка первого игрока.
+  await expect(page.getByRole('group', { name: 'Игрок 1: -100' })).toBeVisible()
+  await page.keyboard.press('ControlLeft')
+  await expect(page.getByRole('group', { name: 'Игрок 1: -100' }).getByRole('button', { name: 'Подтвердите апелляцию' })).toBeVisible()
+  await page.keyboard.press('ControlLeft')
+  await expect(page.getByText(/Апелляция принята/).first()).toBeVisible()
   // Подписи «Апелляции: …» под табло нет — она сдвигала вёрстку.
   await expect(page.getByText(/^Апелляции:/)).toHaveCount(0)
-  await expect(page.getByText('Апелляция принята: за этот вопрос у игрока Игрок 1 теперь плюс сто вместо минус ста.', { exact: false }).first()).toBeVisible()
+  await expect(page.getByRole('group', { name: 'Игрок 1: 100' })).toBeVisible()
   await expect(page.locator('.player.active', { hasText: 'Игрок 1' })).toHaveCount(0)
-  await page.getByRole('group', { name: 'Игрок 2: -100' }).getByRole('button', { name: 'Апелляция' }).click()
-  await page.getByRole('button', { name: 'Да, мой ответ был верным' }).click()
   await board(page)
   for (const id of [1, 2, 3]) await expect(page.getByRole('group', { name: `Игрок ${id}: 100` })).toBeVisible()
 })

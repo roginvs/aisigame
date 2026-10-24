@@ -242,16 +242,25 @@ export function GameScreen(props: {
     const state = appealButton(context, path, playerId)
     if (!state) { onBuzz(playerId); return }
     if (!state.enabled || sendingRef.current.has(playerId) || !onAppeal || !context.appeal) return
-    // После объявления ответа переответа нет: игрок только подтверждает, что ответил верно.
-    if (context.appeal.stage === 'closed') { setConfirmAppeal(playerId); return }
+    // После объявления ответа переответа нет, и подтверждения «Да/нет» больше нет:
+    // апелляция подаётся двукратным нажатием той же кнопки (два клика или два раза
+    // пробел/Ctrl) — первое нажатие только подсвечивает её, второе отправляет заявку.
+    if (context.appeal.stage === 'closed') {
+      if (confirmRequest?.playerId === playerId && confirmRequest.windowId === context.appeal.windowId) {
+        setConfirmAppeal(null)
+        sendAppeal(playerId)
+        return
+      }
+      setConfirmAppeal(playerId)
+      return
+    }
     sendAppeal(playerId)
-  }, [context, path, conference?.layout, conference?.selfClientId, onAppeal, onBuzz, sendAppeal, setConfirmAppeal])
+  }, [context, path, conference?.layout, conference?.selfClientId, onAppeal, onBuzz, sendAppeal, setConfirmAppeal, confirmRequest])
   // Подтверждение живёт только в своём окне апелляции.
   const confirmAppeal = confirmRequest && confirmRequest.windowId === context.appeal?.windowId ? confirmRequest.playerId : null
   const confirmState = confirmAppeal === null ? null : appealButton(context, path, confirmAppeal)
   const confirmingId = confirmAppeal !== null && confirmState?.enabled ? confirmAppeal : null
   const confirmYes = () => { if (confirmingId === null) return; setConfirmAppeal(null); sendAppeal(confirmingId) }
-  const confirmNo = () => setConfirmAppeal(null)
 
   async function copyDebug() {
     const result = await downloadDebugDump({ path, context })
@@ -749,7 +758,6 @@ export function GameScreen(props: {
           appealStates={appealStates}
           confirmingId={confirmingId}
           onConfirmYes={confirmYes}
-          onConfirmNo={confirmNo}
           onBuzz={onPlayerAction}
           nudgePlayerId={nudgeAt ? nudgeSelf?.id ?? null : null}
           layout
@@ -779,7 +787,7 @@ export function GameScreen(props: {
                   <strong>{player.name}</strong>
                   <span>{player.score}</span>
                 </div>
-                {confirmingId === playerId ? <AppealConfirm onYes={confirmYes} onNo={confirmNo} /> : (
+                {confirmingId === playerId ? <AppealConfirm onYes={confirmYes} /> : (
                 <button
                   type="button"
                   key={cooling ? 'penalty' : 'ready'}

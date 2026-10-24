@@ -1,9 +1,13 @@
-/** Подтверждение апелляции на месте широкой кнопки: две узкие кнопки той же общей ширины. */
-export function AppealConfirm({ onYes, onNo }: { onYes: () => void; onNo: () => void }) {
+/**
+ * Подтверждение апелляции на месте широкой кнопки: та же большая кнопка, подпись
+ * меняется на «Подтвердите апелляцию». Второе нажатие (клик, пробел, Ctrl) — это
+ * и есть подтверждение; отдельного «нет» нет — первое нажатие само ничего
+ * не отправляет, пока не подтверждено, окно апелляции закроет заявку само.
+ */
+export function AppealConfirm({ onYes }: { onYes: () => void }) {
   return (
-    <div className="appeal-confirm" role="group" aria-label="Апелляция">
-      <button type="button" className="buzzer" aria-label="Да, мой ответ был верным" onClick={onYes}>Да</button>
-      <button type="button" className="buzzer" aria-label="Нет, не надо апелляцию" onClick={onNo}>Нет</button>
-    </div>
+    <button type="button" className="buzzer appeal-await" aria-label="Подтвердите апелляцию" onClick={onYes}>
+      Подтвердите апелляцию
+    </button>
   )
 }

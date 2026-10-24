@@ -55,7 +55,6 @@ export function ConferencePlayersRow(props: {
   /** Чья широкая кнопка апелляции сейчас заменена на «Да / Нет». */
   confirmingId?: number | null
   onConfirmYes?: () => void
-  onConfirmNo?: () => void
   onBuzz: (playerId: PlayerId) => void
   /** Чья кнопка сейчас мигает подсказкой «жми» (только свой игрок, только на этом экране). */
   nudgePlayerId?: PlayerId | null
@@ -192,8 +191,8 @@ export function ConferencePlayersRow(props: {
                 <strong>{label}</strong>
                 <span>{hasMatchData ? player.score : '—'}</span>
               </div>
-              {props.confirmingId === playerId && props.onConfirmYes && props.onConfirmNo ? (
-                <AppealConfirm onYes={props.onConfirmYes} onNo={props.onConfirmNo} />
+              {props.confirmingId === playerId && props.onConfirmYes ? (
+                <AppealConfirm onYes={props.onConfirmYes} />
               ) : (
               <button
                 type="button"

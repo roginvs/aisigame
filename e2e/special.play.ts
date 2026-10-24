@@ -118,7 +118,7 @@ test('кот: запасной разбор моделью (имя и ставк
   await expect(group).toBeVisible()
   await expect(group.getByRole('button', { name: 'Апелляция' })).toBeEnabled()
   await group.getByRole('button', { name: 'Апелляция' }).click()
-  await page.getByRole('button', { name: 'Да, мой ответ был верным' }).click({ timeout: 10_000 })
+  await group.getByRole('button', { name: 'Подтвердите апелляцию' }).click({ timeout: 10_000 })
   await expect(page.getByRole('group', { name: `${target}: 300` })).toBeVisible()
 })
 
