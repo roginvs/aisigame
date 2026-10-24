@@ -5,7 +5,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { buildCommit } from '../buildInfo.ts'
 import { gameMachine, statePath } from '../game/machine.ts'
 import { demoPack } from '../game/questions.ts'
-import type { SavedMatch } from '../game/types.ts'
+import type { Player, SavedMatch } from '../game/types.ts'
 import type { GameVoice } from '../realtime/client.ts'
 import { MasterSession } from './masterSession.ts'
 import { isConferenceMessage, type ConferenceMessage, type ConferenceState } from './messages.ts'
@@ -931,6 +931,58 @@ describe('MasterSession resume', () => {
       'attacker-endpoint',
     )
     expect(send).not.toHaveBeenCalled()
+
+    session.dispose()
+    actor.stop()
+  })
+
+  it('два имени одного устройства — два игрока; кнопка и ставка несут playerId, чужой id молчит', () => {
+    const actor = createActor(gameMachine)
+    actor.start()
+    const transport = new MemoryTransport()
+    const session = new MasterSession({
+      transport,
+      client: { requestSpeech: vi.fn() } as unknown as GameVoice,
+      actor,
+      masterClientId: 'master-client',
+      masterName: 'Мастер',
+      pack: demoPack,
+      packBytes: new Uint8Array([1, 2, 3]),
+      packHash: 'hash',
+      authorityToken: 'master-token',
+      onRoster: () => {},
+    })
+    transport.receive({
+      type: 'hello',
+      clientId: 'guest-client',
+      authToken: 'guest-token',
+      name: 'Аня, Боря',
+      names: ['Аня', 'Боря'],
+    })
+    transport.receive({ type: 'packVerified', clientId: 'guest-client', authToken: 'guest-token', hash: 'hash' })
+    transport.receive({ type: 'ready', clientId: 'guest-client', authToken: 'guest-token' })
+    const started: Player[] = []
+    session.startGame((players) => {
+      started.push(...players)
+      actor.send({ type: 'START_GAME', pack: demoPack, players })
+      actor.send({ type: 'CONNECTED' })
+    })
+    expect(started.map((player) => player.name)).toEqual(['Мастер', 'Аня', 'Боря'])
+    expect(started.filter((player) => player.clientId === 'guest-client').map((player) => player.id)).toEqual([2, 3])
+
+    const send = vi.spyOn(actor, 'send')
+    transport.receive({ type: 'buzz', clientId: 'guest-client', authToken: 'guest-token', playerId: 3 })
+    expect(send).toHaveBeenCalledWith({ type: 'BUZZER_PRESSED', playerId: 3 })
+    send.mockClear()
+    transport.receive({ type: 'buzz', clientId: 'guest-client', authToken: 'guest-token', playerId: 1 })
+    expect(send).not.toHaveBeenCalled()
+    transport.receive({ type: 'buzz', clientId: 'guest-client', authToken: 'guest-token' })
+    expect(send).not.toHaveBeenCalled()
+    transport.receive({ type: 'finalStake', clientId: 'guest-client', authToken: 'guest-token', playerId: 2, amount: 10 })
+    expect(send).toHaveBeenCalledWith({ type: 'FINAL_STAKE', playerId: 2, amount: 10 })
+    send.mockClear()
+    transport.receive({ type: 'finalAnswer', clientId: 'guest-client', authToken: 'guest-token', playerId: 3, text: 'море' })
+    expect(send).toHaveBeenCalledWith({ type: 'FINAL_TYPED', playerId: 3, text: 'море' })
 
     session.dispose()
     actor.stop()

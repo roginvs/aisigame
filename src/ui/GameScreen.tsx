@@ -32,7 +32,7 @@ import { buzzerLabel } from './buzzerLabel.ts'
 import { nudgeActive, nudgeLevelOverride } from './buzzNudge.ts'
 import { useBuzzNudge } from './useBuzzNudge.ts'
 import { useFitQuestionText } from './questionFit.ts'
-import { buzzKeyLabel, isKeyboardPlayer, playerFromBuzzKey } from './buzzKeys.ts'
+import { buzzKeyLabel, isKeyboardPlayer, playerFromBuzzKey, playerIdFromLocalBuzzKey } from './buzzKeys.ts'
 import { ConversationChat } from './DebugChat.tsx'
 import { packProgressLabel } from '../conference/packProgress.ts'
 import { canBuzzPlayer, canPickCell, conferenceSoloListenHint, conferenceTurnTitle } from './conferenceTurn.ts'
@@ -308,14 +308,20 @@ export function GameScreen(props: {
   const earlyLive = path === 'reading.armed'
   const canFalseStart = falseStartOpen(path, finalRound)
   // Локальная подсказка «жми кнопку»: только свой игрок, только из полученного состояния и своего микрофона.
-  const nudgeSelf = conference?.layout ? context.players.find((player) => canBuzzPlayer(true, conference.selfClientId, player)) : undefined
+  const nudgeSeats = conference?.layout
+    ? context.players.filter((player) => {
+        if (!canBuzzPlayer(true, conference.selfClientId, player)) return false
+        if (context.missedIds.includes(player.id) || context.activePlayerId === player.id) return false
+        return !falseStartCooling(context.falseStarts[player.id], penaltyClock)
+      })
+    : []
   const nudgeOn = nudgeActive({
     path,
     finalRound,
-    hasSelf: Boolean(nudgeSelf),
-    missed: nudgeSelf ? context.missedIds.includes(nudgeSelf.id) : false,
-    answering: nudgeSelf ? context.activePlayerId === nudgeSelf.id : false,
-    cooling: nudgeSelf ? falseStartCooling(context.falseStarts[nudgeSelf.id], penaltyClock) : false,
+    hasSelf: nudgeSeats.length > 0,
+    missed: false,
+    answering: false,
+    cooling: false,
     micLive: Boolean((conference?.tiles ?? []).find((tile) => tile.isLocal)?.micLive) || nudgeLevelOverride() !== null,
   })
   const nudgeAt = useBuzzNudge(conference?.localMicStream, nudgeOn)
@@ -403,15 +409,24 @@ export function GameScreen(props: {
 
   useEffect(() => {
     if (conference?.layout) {
-      const self = context.players.find((player) => canBuzzPlayer(true, conference.selfClientId, player))
-      if (!self || conference.lobby) return
-      const selfPlayerId = self.id
+      if (conference.lobby) return
+      const localIds = context.players
+        .filter((player) => canBuzzPlayer(true, conference.selfClientId, player))
+        .map((player) => player.id)
+      if (localIds.length === 0) return
       function onKeyDown(event: KeyboardEvent) {
-        if (event.code !== 'Space' || event.repeat) return
+        if (event.repeat) return
         const target = event.target
         if (target instanceof HTMLElement && target.closest('input, textarea, select, .model-name, [contenteditable="true"]')) return
+        const playerId = playerIdFromLocalBuzzKey(event.code, {
+          alt: event.altKey,
+          ctrl: event.ctrlKey,
+          meta: event.metaKey,
+          shift: event.shiftKey,
+        }, localIds)
+        if (playerId === null) return
         event.preventDefault()
-        onPlayerAction(selfPlayerId)
+        onPlayerAction(playerId)
       }
       window.addEventListener('keydown', onKeyDown)
       return () => window.removeEventListener('keydown', onKeyDown)
@@ -759,7 +774,7 @@ export function GameScreen(props: {
           confirmingId={confirmingId}
           onConfirmYes={confirmYes}
           onBuzz={onPlayerAction}
-          nudgePlayerId={nudgeAt ? nudgeSelf?.id ?? null : null}
+          nudgePlayerIds={nudgeAt ? nudgeSeats.map((player) => player.id) : []}
           layout
         />
       ) : (

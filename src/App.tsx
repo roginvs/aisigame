@@ -25,6 +25,7 @@ import {
   type MatchMode,
 } from './conference/prefs.ts'
 import { contextFromSnapshot } from './conference/snapshotView.ts'
+import { conferenceDisplayName, deviceSpeechPlayerId, rosterSeats } from './conference/seats.ts'
 import { jitsiHostFromBase, stripInviteParams } from './conference/stripInvite.ts'
 import { focusedModelParticipantId } from './conference/audioMix.ts'
 import type { ConferenceHandle, ConferenceTile } from './conference/media.ts'
@@ -54,7 +55,7 @@ import {
 } from './game/savedGame.ts'
 import { loadSiq, revokePackMedia } from './game/siq.ts'
 import { preferredPackId, readStartPrefs, writeStartPrefs } from './game/startPrefs.ts'
-import type { PlayerId, QuestionPack } from './game/types.ts'
+import type { GameContext, PlayerId, QuestionPack } from './game/types.ts'
 import type { LinkStatus } from './realtime/client.ts'
 import { MockRealtimeClient } from './realtime/mockClient.ts'
 import {
@@ -768,9 +769,18 @@ export default function App() {
         return
       }
       const entry = masterSessionRef.current?.rosterList().find((item) => item.clientId === clientId)
-      if (!entry || entry.playerId === null) return
-      if (end) controllerActionsRef.current?.answerSilentCommit(entry.playerId, end.durationMs)
-      else controllerActionsRef.current?.speechEpisode(entry.playerId)
+      if (!entry || !snapshot) return
+      const playerId = deviceSpeechPlayerId({
+        seatIds: rosterSeats(entry).flatMap((seat) => (seat.playerId === null ? [] : [seat.playerId])),
+        phase: snapshot.phase,
+        answererId: snapshot.answererId,
+        chooserId: snapshot.chooserId,
+        missedIds: snapshot.missedIds,
+        listenerId: specialListenerId(snapshot.phase, { special: snapshot.special } as GameContext),
+      })
+      if (playerId === null) return
+      if (end) controllerActionsRef.current?.answerSilentCommit(playerId, end.durationMs)
+      else controllerActionsRef.current?.speechEpisode(playerId)
     })
   }
 
@@ -859,7 +869,7 @@ export default function App() {
         roomId,
         useBroadcast,
         jitsiBase: roomJitsi,
-        displayName: roomMasterName,
+        displayName: conferenceDisplayName(roomMasterName),
         publishHost: true,
         onError: conferenceConnectionFailed,
         onSoundsLost: gameSoundsLost,
@@ -1044,7 +1054,7 @@ export default function App() {
         roomId,
         useBroadcast,
         jitsiBase: baseJitsi,
-        displayName: name,
+        displayName: conferenceDisplayName(name),
         onError: conferenceConnectionFailed,
       })
       attachConferenceHandle(handle)
@@ -1310,6 +1320,7 @@ export default function App() {
         clientId: entry.clientId,
         name: entry.name,
         playerId: entry.playerId,
+        seats: rosterSeats(entry),
         percent: isSelf ? joinerLobby.percent : entry.percent,
         downloadBps: entry.downloadBps ?? null,
         etaSeconds: entry.etaSeconds ?? null,
@@ -1413,9 +1424,9 @@ export default function App() {
         if (conferenceRole === 'joiner') {
           const session = joinerSessionRef.current
           if (!session) return
-          if (pick.target === 'player') session.sendSpecialPick({ target: 'player', playerId: pick.playerId })
-          else if (pick.target === 'stake') session.sendSpecialPick({ target: 'stake', amount: pick.amount })
-          else session.sendSpecialPick({ target: 'auction', choice: pick.option.kind === 'stake' ? pick.option.amount : pick.option.kind })
+          if (pick.target === 'player') session.sendSpecialPick({ target: 'player', playerId: pick.playerId, actorId: playerId })
+          else if (pick.target === 'stake') session.sendSpecialPick({ target: 'stake', amount: pick.amount, actorId: playerId })
+          else session.sendSpecialPick({ target: 'auction', choice: pick.option.kind === 'stake' ? pick.option.amount : pick.option.kind, actorId: playerId })
           return
         }
         if (pick.target === 'player') send({ type: 'CAT_RECIPIENT', playerId: pick.playerId })
@@ -1424,7 +1435,7 @@ export default function App() {
       }}
       onFinalStake={(playerId, amount) => {
         if (conferenceRole === 'joiner') {
-          joinerSessionRef.current?.sendFinalStake(amount)
+          joinerSessionRef.current?.sendFinalStake(amount, playerId)
           return
         }
         if (conferenceRole === 'master') {
@@ -1435,7 +1446,7 @@ export default function App() {
       }}
       onFinalAnswer={(playerId, text) => {
         if (conferenceRole === 'joiner') {
-          joinerSessionRef.current?.sendFinalAnswer(text)
+          joinerSessionRef.current?.sendFinalAnswer(text, playerId)
           return
         }
         if (conferenceRole === 'master') {
@@ -1446,7 +1457,7 @@ export default function App() {
       }}
       onBuzz={(playerId: PlayerId) => {
         if (conferenceRole === 'joiner') {
-          joinerSessionRef.current?.sendBuzz()
+          joinerSessionRef.current?.sendBuzz(playerId)
           return
         }
         if (conferenceRole === 'master') {

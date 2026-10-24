@@ -4,19 +4,25 @@ import {
   PRESENCE_STALE_MS,
   applyPresence,
   forgetPlayer,
-  lookupRememberedPlayer,
-  mergeReturningPlayer,
+  lookupRememberedSeats,
   rememberPlayer,
   touch,
   type PresenceEntry,
 } from './presence.ts'
 import type { Player } from '../game/types.ts'
 import { stickyPackPhase, type PackPhase } from './packProgress.ts'
+import { rosterSeats, seatLabel, type RosterSeat } from './seats.ts'
+
+export type { RosterSeat }
 
 export type RosterEntry = {
   clientId: string
+  /** Подпись устройства: одно имя или «Аня, Боря». */
   name: string
+  /** Первое место. Игровые действия смотрят seats, не это поле. */
   playerId: number | null
+  /** Места устройства. Нет поля — одно место из name/playerId. */
+  seats?: RosterSeat[]
   percent: number
   /** Оценка скорости приёма пакета у этого клиента, байт/с; null если ещё рано или готово. */
   downloadBps: number | null
@@ -44,16 +50,19 @@ export class ConferenceRoster {
     return this.masterClientId
   }
 
-  constructor(masterClientId: string, masterName: string, startPlayerId = 2) {
+  constructor(masterClientId: string, masterName: string | readonly string[], startPlayerId = 2) {
+    const seatNames = normalizeRosterNames(masterName)
     this.masterClientId = masterClientId
-    this.masterName = masterName
-    this.nextPlayerId = startPlayerId
+    this.masterName = seatLabel(seatNames)
+    const seats = seatNames.map((name, index) => ({ name, playerId: index + 1 }))
+    this.nextPlayerId = Math.max(startPlayerId, seatNames.length + 1)
     const now = Date.now()
     touch(masterClientId, now)
     this.entries.set(masterClientId, {
       clientId: masterClientId,
-      name: masterName,
-      playerId: 1,
+      name: this.masterName,
+      playerId: seats[0]?.playerId ?? 1,
+      seats,
       percent: 100,
       downloadBps: null,
       etaSeconds: null,
@@ -70,26 +79,50 @@ export class ConferenceRoster {
   setMasterName(name: string): void {
     this.masterName = name.trim() || this.masterName
     const entry = this.entries.get(this.masterClientId)
-    if (entry) this.entries.set(this.masterClientId, { ...entry, name: this.masterName })
+    if (!entry) return
+    const seats = rosterSeats(entry)
+    const nextSeats = seats.length === 1 ? [{ name: this.masterName, playerId: seats[0]?.playerId ?? entry.playerId }] : seats
+    this.entries.set(this.masterClientId, { ...entry, name: this.masterName, seats: nextSeats })
   }
 
-  upsertHello(clientId: string, name: string, now = Date.now()): RosterEntry {
+  upsertHello(clientId: string, name: string | readonly string[], now = Date.now()): RosterEntry {
     touch(clientId, now)
+    const names = normalizeRosterNames(name)
     const existing = this.entries.get(clientId)
     if (existing) {
-      const next = { ...existing, name: name.trim() || existing.name, lastSeen: now }
+      const locked = rosterSeats(existing).some((seat) => seat.playerId !== null)
+      const seats = locked
+        ? rosterSeats(existing)
+        : names.map((seatName) => ({ name: seatName, playerId: null }))
+      const next = {
+        ...existing,
+        name: locked ? existing.name : seatLabel(seats.map((seat) => seat.name)),
+        playerId: locked ? existing.playerId : null,
+        seats,
+        lastSeen: now,
+      }
       this.entries.set(clientId, this.withPresence(next, now))
       return this.withPresence(next, now)
     }
-    const returning = mergeReturningPlayer(clientId, name, now)
-    const playerId = returning?.playerId ?? null
-    if (returning) {
-      rememberPlayer({ clientId, playerId: returning.playerId, score: returning.score, name: returning.name })
+    const remembered = lookupRememberedSeats(clientId)
+    const seats: RosterSeat[] = remembered?.length
+      ? remembered.map((seat) => ({ name: seat.name, playerId: seat.playerId }))
+      : names.map((seatName) => ({ name: seatName, playerId: null }))
+    const playerId = seats[0]?.playerId ?? null
+    if (remembered?.length) {
+      rememberPlayer({
+        clientId,
+        playerId: remembered[0]?.playerId ?? 0,
+        score: remembered[0]?.score ?? 0,
+        name: remembered[0]?.name ?? names[0] ?? 'Игрок',
+        seats: remembered,
+      })
     }
     const entry: RosterEntry = {
       clientId,
-      name: name.trim() || 'Игрок',
+      name: seatLabel(seats.map((seat) => seat.name)),
       playerId,
+      seats,
       percent: 0,
       downloadBps: null,
       etaSeconds: null,
@@ -136,13 +169,40 @@ export class ConferenceRoster {
   }
 
   assignPlayerId(clientId: string): number | null {
+    return this.assignSeats(clientId)[0] ?? null
+  }
+
+  /** Выдаёт id всем местам устройства, у которых его ещё нет. Уже выданные не двигает. */
+  assignSeats(clientId: string): number[] {
     const entry = this.entries.get(clientId)
-    if (!entry || entry.playerId !== null) return entry?.playerId ?? null
-    const remembered = lookupRememberedPlayer(clientId)
-    const id = remembered?.playerId ?? this.nextPlayerId++
-    this.nextPlayerId = Math.max(this.nextPlayerId, id + 1)
-    this.entries.set(clientId, { ...entry, playerId: id })
-    return id
+    if (!entry) return []
+    let changed = false
+    const seats = rosterSeats(entry).map((seat) => {
+      if (seat.playerId !== null) return seat
+      changed = true
+      const id = this.nextPlayerId++
+      return { ...seat, playerId: id }
+    })
+    const ids = seats.flatMap((seat) => (seat.playerId === null ? [] : [seat.playerId]))
+    if (changed || entry.playerId !== (ids[0] ?? null) || !entry.seats) {
+      const remembered = lookupRememberedSeats(clientId) ?? []
+      const stored = seats.flatMap((seat) => {
+        if (seat.playerId === null) return []
+        const prev = remembered.find((item) => item.playerId === seat.playerId)
+        return [{ playerId: seat.playerId, score: prev?.score ?? 0, name: seat.name }]
+      })
+      const first = stored[0]
+      if (first) {
+        rememberPlayer({ clientId, playerId: first.playerId, score: first.score, name: first.name, seats: stored })
+      }
+      this.entries.set(clientId, {
+        ...entry,
+        seats,
+        playerId: ids[0] ?? null,
+        name: seatLabel(seats.map((seat) => seat.name)),
+      })
+    }
+    return ids
   }
 
   /**
@@ -150,42 +210,32 @@ export class ConferenceRoster {
    * Сами отсутствующие клиенты не добавляются в видимый roster: они появятся после hello.
    */
   restorePlayers(players: readonly Player[]): void {
-    const master =
-      players.find((player) => player.clientId === this.masterClientId) ??
-      players.find((player) => player.id === 1) ??
-      players[0]
-    if (master) {
-      const current = this.entries.get(this.masterClientId)
-      if (current) {
-        this.masterName = master.name
-        this.entries.set(this.masterClientId, {
-          ...current,
-          name: master.name,
-          playerId: master.id,
-        })
-      }
-      rememberPlayer({
-        clientId: this.masterClientId,
-        playerId: master.id,
-        score: master.score,
-        name: master.name,
-      })
-    }
-
+    const groups = new Map<string, Player[]>()
     for (const player of players) {
       this.nextPlayerId = Math.max(this.nextPlayerId, player.id + 1)
       const savedClientId = player.clientId?.trim()
-      if (!savedClientId || savedClientId === this.masterClientId) continue
-      rememberPlayer({
-        clientId: savedClientId,
-        playerId: player.id,
-        score: player.score,
-        name: player.name,
+      if (!savedClientId) continue
+      const group = groups.get(savedClientId) ?? []
+      group.push(player)
+      groups.set(savedClientId, group)
+    }
+    for (const [clientId, group] of groups) {
+      group.sort((left, right) => left.id - right.id)
+      const seats = group.map((player) => ({ playerId: player.id, score: player.score, name: player.name }))
+      const first = seats[0]
+      if (!first) continue
+      rememberPlayer({ clientId, playerId: first.playerId, score: first.score, name: first.name, seats })
+      const existing = this.entries.get(clientId)
+      const rosterSeatsHere = group.map((player) => ({ name: player.name, playerId: player.id }))
+      const label = seatLabel(group.map((player) => player.name))
+      if (clientId === this.masterClientId) this.masterName = label
+      if (!existing) continue
+      this.entries.set(clientId, {
+        ...existing,
+        name: label,
+        playerId: first.playerId,
+        seats: rosterSeatsHere,
       })
-      const existing = this.entries.get(savedClientId)
-      if (existing) {
-        this.entries.set(savedClientId, { ...existing, name: player.name, playerId: player.id })
-      }
     }
   }
 
@@ -257,4 +307,10 @@ export class ConferenceRoster {
     const view = views[0]
     return { ...entry, stale: view?.stale ?? false, hidden: view?.hidden ?? false }
   }
+}
+
+function normalizeRosterNames(name: string | readonly string[]): string[] {
+  const raw = typeof name === 'string' ? [name] : [...name]
+  const names = raw.map((item) => item.trim().slice(0, 40)).filter((item) => item.length > 0).slice(0, 8)
+  return names.length > 0 ? names : ['Игрок']
 }

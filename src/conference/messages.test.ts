@@ -8,6 +8,9 @@ describe('isConferenceMessage', () => {
     ).toBe(true)
     expect(isConferenceMessage({ type: 'hello', clientId: 'client', name: 'Игрок' })).toBe(false)
     expect(isConferenceMessage({ type: 'hello', clientId: {}, authToken: 'secret', name: 'Игрок' })).toBe(false)
+    expect(isConferenceMessage({ type: 'hello', clientId: 'client', authToken: 'secret', names: ['Аня', 'Боря'] })).toBe(true)
+    expect(isConferenceMessage({ type: 'hello', clientId: 'client', authToken: 'secret', names: [] })).toBe(false)
+    expect(isConferenceMessage({ type: 'buzz', clientId: 'client', authToken: 'secret', playerId: 2 })).toBe(true)
   })
 
   it('отбрасывает неизвестные, чрезмерные и неполные сообщения', () => {

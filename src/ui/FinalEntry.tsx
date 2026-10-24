@@ -32,6 +32,7 @@ export function FinalEntry(props: {
   const entered = (id: PlayerId) =>
     kind === 'stake' ? context.bets.some((bet) => bet.playerId === id) : (context.typedIds ?? []).includes(id)
   const scoreOf = (id: PlayerId) => context.players.find((player) => player.id === id)?.score ?? 0
+  const focusId = context.finalists.find((id) => !entered(id) && canAct(id))
   return (
     <article className={kind === 'stake' ? 'question final-entry' : 'question special-panel final-entry'} aria-label={kind === 'stake' ? 'Ставки финала' : 'Ответы финала'}>
       {kind === 'stake' ? (
@@ -82,7 +83,7 @@ export function FinalEntry(props: {
               </label>
               <input
                 name="value"
-                autoFocus
+                autoFocus={id === focusId}
                 inputMode={kind === 'stake' ? 'numeric' : 'text'}
                 autoComplete="off"
                 maxLength={kind === 'stake' ? 7 : 200}

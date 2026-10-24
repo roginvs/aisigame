@@ -1,5 +1,6 @@
 import { useState } from 'react'
 import { readConferenceName, writeConferenceName } from '../conference/prefs.ts'
+import { seatNamesFromText } from '../conference/seats.ts'
 
 export function JoinConfirmScreen(props: {
   jitsiHost: string
@@ -22,18 +23,21 @@ export function JoinConfirmScreen(props: {
         </p>
         <label className="field">
           <span>Ваше имя</span>
-          <input
+          <textarea
+            rows={2}
             value={name}
+            placeholder="Аня; Боря"
             spellCheck={false}
             disabled={busy}
             onChange={(event) => setName(event.target.value)}
           />
         </label>
+        <p className="status-line">Имя с новой строки или через точку с запятой — вы и остальные за этим устройством.</p>
         <div className="row">
           <button
             type="button"
             className="primary"
-            disabled={!name.trim() || busy}
+            disabled={seatNamesFromText(name).length === 0 || busy}
             onClick={() => {
               writeConferenceName(name)
               props.onJoin(name.trim())

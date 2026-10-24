@@ -1909,7 +1909,7 @@ describe('game machine', () => {
     expect(snap.context.players).toContainEqual({ id: 4, name: 'Удалённый', score: 0, clientId: 'client-4' })
   })
 
-  it('ADD_PLAYER с тем же clientId не дублирует игрока', () => {
+  it('ADD_PLAYER сажает второе место на тот же clientId и не дублирует id', () => {
     const actor = reachBuzzing()
     actor.send({
       type: 'ADD_PLAYER',
@@ -1919,9 +1919,15 @@ describe('game machine', () => {
       type: 'ADD_PLAYER',
       player: { id: 5, name: 'Второй', score: 0, clientId: 'same-client' },
     })
+    actor.send({
+      type: 'ADD_PLAYER',
+      player: { id: 5, name: 'Снова второй', score: 100, clientId: 'same-client' },
+    })
     const ids = actor.getSnapshot().context.players.filter((player) => player.clientId === 'same-client')
-    expect(ids).toHaveLength(1)
-    expect(ids[0]).toMatchObject({ id: 4, name: 'Первый', score: 0 })
+    expect(ids).toEqual([
+      { id: 4, name: 'Первый', score: 0, clientId: 'same-client' },
+      { id: 5, name: 'Второй', score: 0, clientId: 'same-client' },
+    ])
   })
 
   it('пауза в лобби: из startMenu можно встать на паузу и «Дальше» возвращает в startMenu', () => {

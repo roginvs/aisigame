@@ -2,6 +2,7 @@ import { useRef } from 'react'
 import { ownPackId, packCatalog } from '../game/catalog.ts'
 import { defaultPlayerNames } from '../game/players.ts'
 import type { MatchMode } from '../conference/prefs.ts'
+import { seatNamesFromText } from '../conference/seats.ts'
 import type { LinkStatus } from '../realtime/client.ts'
 import { keyFieldLabel, voiceById, voiceModels } from '../realtime/models.ts'
 import { startBuildInfo } from '../buildInfo.ts'
@@ -167,14 +168,21 @@ export function StartScreen(props: {
                 </p>
               </>
             ) : (
-              <label className="field">
-                <span>Ваше имя</span>
-                <input
-                  value={conferenceName}
-                  spellCheck={false}
-                  onChange={(event) => onConferenceName(event.target.value)}
-                />
-              </label>
+              <>
+                <label className="field">
+                  <span>Ваше имя</span>
+                  <textarea
+                    rows={2}
+                    value={conferenceName}
+                    placeholder="Аня; Боря"
+                    spellCheck={false}
+                    onChange={(event) => onConferenceName(event.target.value)}
+                  />
+                </label>
+                <p className="status-line">
+                  Имя с новой строки или через точку с запятой — вы и остальные за этим устройством.
+                </p>
+              </>
             )}
           </div>
           <div className="start-col">
@@ -298,7 +306,7 @@ export function StartScreen(props: {
             loadingPack ||
             !packReady ||
             (needsKey && apiKey.trim().length === 0) ||
-            (matchMode === 'conference' && conferenceName.trim().length === 0)
+            (matchMode === 'conference' && seatNamesFromText(conferenceName).length === 0)
           }
           onClick={onStart}
         >

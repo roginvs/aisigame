@@ -1371,7 +1371,7 @@ export const gameMachine = setup({
         if (event.type !== 'ADD_PLAYER') return context.players
         const clientId = event.player.clientId?.trim()
         if (!clientId) return context.players
-        if (context.players.some((player) => player.clientId === clientId)) return context.players
+        if (context.players.some((player) => player.id === event.player.id)) return context.players
         return [...context.players, { ...event.player, clientId }]
       },
     }),

@@ -15,29 +15,36 @@ export type PresenceView = PresenceEntry & {
   hidden: boolean
 }
 
-type RememberedPlayer = {
+type RememberedSeat = {
   playerId: number
   score: number
   name: string
 }
 
-const remembered = new Map<string, RememberedPlayer>()
+type RememberedPlayer = RememberedSeat
+
+const remembered = new Map<string, RememberedSeat[]>()
 
 export function rememberPlayer(input: {
   clientId: string
   playerId: number
   score: number
   name: string
+  seats?: readonly RememberedSeat[]
 }): void {
-  remembered.set(input.clientId, {
-    playerId: input.playerId,
-    score: input.score,
-    name: input.name,
-  })
+  const seats = input.seats?.length
+    ? input.seats.map((seat) => ({ playerId: seat.playerId, score: seat.score, name: seat.name }))
+    : [{ playerId: input.playerId, score: input.score, name: input.name }]
+  remembered.set(input.clientId, seats)
 }
 
 export function lookupRememberedPlayer(clientId: string): RememberedPlayer | null {
-  return remembered.get(clientId) ?? null
+  return remembered.get(clientId)?.[0] ?? null
+}
+
+export function lookupRememberedSeats(clientId: string): RememberedSeat[] | null {
+  const seats = remembered.get(clientId)
+  return seats?.length ? seats.map((seat) => ({ ...seat })) : null
 }
 
 const lastSeenByClient = new Map<string, number>()
@@ -65,7 +72,7 @@ export function mergeReturningPlayer(
   name: string,
   now: number,
 ): { playerId: number; score: number; name: string; lastSeen: number } | null {
-  const prev = remembered.get(clientId)
+  const prev = remembered.get(clientId)?.[0]
   if (!prev) return null
   return {
     playerId: prev.playerId,

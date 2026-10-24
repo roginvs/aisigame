@@ -90,4 +90,22 @@ describe('rememberPlayer / returning', () => {
     roster.upsertHello('new-client', 'Новый игрок')
     expect(roster.assignPlayerId('new-client')).toBe(5)
   })
+
+  it('два места одного clientId восстанавливаются вместе и не пересаживаются новым hello', () => {
+    const roster = new ConferenceRoster('master-client', ['Мастер'])
+    roster.restorePlayers([
+      { id: 1, name: 'Мастер', score: 0, clientId: 'master-client' },
+      { id: 4, name: 'Аня', score: 100, clientId: 'tablet' },
+      { id: 5, name: 'Боря', score: 200, clientId: 'tablet' },
+    ])
+    const back = roster.upsertHello('tablet', ['Боря', 'Аня'])
+    expect(back.seats).toEqual([
+      { name: 'Аня', playerId: 4 },
+      { name: 'Боря', playerId: 5 },
+    ])
+    expect(back.name).toBe('Аня, Боря')
+    expect(roster.assignPlayerId('tablet')).toBe(4)
+    roster.upsertHello('fresh', ['Вика', 'Гена'])
+    expect(roster.assignSeats('fresh')).toEqual([6, 7])
+  })
 })

@@ -39,10 +39,17 @@ export type ConferenceSnapshotPlayer = {
 /** `[jitsiId, clientId]` — см. `ConferenceSnapshot.jitsiIds`. */
 export type ConferenceJitsiPair = [jitsiId: string, clientId: string]
 
+export type ConferencePresenceSeat = {
+  name: string
+  playerId: number | null
+}
+
 export type ConferenceSnapshotPresence = {
   clientId: string
   name: string
   playerId: number | null
+  /** Места устройства. Старый снимок без поля — одно место из name/playerId. */
+  seats?: ConferencePresenceSeat[]
   isMaster: boolean
   stale: boolean
   hidden: boolean
@@ -185,7 +192,10 @@ export type HelloMessage = {
   type: 'hello'
   clientId: string
   authToken: string
-  name: string
+  /** Подпись устройства. Старый клиент шлёт только её — это одно место. */
+  name?: string
+  /** Места устройства по порядку. Новый клиент шлёт их и подпись name. */
+  names?: string[]
 }
 
 export type PackOfferMessage = {
@@ -285,6 +295,8 @@ export type BuzzMessage = {
   type: 'buzz'
   clientId: string
   authToken: string
+  /** Чья кнопка. Нет поля — единственное место устройства. */
+  playerId?: number
 }
 
 /** Игрок → мастер: toggle паузы. Ставит паузу или снимает по текущему состоянию машины. */
@@ -308,7 +320,10 @@ export type SpecialPickMessage = {
   clientId: string
   authToken: string
   target: 'player' | 'stake' | 'auction'
+  /** Кого выбрали котом. Не путать с местом, которое нажало. */
   playerId?: number
+  /** Место устройства, которое нажало. Одно место на устройстве можно не слать. */
+  actorId?: number
   amount?: number
   choice?: 'pass' | 'allIn' | number
 }
@@ -319,6 +334,8 @@ export type FinalStakeMessage = {
   clientId: string
   authToken: string
   amount: number
+  /** Чья ставка. Нет поля — единственное место устройства. */
+  playerId?: number
 }
 
 /** Финал: игрок печатает скрытый ответ. Мастер проверяет право и длину. */
@@ -327,6 +344,8 @@ export type FinalAnswerMessage = {
   clientId: string
   authToken: string
   text: string
+  /** Чей ответ. Нет поля — единственное место устройства. */
+  playerId?: number
 }
 
 export type ChatMessage = {
@@ -403,7 +422,7 @@ export function isConferenceMessage(value: unknown): value is ConferenceMessage 
   const client = () => shortString(value.clientId, 200) && shortString(value.authToken, 300)
   switch (value.type) {
     case 'hello':
-      return client() && shortString(value.name, 100)
+      return client() && validHelloNames(value)
     case 'packOffer':
       return (
         authority(value) &&
@@ -447,7 +466,7 @@ export function isConferenceMessage(value: unknown): value is ConferenceMessage 
     case 'statusRequest':
     case 'ready':
     case 'buzz':
-      return client()
+      return client() && (value.playerId === undefined || integer(value.playerId, 1))
     case 'pause':
       return client()
     case 'appeal':
@@ -458,13 +477,16 @@ export function isConferenceMessage(value: unknown): value is ConferenceMessage 
       return client() && shortString(value.themeId, 500) && Number.isFinite(value.value)
     case 'specialPick':
       return client() && (
+        (value.actorId === undefined || integer(value.actorId, 1)) && (
         (value.target === 'player' && integer(value.playerId, 1)) ||
         (value.target === 'stake' && integer(value.amount, 1)) ||
-        (value.target === 'auction' && (value.choice === 'pass' || value.choice === 'allIn' || integer(value.choice, 1))))
+        (value.target === 'auction' && (value.choice === 'pass' || value.choice === 'allIn' || integer(value.choice, 1)))))
     case 'finalStake':
-      return client() && Number.isInteger(value.amount) && (value.amount as number) >= 0 && (value.amount as number) <= 1_000_000
+      return client() && Number.isInteger(value.amount) && (value.amount as number) >= 0 && (value.amount as number) <= 1_000_000 &&
+        (value.playerId === undefined || integer(value.playerId, 1))
     case 'finalAnswer':
-      return client() && typeof value.text === 'string' && value.text.trim().length > 0 && value.text.length <= 200
+      return client() && typeof value.text === 'string' && value.text.trim().length > 0 && value.text.length <= 200 &&
+        (value.playerId === undefined || integer(value.playerId, 1))
     case 'chat':
       return client() && typeof value.text === 'string' && value.text.length <= 4_000
     case 'audioSinkNote':
@@ -678,9 +700,32 @@ export function validJitsiPairs(value: unknown): boolean {
   return true
 }
 
+function validHelloNames(value: Record<string, unknown>): boolean {
+  const names = value.names
+  const nameOk = value.name === undefined || shortString(value.name, 100)
+  if (names === undefined) return nameOk && shortString(value.name, 100)
+  if (!Array.isArray(names) || names.length < 1 || names.length > 8) return false
+  return nameOk && names.every((item) => typeof item === 'string' && item.trim().length > 0 && item.trim().length <= 40)
+}
+
+function validPresenceSeats(value: unknown): boolean {
+  if (value === undefined) return true
+  if (!Array.isArray(value) || value.length < 1 || value.length > 8) return false
+  const ids = new Set<number>()
+  for (const seat of value) {
+    if (!isRecord(seat) || !shortString(seat.name, 40)) return false
+    if (seat.playerId !== null && !integer(seat.playerId, 1)) return false
+    if (typeof seat.playerId === 'number') {
+      if (ids.has(seat.playerId)) return false
+      ids.add(seat.playerId)
+    }
+  }
+  return true
+}
+
 function validPresence(value: unknown): boolean {
   return isRecord(value) && shortString(value.clientId, 200) && shortString(value.name, 100) &&
-    nullableInteger(value.playerId) && typeof value.isMaster === 'boolean' && typeof value.stale === 'boolean' &&
+    nullableInteger(value.playerId) && validPresenceSeats(value.seats) && typeof value.isMaster === 'boolean' && typeof value.stale === 'boolean' &&
     typeof value.hidden === 'boolean' && Number.isFinite(value.percent) && typeof value.ready === 'boolean' &&
     typeof value.hashOk === 'boolean' &&
     (value.downloadBps === undefined || value.downloadBps === null || Number.isFinite(value.downloadBps)) &&

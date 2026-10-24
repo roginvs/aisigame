@@ -355,6 +355,61 @@ test.describe('конференция на BroadcastChannel', () => {
     await expect(master.locator('.board')).toBeVisible({ timeout: 30_000 })
     await expect(joiner.locator('.stage-pause')).toHaveCount(0)
   })
+
+  test('двое имён на одном устройстве — два игрока, одна камера, оба жмут свою кнопку', async ({ browser }) => {
+    test.setTimeout(120_000)
+    const context = await browser.newContext()
+    await context.grantPermissions(['clipboard-read', 'clipboard-write'])
+    const master = await context.newPage()
+    const joiner = await context.newPage()
+    await master.goto('/?mock=1&transport=broadcast')
+    await master.getByLabel('Модель').selectOption('mock')
+    await master.getByRole('radio', { name: 'Конференция' }).check()
+    await master.getByLabel('Пакет вопросов').selectOption('demo')
+    await master.getByLabel('Ваше имя').fill('Мастер')
+    await master.getByRole('button', { name: 'Начать игру' }).click()
+    const invite = await copyInvite(master)
+    const localInvite = localInviteUrl(invite, master.url())
+    const joinerUrl = `${localInvite}${localInvite.includes('?') ? '&' : '?'}mock=1`
+    await joiner.goto(joinerUrl)
+    await joiner.getByLabel('Ваше имя').fill('Аня; Боря')
+    await joiner.getByRole('button', { name: 'Подключиться' }).click()
+    await expect(joiner.getByRole('button', { name: 'Я в игре' })).toBeEnabled({ timeout: 60_000 })
+    await expect(master.getByRole('group', { name: 'Аня' })).toBeVisible({ timeout: 15_000 })
+    await expect(master.getByRole('group', { name: 'Боря' })).toBeVisible()
+    await joiner.getByRole('button', { name: 'Я в игре' }).click()
+    await master.getByRole('button', { name: 'Начать игру' }).click()
+    await expect(joiner.getByRole('status').filter({ hasText: 'Аня выбирает вопрос' })).toBeVisible({
+      timeout: 30_000,
+    })
+
+    const anya = joiner.getByRole('group', { name: /Аня:/ })
+    const borya = joiner.getByRole('group', { name: /Боря:/ })
+    await expect(anya).toBeVisible()
+    await expect(borya).toBeVisible()
+    expect(await anya.getAttribute('data-jitsi-id')).toBeTruthy()
+    expect(await anya.getAttribute('data-jitsi-id')).toBe(await borya.getAttribute('data-jitsi-id'))
+
+    const saved = await master.evaluate(() => {
+      const raw = localStorage.getItem('aisigame.game')
+      if (!raw) throw new Error('нет сохранения')
+      return JSON.parse(raw) as { players: Array<{ name: string; clientId?: string }> }
+    })
+    const seats = saved.players.filter((player) => player.name === 'Аня' || player.name === 'Боря')
+    expect(seats).toHaveLength(2)
+    expect(seats[0]?.clientId).toBeTruthy()
+    expect(seats[0]?.clientId).toBe(seats[1]?.clientId)
+
+    await joiner.getByRole('button', { name: 'Текст, 100' }).click()
+    await expect(joiner.getByRole('status').filter({ hasText: 'Жмите кнопку' })).toBeVisible({ timeout: 20_000 })
+    await borya.getByRole('button', { name: 'Жмите' }).click()
+    await expect(master.getByText('Боря, ваш ответ.')).toBeVisible({ timeout: 15_000 })
+    await hear(master, 'не то')
+    await expect(joiner.getByRole('status').filter({ hasText: 'Жмите кнопку' })).toBeVisible({ timeout: 20_000 })
+    await anya.getByRole('button', { name: 'Жмите' }).click()
+    await expect(master.getByText('Аня, ваш ответ.')).toBeVisible({ timeout: 15_000 })
+    await context.close()
+  })
 })
 
 async function hear(page: Page, text: string): Promise<void> {

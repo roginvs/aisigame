@@ -30,6 +30,7 @@ import {
 } from './messages.ts'
 import { paceAfterAck, type TransferPace } from './packProgress.ts'
 import { ConferenceRoster, type RosterEntry } from './roster.ts'
+import { helloSeatNames, rosterSeats, seatNamesFromText } from './seats.ts'
 import type { ConferenceTransport } from './transport.ts'
 import { PING_INTERVAL_MS, PRESENCE_HEARTBEAT_MS, PRESENCE_STALE_MS } from './presence.ts'
 import { appendRemoteDebug, clearRemoteDebug, getLinkStatus, getLivePlayerLine, getTrace, pushSystemLine, pushTrace, subscribeChatEdits, subscribeLinkStatus, subscribeLivePlayerLine, subscribeTrace } from '../debug/trace.ts'
@@ -166,7 +167,11 @@ export class MasterSession {
     this.onHistory = options.onHistory ?? (() => {})
     this.onChatLineCb = options.onChatLine ?? null
     this.isRoomSpeaking = options.isRoomSpeaking ?? (() => false)
-    this.roster = new ConferenceRoster(options.masterClientId, options.masterName)
+    const masterSeats = seatNamesFromText(options.masterName)
+    this.roster = new ConferenceRoster(
+      options.masterClientId,
+      masterSeats.length > 0 ? masterSeats : [options.masterName.trim() || 'Мастер'],
+    )
     this.verified.add(options.masterClientId)
     if (options.resumePlayers?.length) {
       this.roster.restorePlayers(options.resumePlayers)
@@ -278,21 +283,17 @@ export class MasterSession {
   startGame(sendStart: (players: Player[]) => void): void {
     this.resumeLobbyPause()
     this.clearLobbySpeechTimer()
-    const masterEntry = this.roster.get(this.masterClientId)
-    const players: Player[] = [
-      {
-        id: 1,
-        name: masterEntry?.name ?? 'Мастер',
-        score: 0,
-        clientId: this.masterClientId,
-      },
-    ]
+    const players: Player[] = []
     for (const entry of this.roster.list()) {
-      if (entry.isMaster || !entry.hashOk || !entry.ready) continue
-      const id = this.roster.assignPlayerId(entry.clientId)
-      if (id === null) continue
-      players.push({ id, name: entry.name, score: 0, clientId: entry.clientId })
-      this.verified.add(entry.clientId)
+      if (!entry.isMaster && (!entry.hashOk || !entry.ready)) continue
+      this.roster.assignSeats(entry.clientId)
+      const fresh = this.roster.get(entry.clientId)
+      if (!fresh) continue
+      for (const seat of rosterSeats(fresh)) {
+        if (seat.playerId === null) continue
+        players.push({ id: seat.playerId, name: seat.name, score: 0, clientId: entry.clientId })
+      }
+      if (!entry.isMaster) this.verified.add(entry.clientId)
     }
     this.gameStarted = true
     this.gameStartedAt = Date.now()
@@ -354,7 +355,9 @@ export class MasterSession {
     const entry = this.roster.get(clientId)
     if (!clean || !entry) return
     this.broadcastMessage({ kind: 'chat', name: entry.name, text: clean, at: new Date().toISOString() })
-    const playerId = this.actor.getSnapshot().context.players.find((player) => player.clientId === clientId)?.id ?? null
+    const ids = this.seatIds(clientId)
+    const active = this.actor.getSnapshot().context.activePlayerId
+    const playerId = active !== null && ids.includes(active) ? active : (ids[0] ?? null)
     this.onChatLineCb?.(playerId, clean)
   }
 
@@ -431,7 +434,7 @@ export class MasterSession {
     if (message.type === 'hello') {
       const previousEndpoint = this.clientSender.get(message.clientId)
       if (!this.bindClient(message.clientId, message.authToken, senderId)) return
-      this.roster.upsertHello(message.clientId, message.name)
+      this.roster.upsertHello(message.clientId, helloSeatNames(message))
       if (message.clientId === this.masterClientId) return
       if (previousEndpoint && previousEndpoint !== senderId) {
         // После reload сохраняются clientId и секрет, но в новой странице ещё
@@ -448,7 +451,7 @@ export class MasterSession {
         this.clearPipeFallback(message.clientId)
       }
       if (this.gameStarted && message.clientId) {
-        void this.addMidGamePlayer(message.clientId, message.name)
+        void this.addMidGamePlayer(message.clientId)
       }
       if (this.packPipe) {
         // Повторный hello (heartbeat) не сбрасывает percent/фазу — только поднимает peer при нужде.
@@ -513,7 +516,7 @@ export class MasterSession {
     if (message.type === 'ready') {
       if (!this.verified.has(message.clientId) || !this.roster.get(message.clientId)?.hashOk) return
       this.roster.updateProgress(message.clientId, { ready: true, hashOk: true, percent: 100 })
-      if (this.gameStarted) void this.addMidGamePlayer(message.clientId, this.roster.get(message.clientId)?.name ?? '')
+      if (this.gameStarted) void this.addMidGamePlayer(message.clientId)
       this.onRosterCb()
       this.broadcastCurrentSnapshot()
       this.maybeLobbySpeech()
@@ -542,9 +545,9 @@ export class MasterSession {
     }
     if (message.type === 'buzz') {
       if (!this.gameStarted || !this.verified.has(message.clientId)) return
-      const entry = this.roster.get(message.clientId)
-      if (!entry?.playerId) return
-      this.actor.send({ type: 'BUZZER_PRESSED', playerId: entry.playerId })
+      const playerId = this.actingSeat(message.clientId, message.playerId)
+      if (playerId === null) return
+      this.actor.send({ type: 'BUZZER_PRESSED', playerId })
       return
     }
     if (message.type === 'pause') {
@@ -559,16 +562,16 @@ export class MasterSession {
     }
     if (message.type === 'finalStake') {
       if (!this.gameStarted || !this.verified.has(message.clientId)) return
-      const sender = this.roster.get(message.clientId)?.playerId
-      if (!sender) return
-      this.actor.send({ type: 'FINAL_STAKE', playerId: sender, amount: message.amount })
+      const playerId = this.actingSeat(message.clientId, message.playerId)
+      if (playerId === null) return
+      this.actor.send({ type: 'FINAL_STAKE', playerId, amount: message.amount })
       return
     }
     if (message.type === 'finalAnswer') {
       if (!this.gameStarted || !this.verified.has(message.clientId)) return
-      const sender = this.roster.get(message.clientId)?.playerId
-      if (!sender) return
-      this.actor.send({ type: 'FINAL_TYPED', playerId: sender, text: message.text })
+      const playerId = this.actingSeat(message.clientId, message.playerId)
+      if (playerId === null) return
+      this.actor.send({ type: 'FINAL_TYPED', playerId, text: message.text })
       return
     }
     if (message.type === 'pick') {
@@ -576,26 +579,28 @@ export class MasterSession {
       const snap = this.actor.getSnapshot()
       const path = statePath(snap.value)
       if (!pickOpen(path, snap.context)) return
-      const sender = this.roster.get(message.clientId)?.playerId
-      if (sender === undefined) return
+      const seatIds = this.seatIds(message.clientId)
+      if (seatIds.length === 0) return
       // В финале темы вычёркивает тот, чей удар по кругу, а не всегда выбирающий раунда.
-      const allowed = snap.context.chooserId === sender ||
-        (finalStrikerTurnOpen(snap.context) && snap.context.finalStriker === sender && roundThemes(snap.context.questions, snap.context.roundIndex).some((theme) => theme.id === message.themeId))
+      const allowed = seatIds.includes(snap.context.chooserId) ||
+        (finalStrikerTurnOpen(snap.context) && snap.context.finalStriker !== undefined && seatIds.includes(snap.context.finalStriker) && roundThemes(snap.context.questions, snap.context.roundIndex).some((theme) => theme.id === message.themeId))
       if (!allowed) return
       this.actor.send({ type: 'QUESTION_SELECTED', themeId: message.themeId, value: message.value })
       return
     }
     if (message.type === 'specialPick') {
       if (!this.gameStarted || !this.verified.has(message.clientId)) return
-      const sender = this.roster.get(message.clientId)?.playerId
+      const sender = this.actingSeat(message.clientId, message.actorId)
       const snap = this.actor.getSnapshot()
       const special = snap.context.special
-      if (!sender || !special) return
+      if (sender === null || !special) return
       if (message.target === 'player' && message.playerId !== undefined && special.giverId === sender) {
         this.actor.send({ type: 'CAT_RECIPIENT', playerId: message.playerId })
       }
-      if (message.target === 'stake' && message.amount !== undefined) this.actor.send({ type: 'CAT_STAKE', playerId: sender, amount: message.amount })
-      if (message.target === 'auction' && message.choice !== undefined) {
+      if (message.target === 'stake' && message.amount !== undefined && special.recipientId === sender) {
+        this.actor.send({ type: 'CAT_STAKE', playerId: sender, amount: message.amount })
+      }
+      if (message.target === 'auction' && message.choice !== undefined && special.recipientId === sender) {
         // Варианты пересчитаны мастером; клиентским не верим.
         const option = special.options.find((item) => message.choice === 'pass' ? item.kind === 'pass'
           : message.choice === 'allIn' ? item.kind === 'allIn' : item.kind === 'stake' && item.amount === message.choice)
@@ -823,25 +828,36 @@ export class MasterSession {
     if (statePath(this.actor.getSnapshot().value) === 'paused') this.actor.send({ type: 'RESUME' })
   }
 
-  addMidGamePlayer(clientId: string, name: string): Player | null {
+  addMidGamePlayer(clientId: string): Player | null {
     if (!this.gameStarted) return null
-    const entry = this.roster.upsertHello(clientId, name)
-    if (!entry.hashOk) return null
-    const id = this.roster.assignPlayerId(clientId)
-    if (id === null) return null
-    const player: Player = { id, name: entry.name, score: 0, clientId }
-    this.actor.send({ type: 'ADD_PLAYER', player })
+    const entry = this.roster.get(clientId)
+    if (!entry?.hashOk) return null
+    this.roster.assignSeats(clientId)
+    const fresh = this.roster.get(clientId)
+    if (!fresh) return null
+    const existing = new Set(this.actor.getSnapshot().context.players.map((player) => player.id))
+    let first: Player | null = null
+    for (const seat of rosterSeats(fresh)) {
+      if (seat.playerId === null || existing.has(seat.playerId)) continue
+      const player: Player = { id: seat.playerId, name: seat.name, score: 0, clientId }
+      this.actor.send({ type: 'ADD_PLAYER', player })
+      existing.add(player.id)
+      first ??= player
+    }
     this.verified.add(clientId)
-    return player
+    return first
   }
 
   /** Онлайн-игроки по ростеру: мастер всегда онлайн. */
   private onlinePlayers(now: number): Set<number> {
-    return new Set(
-      this.roster.allIncludingHidden(now)
-        .filter((entry) => entry.playerId !== null && entry.hashOk && (entry.isMaster || (!entry.stale && !entry.hidden)))
-        .map((entry) => entry.playerId as number),
-    )
+    const ids = new Set<number>()
+    for (const entry of this.roster.allIncludingHidden(now)) {
+      if (!entry.hashOk || !(entry.isMaster || (!entry.stale && !entry.hidden))) continue
+      for (const seat of rosterSeats(entry)) {
+        if (seat.playerId !== null) ids.add(seat.playerId)
+      }
+    }
+    return ids
   }
 
   /** Кот/аукцион: получатель, участник торгов или отвечающий ушёл — 15 с ожидания; вернулся — продолжаем. */
@@ -868,9 +884,13 @@ export class MasterSession {
     const players = context.players
     const index = players.findIndex((player) => player.id === watched)
     let nextChooserId: number | null = null
+    const watchedPlayer = players[index]
     for (let offset = 1; offset < players.length; offset += 1) {
       const candidate = players[(index + offset) % players.length]
-      if (candidate && online.has(candidate.id)) { nextChooserId = candidate.id; break }
+      if (!candidate || !online.has(candidate.id)) continue
+      if (candidate.clientId && watchedPlayer?.clientId && candidate.clientId === watchedPlayer.clientId) continue
+      nextChooserId = candidate.id
+      break
     }
     this.actor.send({ type: 'SPECIAL_PLAYER_OFFLINE', playerId: watched, nextChooserId })
   }
@@ -900,14 +920,17 @@ export class MasterSession {
       const presence = roster.find((entry) => entry.clientId === token.clientId)
       if (presence && !presence.stale && !presence.hidden) continue
       if (!presence && absentGrace) continue
-      const onlinePlayerIds = new Set(
-        roster
-          .filter((entry) => entry.playerId !== null && entry.hashOk && (entry.isMaster || (!entry.stale && !entry.hidden)))
-          .map((entry) => entry.playerId),
-      )
+      const onlinePlayerIds = new Set<number>()
+      for (const entry of roster) {
+        if (!entry.hashOk || !(entry.isMaster || (!entry.stale && !entry.hidden))) continue
+        for (const seat of rosterSeats(entry)) {
+          if (seat.playerId !== null) onlinePlayerIds.add(seat.playerId)
+        }
+      }
       for (let offset = 1; offset < players.length; offset += 1) {
         const replacement = players[(index + offset) % players.length]
         if (!replacement || !onlinePlayerIds.has(replacement.id)) continue
+        if (replacement.clientId && token.clientId && replacement.clientId === token.clientId) continue
         this.actor.send({
           type: 'CHOOSER_OFFLINE',
           fromPlayerId: token.id,
@@ -916,6 +939,19 @@ export class MasterSession {
         return
       }
     }
+  }
+
+  private seatIds(clientId: string): number[] {
+    const entry = this.roster.get(clientId)
+    if (!entry) return []
+    return rosterSeats(entry).flatMap((seat) => (seat.playerId === null ? [] : [seat.playerId]))
+  }
+
+  /** Кнопка назвала место. Без id — единственное место устройства. Чужой id отклоняется. */
+  private actingSeat(clientId: string, playerId: number | undefined): number | null {
+    const ids = this.seatIds(clientId)
+    if (playerId !== undefined) return ids.includes(playerId) ? playerId : null
+    return ids.length === 1 ? (ids[0] ?? null) : null
   }
 
   private bindClient(clientId: string, authToken: string, senderId: string): boolean {

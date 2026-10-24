@@ -8,6 +8,7 @@ import {
   type ConferenceSnapshot,
   type ConferenceSnapshotPresence,
 } from './messages.ts'
+import { rosterSeats } from './seats.ts'
 import type { RosterEntry } from './roster.ts'
 import { emptyMessageRing } from './messageRing.ts'
 
@@ -65,6 +66,7 @@ export function buildConferenceSnapshot(input: {
     clientId: entry.clientId,
     name: entry.name,
     playerId: entry.playerId,
+    seats: rosterSeats(entry),
     isMaster: entry.isMaster,
     stale: entry.stale,
     hidden: entry.hidden,

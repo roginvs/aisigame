@@ -10,7 +10,8 @@ import type { RosterEntry } from '../conference/roster.ts'
 import type { Player, PlayerId } from '../game/types.ts'
 import { falseStartCooling } from '../game/machine.ts'
 import { falseStartMs } from '../options.ts'
-import { buzzKeyLabel, isKeyboardPlayer } from './buzzKeys.ts'
+import { buzzKeyLabel, isKeyboardPlayer, localSeatKeyLabel } from './buzzKeys.ts'
+import { rosterSeats } from '../conference/seats.ts'
 import { canBuzzPlayer } from './conferenceTurn.ts'
 import { conferencePlayerLabel } from './conferencePlayerLabel.ts'
 import { matchConferenceTile } from './conferenceTileMatch.ts'
@@ -56,8 +57,8 @@ export function ConferencePlayersRow(props: {
   confirmingId?: number | null
   onConfirmYes?: () => void
   onBuzz: (playerId: PlayerId) => void
-  /** Чья кнопка сейчас мигает подсказкой «жми» (только свой игрок, только на этом экране). */
-  nudgePlayerId?: PlayerId | null
+  /** Чьи кнопки сейчас мигают подсказкой «жми» (свои места, только на этом экране). */
+  nudgePlayerIds?: readonly PlayerId[]
   layout: boolean
 }) {
   const {
@@ -85,13 +86,14 @@ export function ConferencePlayersRow(props: {
 
   if (mode === 'lobby') {
     const entries = roster.filter((entry) => !entry.hidden || entry.isMaster)
+    const lobbyCards = entries.reduce((sum, entry) => sum + rosterSeats(entry).length, 0)
     return (
       <section
         className="players conference-players"
-        style={paused ? ({ '--pause-cols': String(pauseColumns(entries.length)) } as CSSProperties) : undefined}
+        style={paused ? ({ '--pause-cols': String(pauseColumns(lobbyCards)) } as CSSProperties) : undefined}
         aria-label="Участники"
       >
-        {entries.map((entry) => {
+        {entries.flatMap((entry) => {
           const isSelf = Boolean(selfClientId && entry.clientId === selfClientId)
           const tile =
             matchConferenceTile(tiles, {
@@ -99,15 +101,15 @@ export function ConferencePlayersRow(props: {
               clientId: entry.clientId,
               jitsiIds,
             }) ?? emptyTile(entry.clientId, entry.name, isSelf)
-          return (
+          return rosterSeats(entry).map((seat, index) => (
             <div
-              key={entry.clientId}
+              key={`${entry.clientId}:${seat.playerId ?? index}`}
               className={['player', 'conference-player', isSelf ? 'self' : '', entry.stale ? 'stale' : '']
                 .filter(Boolean)
                 .join(' ')}
               role="group"
               data-jitsi-id={jitsiIdOfClient(jitsiIds, entry.clientId) ?? undefined}
-              aria-label={entry.name}
+              aria-label={seat.name}
             >
               <ConferenceVideoTile tile={tile} bindVideo={bindVideo} masterBadge={entry.isMaster} pingMs={entry.pingMs} />
               {entry.isMaster ? (
@@ -131,7 +133,7 @@ export function ConferencePlayersRow(props: {
                 </div>
               )}
             </div>
-          )
+          ))
         })}
       </section>
     )
@@ -156,7 +158,12 @@ export function ConferencePlayersRow(props: {
         const canControl = canBuzzPlayer(layout, selfClientId, player)
         const isSelf = layout && canControl
         const displayOnly = layout && !canControl
-        const key = layout ? '' : isKeyboardPlayer(playerId) ? buzzKeyLabel[playerId] : ''
+        const localIds = layout
+          ? players.filter((item) => item.clientId && selfClientId && item.clientId === selfClientId).map((item) => item.id)
+          : []
+        const key = layout
+          ? (canControl ? (localSeatKeyLabel(localIds.indexOf(playerId), localIds.length) ?? '') : '')
+          : (isKeyboardPlayer(playerId) ? buzzKeyLabel[playerId] : '')
         const presence = player.clientId
           ? roster.find((entry) => entry.clientId === player.clientId)
           : undefined
@@ -197,7 +204,7 @@ export function ConferencePlayersRow(props: {
               <button
                 type="button"
                 key={cooling ? 'penalty' : 'ready'}
-                className={['buzzer', chooses ? 'chooser' : '', cooling ? 'false-start' : '', !cooling && props.nudgePlayerId === playerId ? 'buzz-nudge' : '']
+                className={['buzzer', chooses ? 'chooser' : '', cooling ? 'false-start' : '', !cooling && props.nudgePlayerIds?.includes(playerId) ? 'buzz-nudge' : '']
                   .filter(Boolean)
                   .join(' ')}
                 style={
@@ -206,7 +213,7 @@ export function ConferencePlayersRow(props: {
                         animationDuration: `${falseStartMs}ms`,
                         animationPlayState: paused ? 'paused' : 'running',
                       }
-                    : props.nudgePlayerId === playerId
+                    : props.nudgePlayerIds?.includes(playerId)
                       ? ({ '--nudge-ms': `${buzzNudge.flashMs}ms`, '--nudge-count': String(buzzNudge.flashes) } as CSSProperties)
                       : undefined
                 }
@@ -221,8 +228,8 @@ export function ConferencePlayersRow(props: {
                 {earlyLive ? <span className="visually-hidden">, вопрос ещё читается</span> : null}
               </button>
               )}
-              {key || isSelf ? (
-                <p className="key-hint">{key ? (earlyLive ? `${key} · уже можно` : key) : 'Пробел'}</p>
+              {key ? (
+                <p className="key-hint">{earlyLive ? `${key} · уже можно` : key}</p>
               ) : null}
             </div>
           </div>

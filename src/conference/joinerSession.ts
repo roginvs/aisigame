@@ -13,6 +13,7 @@ import type { ConferenceTransport } from './transport.ts'
 import { PRESENCE_HEARTBEAT_MS, PRESENCE_STALE_MS } from './presence.ts'
 import { pushTrace, sharedDebugBacklogCursor, sharedDebugBatch } from '../debug/trace.ts'
 import { buildCommit } from '../buildInfo.ts'
+import { seatLabel, seatNamesFromText } from './seats.ts'
 
 export type JoinerSessionCallbacks = {
   onSnapshot: (snapshot: ConferenceSnapshot) => void
@@ -53,6 +54,7 @@ export class JoinerSession {
   private clientId: string
   private authToken: string
   private name: string
+  private names: string[]
   private callbacks: JoinerSessionCallbacks
   private unsub: () => void
   private heartbeatTimer = 0
@@ -103,7 +105,9 @@ export class JoinerSession {
     this.transport = input.transport
     this.clientId = input.clientId
     this.authToken = input.authToken
-    this.name = input.name
+    this.names = seatNamesFromText(input.name)
+    if (this.names.length === 0) this.names = [input.name.trim().slice(0, 40) || 'Игрок']
+    this.name = seatLabel(this.names)
     this.callbacks = input.callbacks
     this.packCache = input.packCache ?? defaultPackCache
     this.usePackPipe = input.usePackPipe === true
@@ -191,9 +195,14 @@ export class JoinerSession {
     this.emitLobby()
   }
 
-  sendBuzz(): void {
+  sendBuzz(playerId?: number): void {
     if (!this.hashOk) return
-    this.transport.send({ type: 'buzz', clientId: this.clientId, authToken: this.authToken })
+    this.transport.send({
+      type: 'buzz',
+      clientId: this.clientId,
+      authToken: this.authToken,
+      ...(playerId !== undefined ? { playerId } : {}),
+    })
   }
 
   /** Toggle паузы: мастер сам решает по своему состоянию — ставит или снимает. */
@@ -202,7 +211,13 @@ export class JoinerSession {
     this.transport.send({ type: 'pause', clientId: this.clientId, authToken: this.authToken })
   }
 
-  sendSpecialPick(pick: { target: 'player' | 'stake' | 'auction'; playerId?: number; amount?: number; choice?: 'pass' | 'allIn' | number }): void {
+  sendSpecialPick(pick: {
+    target: 'player' | 'stake' | 'auction'
+    playerId?: number
+    actorId?: number
+    amount?: number
+    choice?: 'pass' | 'allIn' | number
+  }): void {
     this.transport.send({ type: 'specialPick', clientId: this.clientId, authToken: this.authToken, ...pick })
   }
 
@@ -215,16 +230,28 @@ export class JoinerSession {
    * Известное упрощение: сообщение идёт broadcast'ом всей комнате (адресата в финальных
    * сообщениях нет), так что технически внимательный сосед может прочитать чужую ставку
    * или ответ в канале. Считаем игроков честными: адресная доставка мастеру — в to-do. */
-  sendFinalStake(amount: number): void {
+  sendFinalStake(amount: number, playerId?: number): void {
     if (!this.hashOk) return
-    this.transport.send({ type: 'finalStake', clientId: this.clientId, authToken: this.authToken, amount })
+    this.transport.send({
+      type: 'finalStake',
+      clientId: this.clientId,
+      authToken: this.authToken,
+      amount,
+      ...(playerId !== undefined ? { playerId } : {}),
+    })
   }
 
   /** Финал: скрытый ответ. Мастер проверит право и длину. */
-  sendFinalAnswer(text: string): void {
+  sendFinalAnswer(text: string, playerId?: number): void {
     const clean = text.trim()
     if (!this.hashOk || !clean) return
-    this.transport.send({ type: 'finalAnswer', clientId: this.clientId, authToken: this.authToken, text: clean })
+    this.transport.send({
+      type: 'finalAnswer',
+      clientId: this.clientId,
+      authToken: this.authToken,
+      text: clean,
+      ...(playerId !== undefined ? { playerId } : {}),
+    })
   }
 
   sendChat(text: string): void {
@@ -581,6 +608,7 @@ export class JoinerSession {
       clientId: this.clientId,
       authToken: this.authToken,
       name: this.name,
+      names: this.names,
     })
   }
 
