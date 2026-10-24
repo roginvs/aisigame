@@ -629,6 +629,8 @@ export const gameMachine = setup({
       earlyLeftMs: () => null,
       pauseStartedAt: () => null,
     }),
+    // Намеренно (автор, 24 октября 2026): пауза ставит полную длительность окна, а не остаток.
+    // Пауза жмётся редко, так проще, и это способ сбросить таймеры.
     resumeClock: assign({
       appeal: ({ context }) => context.appeal ? { ...context.appeal, startedAt: context.appeal.activePlayerId === null ? Date.now() : null } : null,
       statusLine: ({ context }) => context.resumeStatus || 'Дальше',
