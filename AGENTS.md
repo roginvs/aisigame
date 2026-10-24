@@ -53,6 +53,7 @@
 - [docs/CAT.md](docs/CAT.md), [docs/AUCTION.md](docs/AUCTION.md) — спецвопросы; [docs/AUDIO_JUDGMENT.md](docs/AUDIO_JUDGMENT.md) — оценка ответа по аудио; [docs/PROMPTS.md](docs/PROMPTS.md) — обязательный чек-лист правок промптов ведущей.
 - [docs/QWEN_LIVE_2026-10-22.md](docs/QWEN_LIVE_2026-10-22.md) — разбор живых партий Qwen и что проверить; [docs/JITSI.md](docs/JITSI.md) и [docs/TURN.md](docs/TURN.md) — сервер и coturn.
 - [docs/PLAYOUT.md](docs/PLAYOUT.md), [docs/LAYOUT.md](docs/LAYOUT.md) — раскладки; [docs/DEBUG.md](docs/DEBUG.md) — дебаг; [docs/UNIFY_MODES.md](docs/UNIFY_MODES.md) — план объединения режимов; [docs/DOCS_AUDIT.md](docs/DOCS_AUDIT.md) — снимок карты доков от 13.10.
+- [docs/STABILITY.md](docs/STABILITY.md) — разбор устойчивости машины и контроллера (24 октября 2026): причины поломок и предложения. Не правила и не задание, пока автор не выберет пункты.
 - [to-do.md](to-do.md) — задачи и история: для одной задачи только нужный пункт по индексу вверху; [to-do-question-types.md](to-do-question-types.md) — типы вопросов.
 - [docs/archive/AGENTS-2026-10-22.md](docs/archive/AGENTS-2026-10-22.md) — архив AGENTS.md до сокращения (решения 9–22 октября), справочный.
 
