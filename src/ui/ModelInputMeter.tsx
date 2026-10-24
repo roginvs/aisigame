@@ -9,6 +9,7 @@ import { CLOSED_OVERLAY, INPUT_BAND_H, OUTPUT_WAVE_COLOR, drawMarkers, HEIGHT, i
  * (тот же поток, что уходит в realtime). В конференции — `getLevel` из общих уровней
  * мастера (после микшера, разосланы всем), без конференции — свой AnalyserNode.
  * `getOutLevel` — уровень дорожки ведущей (что модель говорит): прозрачно-серая волна сверху.
+ * Намеренно только у мастера, с подсказками и метками событий.
  */
 export function ModelInputMeter({ getAnalyser, getLevel, getOutLevel }: { getAnalyser?: () => AnalyserNode | null; getLevel?: () => number; getOutLevel?: () => number }) {
   const canvasRef = useRef<HTMLCanvasElement | null>(null)

@@ -1,5 +1,6 @@
 import { buzzNudge } from '../options.ts'
 
+// Намеренно, не удалять: мигание своей кнопки, когда игрок говорит, не нажав её (GAME.md, «Подсказка «жми кнопку»»).
 export type NudgeOptions = { rms: number; sustainMs: number; gapMs: number; cooldownMs: number }
 /** Состояние детектора: начало текущего «звука подряд», последний звук выше порога, последняя вспышка. */
 export type NudgeState = { since: number | null; lastLoud: number | null; firedAt: number | null }

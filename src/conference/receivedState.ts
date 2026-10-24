@@ -52,6 +52,7 @@ export class ReceivedState {
  * сообщение отправителю не возвращает, поэтому петля — ровно те байты, что ушли в
  * транспорт (`JSON.stringify` → `JSON.parse` → `isConferenceMessage` → `ReceivedState`),
  * асинхронно, следующей задачей. Пропущенное изменение просит полный снимок.
+ * Намеренно так, не упрощать: мастер и игроки архитектурно одинаковы (AGENTS.md, «Принципы кода» 4).
  */
 export class LoopbackStateReceiver {
   private readonly received = new ReceivedState()

@@ -6,6 +6,7 @@ import { hostMsPerCharDefault } from '../options.ts'
  * иначе время от `output_audio_buffer.started` до обрыва. В символы переводит темп речи этой сессии
  * (мс на символ по целиком доигранным репликам), смысл текста не разбирается.
  * Пусто — не прозвучало ни одного целого слова: в чат ничего.
+ * Намеренно, не удалять: реплика в чате сразу, обрезка с «…» — у мастера и у всех гостей.
  */
 export function cutCaption(line: string, playedMs: number, msPerChar: number): string {
   const text = line.trim()
