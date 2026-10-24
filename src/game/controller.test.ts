@@ -81,6 +81,14 @@ function judgeLines(): string[] {
   })
 }
 
+function hostLines(): string[] {
+  return getTrace().flatMap((entry) => {
+    if (entry.kind !== 'chat' || entry.title !== 'Ведущая') return []
+    const text = (entry.detail as { text?: string } | undefined)?.text
+    return text ? [text] : []
+  })
+}
+
 async function boot(client: MockRealtimeClient, questions = pack, getPublicHistory?: () => readonly ConferenceHistoryMessage[], playSpecialSound?: (kind: 'cat' | 'auction') => void) {
   vi.useFakeTimers()
   vi.stubGlobal('window', {
@@ -818,6 +826,100 @@ describe('attachController answer listening', () => {
     client.deliverTranscript('appeal-early', 'ответ')
     await vi.advanceTimersByTimeAsync(answerSilenceDecideMs + 400)
     expect(actor.getSnapshot().context.players[0]?.score).toBe(400)
+
+    stop()
+    actor.stop()
+  })
+
+  it('поздняя верная расшифровка возвращает снятые очки и пишет апелляцию', async () => {
+    const client = new MockRealtimeClient()
+    const { actor, stop } = await boot(client)
+    actor.send({ type: 'QUESTION_SELECTED', themeId: 'p', value: 400 })
+    await vi.advanceTimersByTimeAsync(gameConfig.cellFlashMs + 80)
+    actor.send({ type: 'BUZZER_PRESSED', playerId: 1 })
+    client.onSpeechStarted({ itemId: 'late-vasya' })
+    client.onSpeechStopped({ durationMs: 1200, itemId: 'late-vasya' })
+    await vi.advanceTimersByTimeAsync(gameConfig.answerMs + 500)
+    expect(actor.getSnapshot().context.players[0]?.score).toBe(-400)
+    const before = hostLines().length
+    client.deliverTranscript('late-vasya', 'ответ')
+    await vi.advanceTimersByTimeAsync(50)
+    expect(actor.getSnapshot().context.players[0]?.score).toBe(400)
+    expect(actor.getSnapshot().context.statusLine).toBe('Апелляция принята')
+    expect(hostLines().slice(before).some((line) => line.includes('Апелляция принята') && line.includes('Игрок 1'))).toBe(true)
+    client.deliverTranscript('late-vasya', 'ответ')
+    client.onTranscript({ itemId: 'late-vasya', text: 'ответ' })
+    expect(actor.getSnapshot().context.players[0]?.score).toBe(400)
+
+    stop()
+    actor.stop()
+  })
+
+  it('поздняя расшифровка мимо эталона очки не возвращает', async () => {
+    const client = new MockRealtimeClient()
+    const { actor, stop } = await boot(client)
+    actor.send({ type: 'QUESTION_SELECTED', themeId: 'p', value: 400 })
+    await vi.advanceTimersByTimeAsync(gameConfig.cellFlashMs + 80)
+    actor.send({ type: 'BUZZER_PRESSED', playerId: 1 })
+    client.onSpeechStarted({ itemId: 'late-miss' })
+    client.onSpeechStopped({ durationMs: 1200, itemId: 'late-miss' })
+    await vi.advanceTimersByTimeAsync(gameConfig.answerMs + 500)
+    expect(actor.getSnapshot().context.players[0]?.score).toBe(-400)
+    client.deliverTranscript('late-miss', 'мимо')
+    await vi.advanceTimersByTimeAsync(50)
+    expect(actor.getSnapshot().context.players[0]?.score).toBe(-400)
+
+    stop()
+    actor.stop()
+  })
+
+  it('после выбора следующей ячейки поздняя расшифровка уже не зачитывается', async () => {
+    const client = new MockRealtimeClient()
+    const { actor, stop } = await boot(client)
+    actor.send({ type: 'QUESTION_SELECTED', themeId: 'p', value: 400 })
+    await vi.advanceTimersByTimeAsync(gameConfig.cellFlashMs + 80)
+    actor.send({ type: 'BUZZER_PRESSED', playerId: 1 })
+    client.onSpeechStarted({ itemId: 'late-window' })
+    client.onSpeechStopped({ durationMs: 1200, itemId: 'late-window' })
+    await vi.advanceTimersByTimeAsync(gameConfig.answerMs + 500)
+    expect(actor.getSnapshot().context.players[0]?.score).toBe(-400)
+    const questionId = actor.getSnapshot().context.activeQuestionId
+    await vi.advanceTimersByTimeAsync(gameConfig.timeoutBeepMs + 300)
+    expect(statePath(actor.getSnapshot().value)).toBe('buzzing.open')
+    await vi.advanceTimersByTimeAsync(gameConfig.buzzerMs + 800)
+    expect(statePath(actor.getSnapshot().value)).toBe('choosing.listening')
+    actor.send({ type: 'QUESTION_SELECTED', themeId: 'v', value: 200 })
+    expect(actor.getSnapshot().context.activeQuestionId).not.toBe(questionId)
+    client.deliverTranscript('late-window', 'ответ')
+    await vi.advanceTimersByTimeAsync(50)
+    expect(actor.getSnapshot().context.players[0]?.score).toBe(-400)
+
+    stop()
+    actor.stop()
+  })
+
+  it('на табло до следующей ячейки поздняя расшифровка ещё возвращает очки', async () => {
+    const client = new MockRealtimeClient()
+    const { actor, stop } = await boot(client)
+    actor.send({ type: 'QUESTION_SELECTED', themeId: 'p', value: 400 })
+    await vi.advanceTimersByTimeAsync(gameConfig.cellFlashMs + 80)
+    actor.send({ type: 'BUZZER_PRESSED', playerId: 1 })
+    client.onSpeechStarted({ itemId: 'late-board' })
+    client.onSpeechStopped({ durationMs: 1200, itemId: 'late-board' })
+    await vi.advanceTimersByTimeAsync(gameConfig.answerMs + 500)
+    expect(actor.getSnapshot().context.players[0]?.score).toBe(-400)
+    await vi.advanceTimersByTimeAsync(gameConfig.timeoutBeepMs + 300)
+    expect(statePath(actor.getSnapshot().value)).toBe('buzzing.open')
+    await vi.advanceTimersByTimeAsync(gameConfig.buzzerMs + 800)
+    expect(statePath(actor.getSnapshot().value)).toBe('choosing.listening')
+    expect(actor.getSnapshot().context.activeQuestionId).toBeNull()
+    const before = hostLines().length
+    client.deliverTranscript('late-board', 'ответ')
+    await vi.advanceTimersByTimeAsync(80)
+    expect(actor.getSnapshot().context.players[0]?.score).toBe(400)
+    expect(actor.getSnapshot().context.statusLine).toBe('Апелляция принята')
+    expect(hostLines().slice(before).some((line) => line.includes('Апелляция принята'))).toBe(true)
+    expect(statePath(actor.getSnapshot().value)).toBe('choosing.listening')
 
     stop()
     actor.stop()

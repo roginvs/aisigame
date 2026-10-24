@@ -114,6 +114,15 @@ export function nearHomophone(heard: string, answers: string[]): boolean {
   return kind === 'near' || kind === 'inflected' || kind === 'fuzzy'
 }
 
+/**
+ * Поздняя расшифровка — это верный ответ, только если вся реплика равна эталону
+ * (в том числе форма в скобках или то же слово по слогам). Кусок фразы и созвучие — нет.
+ */
+export function transcriptIsEtalon(heard: string, answers: readonly string[]): boolean {
+  const list = [...answers]
+  return exactAnswer(heard, list) || sameEtalon(heard, list) || syllableEtalon(heard, list)
+}
+
 /** Вся реплика совпала с одним эталоном. Кусок длинной фразы не считается. */
 export function sameEtalon(heard: string, answers: string[]): boolean {
   const said = answerKey(heard)

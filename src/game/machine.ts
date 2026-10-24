@@ -112,6 +112,17 @@ function isFinal(context: GameContext): boolean {
   return roundKind(context) === 'final'
 }
 
+/**
+ * Ячейка, которой поздняя верная расшифровка ещё может вернуть очки.
+ * Пока ячейка открыта — это `activeQuestionId`. На табло после закрытия он пустеет,
+ * и окно держится за последнюю сыгранную, пока не выбрана следующая. В финале окна нет.
+ */
+export function lateCreditQuestionId(context: GameContext): string | null {
+  if (isFinal(context)) return null
+  if (context.activeQuestionId) return context.activeQuestionId
+  return context.playedIds[context.playedIds.length - 1] ?? null
+}
+
 function currentFinalist(context: GameContext): PlayerId | null {
   return context.finalists[context.finalCursor] ?? null
 }
@@ -555,6 +566,36 @@ export const gameMachine = setup({
         attemptId: context.attemptId + 1, clarifications: 0, heard: '', judgmentStatus: null, announceKind: null,
         judgmentReason: '', phaseStartedAt: null, phaseDurationMs: null, statusLine: 'Повтор ответа' }
     }),
+    /**
+     * Намеренно: поздний верный транскрипт ставит этому игроку плюс за вопрос
+     * (минус возвращается вместе с начислением). Чужой верный зачёт не меняется —
+     * оба плюса за одну ячейку нормальны. Уже верный итог (ручная апелляция, повтор события) не двигает счёт.
+     */
+    creditLateTranscript: assign(({ context, event }) => {
+      if (event.type !== 'LATE_TRANSCRIPT_CREDIT') return {}
+      const { questionId, playerId } = event
+      const outcome = context.outcomes?.[questionId]?.[playerId]
+      if (!outcome || outcome.correct === true || questionId !== lateCreditQuestionId(context)) return {}
+      const amount = appealStake(context, questionId, playerId)
+      const correction = amount - outcome.amount
+      return {
+        players: context.players.map((player) => player.id === playerId ? { ...player, score: player.score + correction } : player),
+        outcomes: {
+          ...context.outcomes,
+          [questionId]: {
+            ...context.outcomes?.[questionId],
+            [playerId]: {
+              amount,
+              attemptId: outcome.attemptId,
+              correct: true,
+              previous: outcome.amount,
+              ...(outcome.stake != null ? { stake: outcome.stake } : {}),
+            },
+          },
+        },
+        statusLine: 'Апелляция принята',
+      }
+    }),
     confirmClosedAppeal: assign(({ context }) => {
       const amount = context.activeQuestionId ? appealStake(context, context.activeQuestionId, context.activePlayerId) : 0
       return { ...settleOutcome(context, amount, true), announceKind: 'correct' as AnnounceKind, judgmentStatus: 'correct' as const,
@@ -663,7 +704,9 @@ export const gameMachine = setup({
       error: () => null,
     }),
     setChoosingStatus: assign({
-      statusLine: ({ context }) => {
+      statusLine: ({ context, event }) => {
+        // Повторный вход из-за речи ведущей не затирает только что принятую апелляцию.
+        if ((event.type === 'HOST_TALKING' || event.type === 'IDLE_SPEECH') && context.statusLine === 'Апелляция принята') return context.statusLine
         const round = context.rounds.find((item) => item.index === context.roundIndex)
         if (round?.kind === 'final') return 'Выберите тему финала'
         return 'назовите тему и стоимость'
@@ -1529,6 +1572,19 @@ export const gameMachine = setup({
   initial: 'startMenu',
   context: freshContext,
   on: {
+    LATE_TRANSCRIPT_CREDIT: {
+      guard: and([
+        not(stateIn('stopped')),
+        not(stateIn('failed')),
+        ({ context, event }) => {
+          if (event.type !== 'LATE_TRANSCRIPT_CREDIT') return false
+          if (event.questionId !== lateCreditQuestionId(context)) return false
+          const outcome = context.outcomes?.[event.questionId]?.[event.playerId]
+          return Boolean(outcome && outcome.correct !== true)
+        },
+      ]),
+      actions: 'creditLateTranscript',
+    },
     APPEAL_REQUESTED: [
       { guard: and([not(stateIn('paused')), not(stateIn('stopped')), not(stateIn('failed')), 'closedAppeal', 'validAppeal']), actions: 'queueAppeal' },
       // До раскрытия ответа (ячейка открыта): игрок повторяет ответ.

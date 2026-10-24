@@ -14,7 +14,7 @@ import type { JudgmentInputMode, JudgmentSource, JudgeRequestContext } from '../
 import { JudgmentClock } from './judgmentClock.ts'
 import { gameConfig } from '../config.ts'
 import { speakingPlayerId } from './speaker.ts'
-import { markPlayerLine, setPlayerSpeakerSource, noteLink, pushJudgeLine, pushPlayerLine, pushSystemLine, pushTrace } from '../debug/trace.ts'
+import { markPlayerLine, setPlayerSpeakerSource, noteLink, pushHostLine, pushJudgeLine, pushPlayerLine, pushSystemLine, pushTrace } from '../debug/trace.ts'
 import type { GameVoice, LinkStatus, ToolCall } from '../realtime/client.ts'
 import { verbatimSpeech } from '../realtime/speechMatch.ts'
 import { echoesTranscriptionPrompt } from './promptEcho.ts'
@@ -22,13 +22,13 @@ import type { ConferenceHistoryMessage } from '../conference/messages.ts'
 import { conversationLineFromTrace } from '../conference/traceConversation.ts'
 import { getLivePlayerLine, getTrace } from '../debug/trace.ts'
 import { withCommentary } from './commentary.ts'
-import { amountWords } from './appealSpeech.ts'
+import { amountWords, appealResultLine } from './appealSpeech.ts'
 import { questionSpeech, spokenChoiceForms } from './choices.ts'
 import { matchSpokenCell, selectionChatText } from './choiceMatch.ts'
 import { answerListeningPrompt, echoesAnswerPrompt, phantomListedAnswer } from './answerPrompt.ts'
 import { choicePrompt, echoesChoicePrompt, optionsPrompt, playersPrompt } from './choicePrompt.ts'
 import { blurtGate, choiceGate, isChoiceUtterance, repeatsQuestion } from './heard.ts'
-import { exactAnswer, judgmentChatText, settleJudgment } from './judgment.ts'
+import { exactAnswer, judgmentChatText, settleJudgment, transcriptIsEtalon } from './judgment.ts'
 import { currentRound, findQuestion, nextPlayableRound, questionById, roundThemes } from './pack.ts'
 import { answerIsPublic } from './reveal.ts'
 import {
@@ -36,6 +36,7 @@ import {
   isAnnounceSpeakingPath,
   isAnnouncingPath,
   isReadingPath,
+  lateCreditQuestionId,
   phoneticRetryReason,
   statePath,
 } from './machine.ts'
@@ -317,6 +318,14 @@ export function attachController(options: {
     actor.send({ type: 'CONNECTION_LOST', message })
   }
   client.onAudioFinished = ({ purpose, turn }) => {
+    if (purpose === 'lateCredit') {
+      if (turn !== speechTurn) return
+      lateSpeechBusy = false
+      const heardPath = statePath(actor.getSnapshot().value)
+      if (heardPath.startsWith('buzzing') || heardPath.startsWith('choosing') || heardPath === 'roundSummaryWindow') client.setMicEnabled(true)
+      flushLateSpeech()
+      return
+    }
     if (turn !== speechTurn || !isSpeechPurpose(purpose)) return
     const finish = () => {
       if (statePath(actor.getSnapshot().value) === 'stopped') return
@@ -398,6 +407,11 @@ export function attachController(options: {
       actor.send({ type: 'PLAYER_SPEECH_STARTED' })
     }
   }
+  client.onTranscript = ({ itemId, text }) => {
+    if (!itemId || !text.trim()) return
+    lateTexts.set(itemId, text)
+    tryLateCredits()
+  }
   client.onSpeechStopped = ({ durationMs, itemId, forced }) => {
     const path = statePath(actor.getSnapshot().value)
     if (path === 'stopped' || path === 'paused') return
@@ -450,6 +464,7 @@ export function attachController(options: {
       // Микрофон не закрываем: реплика уходит в оценку, решение — после тишины (answerSilenceDecideMs).
       const utterance: AnswerUtterance = { order: ++answerSeq, itemId: uttItemId, durationMs: Math.max(0, durationMs), state: 'pending', heard: '' }
       answerTurn.push(utterance)
+      rememberLateSlot(uttItemId)
       diag('слух', `ответ: реплика #${utterance.order} — в оценку`, { itemId: uttItemId, durationMs })
       if (path !== 'answering.settling') actor.send({ type: 'PLAYER_SPEECH_FINISHED' })
       answerQueue.push(utterance)
@@ -667,6 +682,12 @@ export function attachController(options: {
   }
 
   let previousRound = actor.getSnapshot().context.roundIndex
+  /** Реплики ответа этого вопроса: поздняя расшифровка зачитывается только им, не следующей ячейке. */
+  const lateSlots: Array<{ itemId: string; playerId: PlayerId; questionId: string }> = []
+  const lateTexts = new Map<string, string>()
+  const lateDone = new Set<string>()
+  const pendingLateSpeech: Array<{ playerId: PlayerId; questionId: string }> = []
+  let lateSpeechBusy = false
   /** Откуда сняли паузу. `resumeClock` стирает `resumePath` до этой подписки. */
   let pausedFrom = ''
   const subscription = actor.subscribe((snapshot) => {
@@ -700,7 +721,86 @@ export function attachController(options: {
     if (answererLine) pushSystemLine(answererLine)
     if (!hostEarSurvives(path, from)) clearHostEar()
     enter(path, snapshot, from, fromRound)
+    tryLateCredits()
+    flushLateSpeech()
   })
+
+  function rememberLateSlot(itemId: string | null): void {
+    if (!itemId || lateSlots.some((slot) => slot.itemId === itemId)) return
+    const context = actor.getSnapshot().context
+    const questionId = context.activeQuestionId
+    const playerId = context.activePlayerId
+    if (!questionId || !playerId || currentRound(context, context.roundIndex)?.kind === 'final') return
+    lateSlots.push({ itemId, playerId, questionId })
+    if (lateSlots.length > 24) lateSlots.shift()
+  }
+
+  /** Пока игрок говорит или ведущая говорит фразу, которую ждёт машина, — апелляцию не перебиваем. */
+  function lateSpeechBlocked(path: string): boolean {
+    return path === 'paused' || path === 'stopped' || path === 'failed'
+      || path.startsWith('answering') || path === 'judging' || path.startsWith('reading')
+      || path.startsWith('announcing') || path === 'appealCue' || path === 'appealConfirm'
+      || path === 'flashing' || path === 'roundSummaryWindow' || path === 'bridging'
+      || specialListening(path)
+  }
+
+  function tryLateCredits(): void {
+    const context = actor.getSnapshot().context
+    const questionId = lateCreditQuestionId(context)
+    if (!questionId) {
+      lateSlots.length = 0
+      return
+    }
+    for (let index = lateSlots.length - 1; index >= 0; index -= 1) {
+      if (lateSlots[index]?.questionId !== questionId) lateSlots.splice(index, 1)
+    }
+    for (const slot of lateSlots) {
+      if (lateDone.has(slot.itemId)) continue
+      const text = lateTexts.get(slot.itemId)
+      if (!text) continue
+      const outcome = context.outcomes?.[questionId]?.[slot.playerId]
+      if (!outcome) continue
+      const answers = questionById(context.questions, questionId)?.answers ?? []
+      if (outcome.correct === true || !transcriptIsEtalon(text, answers)) {
+        lateDone.add(slot.itemId)
+        continue
+      }
+      const scoreBefore = context.players.find((player) => player.id === slot.playerId)?.score
+      lateDone.add(slot.itemId)
+      actor.send({ type: 'LATE_TRANSCRIPT_CREDIT', questionId, playerId: slot.playerId })
+      const scored = actor.getSnapshot().context
+      const scoreAfter = scored.players.find((player) => player.id === slot.playerId)?.score
+      if (scoreAfter === scoreBefore || scored.outcomes?.[questionId]?.[slot.playerId]?.correct !== true) continue
+      const row = scored.outcomes?.[questionId]?.[slot.playerId]
+      const name = scored.players.find((player) => player.id === slot.playerId)?.name ?? 'игрок'
+      pushHostLine(appealResultLine({
+        name,
+        amount: row?.amount ?? 0,
+        previous: row?.previous ?? 0,
+        accepted: true,
+        total: scoreAfter,
+      }))
+      pendingLateSpeech.push({ playerId: slot.playerId, questionId })
+    }
+    flushLateSpeech()
+  }
+
+  function flushLateSpeech(): void {
+    if (lateSpeechBusy || pendingLateSpeech.length === 0) return
+    const path = statePath(actor.getSnapshot().value)
+    if (lateSpeechBlocked(path)) return
+    const next = pendingLateSpeech[0]
+    if (!next) return
+    const context = actor.getSnapshot().context
+    if (lateCreditQuestionId(context) !== next.questionId) {
+      pendingLateSpeech.shift()
+      flushLateSpeech()
+      return
+    }
+    pendingLateSpeech.shift()
+    lateSpeechBusy = true
+    speak('lateCredit', lateCreditCue(context, next.playerId, next.questionId))
+  }
 
   function enter(
     path: string,
@@ -3376,6 +3476,24 @@ export function verbatimAnnouncement(context: GameContext): string | null {
   // Хвост про кнопку — свободная реплика; дословно остаётся только эталон.
   if (kind === 'nobody' && (context.spokeWithoutButton || context.talkedDuringRead)) return null
   return answer
+}
+
+/** Та же форма фактов, что у ручной апелляции: мок собирает из неё строку чата. */
+export function lateCreditCue(context: GameContext, playerId: PlayerId, questionId: string): string {
+  const player = context.players.find((item) => item.id === playerId)
+  const row = context.outcomes?.[questionId]?.[playerId]
+  const amount = row?.amount ?? 0
+  const previous = row?.previous ?? amount
+  const total = player?.score ?? 0
+  const change = amount === previous ? `осталось ${amountWords(amount)}` : `было ${amountWords(previous)}, стало ${amountWords(amount)}`
+  return hostCue({
+    situation: `Апелляция игрока ${player?.name ?? 'игрок'} принята. За этот вопрос ${change}. Общий счёт ${total}. Новый итог заменяет прежний зачёт этого игрока.`,
+    goal: 'Скажи своими словами, что апелляция принята, назови игрока и итог за вопрос; общий счёт — если уместно.',
+    constraints: [
+      'Числа — ровно как в ситуации, плюс и минус не путай.',
+      'Верный ответ другого игрока на этот вопрос не отменяй.',
+    ],
+  })
 }
 
 export function announceInstructions(context: GameContext, extra: { guessing?: boolean } = {}): string {

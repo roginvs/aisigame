@@ -47,6 +47,7 @@ export class MockRealtimeClient implements GameVoice {
   onToolCall: (call: ToolCall | null, purpose: string, turn: number) => void = () => {}
   onSpeechStarted: (info?: { itemId: string | null }) => void = () => {}
   onSpeechStopped: (info: { durationMs: number; itemId: string | null; forced?: boolean }) => void = () => {}
+  onTranscript: (info: { itemId: string; text: string }) => void = () => {}
 
   private audioItems = new AudioItems()
   private audioTexts = new Map<string, string>()
@@ -236,6 +237,7 @@ export class MockRealtimeClient implements GameVoice {
     const matched = this.transcriptWaiters.get(itemId) ?? []
     this.transcriptWaiters.delete(itemId)
     for (const waiter of matched) waiter(line)
+    if (text.trim()) this.onTranscript({ itemId, text })
   }
 
   private removeTranscriptWaiter(itemId: string, finish: (line: StoredTranscript) => void): void {
@@ -452,6 +454,7 @@ function hostLine(purpose: string, instructions = ''): string {
   if (purpose === 'stake') return 'Смотрим ставку.'
   if (purpose === 'score') return 'Ставка раскрыта.'
   if (purpose === 'appeal') return 'Повторите ответ, пожалуйста.'
+  if (purpose === 'lateCredit') return announceLine(instructions)
   if (purpose === 'roundSummary') return 'Раунд окончен. Впереди следующий раунд.'
   if (purpose === 'buzzCall') {
     const name = /Игрок (.+?) первым нажал/.exec(instructions)?.[1]?.trim()

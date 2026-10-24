@@ -30,6 +30,7 @@ export type SpeechPurpose =
   | 'noBuzzer'
   | 'falseStart'
   | 'appeal'
+  | 'lateCredit'
   | 'roundSummary'
   | 'cat'
   | 'catClarify'
@@ -258,6 +259,8 @@ export type GameEvent =
   | { type: 'UNBUTTONED_TALK' }
   | { type: 'TALKED_OVER' }
   | { type: 'ANSWER_JUDGED'; judgment: AnswerJudgment }
+  /** Поздняя расшифровка совпала с эталоном: вернуть игроку плюс за этот вопрос, чужой зачёт не трогать. */
+  | { type: 'LATE_TRANSCRIPT_CREDIT'; questionId: string; playerId: PlayerId }
   | { type: 'ANSWER_ECHO' }
   /** Ответ из нескольких реплик: игрок замолчал, оценки готовы — решение в judging. */
   | { type: 'ANSWER_SETTLED' }

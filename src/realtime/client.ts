@@ -206,6 +206,8 @@ export class RealtimeClient {
   onToolCall: (call: ToolCall | null, purpose: string, turn: number) => void = () => {}
   onSpeechStarted: (info?: { itemId: string | null }) => void = () => {}
   onSpeechStopped: (info: { durationMs: number; itemId: string | null; forced?: boolean }) => void = () => {}
+  /** Расшифровка реплики легла в хранилище. Игра решает, не опоздала ли она. */
+  onTranscript: (info: { itemId: string; text: string }) => void = () => {}
 
   constructor(options: { model?: string; wire?: VoiceWire | null } = {}) {
     this.model = options.model ?? gameConfig.model
@@ -669,6 +671,7 @@ export class RealtimeClient {
     this.itemPrompts.finished(itemId)
     clearLivePlayerLine(itemId)
     this.offerPlayerChat(itemId, text)
+    if (text.trim()) this.onTranscript({ itemId, text })
     const matched = this.transcriptWaiters.get(itemId) ?? []
     this.transcriptWaiters.delete(itemId)
     for (const waiter of matched) waiter(text)
@@ -1893,6 +1896,7 @@ export type GameVoice = Pick<
   | 'onToolCall'
   | 'onSpeechStarted'
   | 'onSpeechStopped'
+  | 'onTranscript'
   | 'connect'
   | 'setMicEnabled'
   | 'setOutputMuted'

@@ -87,6 +87,7 @@ function allCues(): Array<[string, string]> {
   }
   const appeal = { questionId: 'q', windowId: 1, startedAt: 0, remainingMs: 0, activePlayerId: 1 }
   list.push(['appeal', cues.announceInstructions({ ...c, announceKind: 'correct', appeal: appeal as never, outcomes: { q: { 1: { amount: 100, previous: -100 } } } as never })])
+  list.push(['lateCredit', cues.lateCreditCue({ ...c, outcomes: { q: { 1: { amount: 100, attemptId: 1, correct: true, previous: -100 } } } }, 1, 'q')])
   for (const kind of ['opened', 'update', 'idle'] as const) {
     list.push([`lobby-${kind}`, lobbySpeechInstructions({ kind, packName: 'Пакет', packSummary: 'Раундов: 2, вопросов: 3.', roster: roster() })])
   }
