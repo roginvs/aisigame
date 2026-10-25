@@ -13,6 +13,7 @@ import { geminiOutboundTurns } from './geminiWire.ts'
 import { MockRealtimeClient } from './mockClient.ts'
 import { outputFlushWaitMs } from './playback.ts'
 import { qwenTranslateOutbound } from './qwenWire.ts'
+import { freshGrokTurn, grokInbound } from './grokWire.ts'
 import { eventsFromDebugDump, translateReplayInbound, type ReplayWire } from './replayDump.ts'
 vi.mock('../audio/beep.ts', () => ({ playTimeoutBeep: vi.fn(), unlockAudio: vi.fn() }))
 
@@ -424,6 +425,126 @@ describe('граница кнопки', () => {
     const cues = speech.mock.calls.filter((call) => call[0] === 'buzzCall').map((call) => String(call[2]))
     expect(cues.some((cue) => cue.includes('уже говорили вслух'))).toBe(false)
     expect(scoreOf(actor, 1)).toBe(0)
+    stop()
+    actor.stop()
+  })
+})
+
+const gluedPhrase = 'Текст 100. Давай, слушай, чё ты мне этот, голову-то морочишь?'
+const gluedAnswer = `${gluedPhrase} Цицерон.`
+
+/** Кусок дампа 25 октября: выбор закрылся фразой, ответ — та же фраза плюс «Цицерон». */
+const grokGlueDump = `## trace
+
+2026-10-25T07:09:24.538Z in conversation.item.input_audio_transcription.completed
+{"type":"conversation.item.input_audio_transcription.completed","item_id":"137dec2f","transcript":"${gluedPhrase}","status":"completed"}
+
+2026-10-25T07:09:36.029Z in conversation.item.input_audio_transcription.completed
+{"type":"conversation.item.input_audio_transcription.completed","item_id":"6f55ce40","transcript":"${gluedAnswer}","status":"completed"}
+`
+
+/** Кусок дампа: несколько completed одной реплики выбора, годный текст — не первый. */
+const grokGrowingDump = `## trace
+
+2026-10-25T07:09:08.116Z in input_audio_buffer.speech_started
+{"type":"input_audio_buffer.speech_started","item_id":"d2d910e6","audio_start_ms":31928}
+
+2026-10-25T07:09:08.364Z in conversation.item.input_audio_transcription.completed
+{"type":"conversation.item.input_audio_transcription.completed","item_id":"d2d910e6","transcript":"Text","status":"in_progress"}
+
+2026-10-25T07:09:09.234Z in input_audio_buffer.speech_stopped
+{"type":"input_audio_buffer.speech_stopped","item_id":"d2d910e6","audio_end_ms":33041}
+
+2026-10-25T07:09:09.263Z in conversation.item.input_audio_transcription.completed
+{"type":"conversation.item.input_audio_transcription.completed","item_id":"d2d910e6","transcript":"Текст 100.","status":"in_progress"}
+
+2026-10-25T07:09:09.803Z in conversation.item.input_audio_transcription.completed
+{"type":"conversation.item.input_audio_transcription.completed","item_id":"d2d910e6","transcript":"Текст 100.","status":"completed"}
+
+2026-10-25T07:09:10.100Z in conversation.item.input_audio_transcription.completed
+{"type":"conversation.item.input_audio_transcription.completed","item_id":"d2d910e6","transcript":"Текст 100. лишнее","status":"completed"}
+`
+
+function grokClientEvents(dump: string): object[] {
+  let turn = freshGrokTurn()
+  const out: object[] = []
+  for (const event of eventsFromDebugDump(dump)) {
+    const parsed = grokInbound(event, turn)
+    turn = parsed.turn
+    out.push(...parsed.events)
+  }
+  return out
+}
+
+describe('Grok: подклеенная фраза и нарастающая расшифровка', () => {
+  it('OpenAI оставляет первую completed и не подменяет её следующей', () => {
+    play([
+      { kind: 'in', events: [
+        { type: 'conversation.item.input_audio_transcription.completed', item_id: 'a', transcript: 'Text' },
+        { type: 'conversation.item.input_audio_transcription.completed', item_id: 'a', transcript: 'Текст 100.' },
+      ] },
+    ])
+    expect(transcripts).toEqual([{ itemId: 'a', text: 'Text' }])
+  })
+
+  it('нарастающие completed выбора берутся как «Текст 100.», поздняя правка ход не открывает', () => {
+    const events = grokClientEvents(grokGrowingDump)
+    const completed = events.filter((event) => (event as { type?: string }).type === 'conversation.item.input_audio_transcription.completed')
+    expect(completed).toEqual([
+      expect.objectContaining({ item_id: 'd2d910e6', transcript: 'Текст 100.', status: 'completed' }),
+    ])
+    for (const event of events) feed(event)
+    expect(transcripts).toEqual([{ itemId: 'd2d910e6', text: 'Текст 100.' }])
+  })
+
+  it('префикс фразы до кнопки не уходит в оценку, хвост «Цицерон» уходит, техническая строка есть', async () => {
+    const fromDump = eventsFromDebugDump(grokGlueDump).map((event) => (event as { transcript?: string }).transcript)
+    expect(fromDump).toEqual([gluedPhrase, gluedAnswer])
+    const pack: QuestionPack = {
+      name: 'Текст',
+      rounds: [{ index: 0, name: 'Раунд', kind: 'normal' }],
+      warnings: [],
+      questions: [{
+        id: 't-100',
+        roundIndex: 0,
+        themeId: 't',
+        themeName: 'Т....Т',
+        value: 100,
+        text: 'Кто это?',
+        answers: ['Цицерон'],
+      }],
+    }
+    const voice = new MockRealtimeClient()
+    const actor = createActor(gameMachine)
+    actor.start()
+    const stop = attachController({ actor, client: voice, getApiKey: () => 'test-key', setLink: () => {} })
+    actor.send({ type: 'START_GAME', pack })
+    await vi.advanceTimersByTimeAsync(80)
+    expect(statePath(actor.getSnapshot().value)).toBe('choosing.listening')
+    voice.hear(gluedPhrase, 2600)
+    await vi.advanceTimersByTimeAsync(80)
+    expect(statePath(actor.getSnapshot().value)).toBe('flashing')
+    await vi.advanceTimersByTimeAsync(gameConfig.cellFlashMs + 100)
+    if (statePath(actor.getSnapshot().value).startsWith('reading')) {
+      actor.send({ type: 'HOST_AUDIO_FINISHED', purpose: 'read' })
+      await vi.advanceTimersByTimeAsync(80)
+    }
+    expect(statePath(actor.getSnapshot().value)).toBe('buzzing.open')
+    actor.send({ type: 'BUZZER_PRESSED', playerId: 1 })
+    await vi.advanceTimersByTimeAsync(40)
+    voice.hear(gluedAnswer, 1022)
+    await vi.advanceTimersByTimeAsync(120 + answerSilenceDecideMs)
+    const system = getTrace().filter((entry) => entry.kind === 'chat' && entry.title === 'Техническое')
+      .map((entry) => (entry.detail as { text?: string }).text ?? '')
+    expect(system.some((line) => line.includes('распознаватель подклеил фразу до кнопки') && line.includes(gluedPhrase) && line.includes('Цицерон'))).toBe(true)
+    const judged = getTrace().filter((entry) => entry.kind === 'note' && entry.title.includes('засчитываю без модели'))
+    expect(judged.some((entry) => entry.title.includes('Цицерон') && !entry.title.includes(gluedPhrase))).toBe(true)
+    expect(scoreOf(actor, 1)).toBe(100)
+    const prefixLine = getTrace().find((entry) => {
+      const detail = entry.detail as { text?: string; mark?: { kind?: string } } | undefined
+      return entry.kind === 'chat' && detail?.mark?.kind === 'beforeButton' && detail.text === gluedPhrase
+    })
+    expect(prefixLine).toBeTruthy()
     stop()
     actor.stop()
   })

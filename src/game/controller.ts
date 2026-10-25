@@ -14,10 +14,10 @@ import type { JudgmentInputMode, JudgmentSource, JudgeRequestContext } from '../
 import { JudgmentClock } from './judgmentClock.ts'
 import { gameConfig } from '../config.ts'
 import { speakingPlayerId } from './speaker.ts'
-import { markPlayerLine, setPlayerSpeakerSource, noteLink, pushHostLine, pushJudgeLine, pushPlayerLine, pushSystemLine, pushTrace } from '../debug/trace.ts'
+import { editChatLine, markPlayerLine, setPlayerSpeakerSource, noteLink, pushHostLine, pushJudgeLine, pushPlayerLine, pushSystemLine, pushTrace } from '../debug/trace.ts'
 import type { GameVoice, LinkStatus, ToolCall } from '../realtime/client.ts'
 import { verbatimSpeech } from '../realtime/speechMatch.ts'
-import { echoesTranscriptionPrompt } from './promptEcho.ts'
+import { cutGluedPhrase, echoesTranscriptionPrompt } from './promptEcho.ts'
 import type { ConferenceHistoryMessage } from '../conference/messages.ts'
 import { conversationLineFromTrace } from '../conference/traceConversation.ts'
 import { getLivePlayerLine, getTrace } from '../debug/trace.ts'
@@ -226,6 +226,12 @@ export function attachController(options: {
   let beforeButtonRemark: string | null = null
   let beforeButtonRemarkUsed = false
   let buzzCueSent = false
+  /** Последняя фраза игрока, закрытая до кнопки (выбор, перебивание, речь без кнопки). */
+  let closedBeforePress = ''
+  /** Снимок closedBeforePress в момент открытия попытки: ответ сравнивается только с ним. */
+  let answerGluePhrase = ''
+  let glueReported = false
+  let glueEmptied = false
   /** Свежая речь на выборе / ответе — не долбить подсказкой «мик выкл.». */
   let lastAnswerSpeechAt = 0
   let overRead = false
@@ -1019,6 +1025,7 @@ export function attachController(options: {
     }
     if (!path.startsWith('choosing')) choosingOffer = null
     if (path === 'choosing.listening') {
+      closedBeforePress = ''
       choiceEpoch += 1
       client.setSpeechSpeed(gameConfig.speechSpeed)
       client.setTranscriptionPrompt(listeningPrompt(context, choosingOffer))
@@ -1181,6 +1188,9 @@ export function attachController(options: {
     armAnswerDeadline(context.clarifications > 0 ? gameConfig.clarifyMs : gameConfig.answerMs)
     liveAttemptId = attemptId
     answerArmedAt = Date.now()
+    answerGluePhrase = closedBeforePress
+    glueReported = false
+    glueEmptied = false
     answerItemId = null
     answerTranscript = ''
     answerConfidence = null
@@ -1309,9 +1319,15 @@ export function attachController(options: {
     rememberOverheard(text)
   }
 
+  function noteClosedPhrase(text: string): void {
+    const clean = text.trim()
+    if (clean) closedBeforePress = clean
+  }
+
   function rememberOverheard(text: string): void {
     const clean = text.trim()
     if (!clean) return
+    noteClosedPhrase(clean)
     if (!heardBeforeButton.includes(clean)) heardBeforeButton.push(clean)
     beforeButtonRemark = heardBeforeButton.join('; ').slice(0, 400)
     offerOverheardRemark()
@@ -1461,6 +1477,7 @@ export function attachController(options: {
       choiceInModel = null
       window.clearTimeout(choiceModelTimer)
     }
+    if (state !== 'noise' && u.text.trim()) noteClosedPhrase(u.text)
     markPlayerLine(u.itemId, state === 'cell' && cell ? { kind: 'cell', cell: cell.label } : { kind: state === 'noise' ? 'noise' : 'other' })
     pushTrace('note', `выбор: реплика #${u.order} → ${state}${cell ? ` ${cell.label}` : ''}`)
     runNextSelection()
@@ -1814,11 +1831,54 @@ export function attachController(options: {
    */
   async function audioAsrHint(itemId: string, durationMs: number, clock: JudgmentClock): Promise<string> {
     const ready = client.peekTranscript(itemId)
-    if (ready?.arrived) return ready.text.trim()
+    if (ready?.arrived) return unglueAnswer(ready.text, itemId).text.trim()
     const wait = Math.min(transcriptWaitMs(durationMs), Math.max(0, clock.remaining()))
     if (wait <= 0) return ''
     const heard = await clock.within(() => client.waitForTranscript(itemId, wait), wait).catch(() => null)
-    return heard?.arrived ? heard.text.trim() : ''
+    return heard?.arrived ? unglueAnswer(heard.text, itemId).text.trim() : ''
+  }
+
+  /** Уже показанную строку этой реплики заменить хвостом. Нет строки — ничего. */
+  function rewritePlayerLine(itemId: string | null, text: string): void {
+    if (!itemId) return
+    const entry = [...getTrace()].reverse().find((item) => {
+      if (item.kind !== 'chat') return false
+      const detail = item.detail
+      return Boolean(detail && typeof detail === 'object' && (detail as { itemId?: unknown }).itemId === itemId)
+    })
+    if (entry) editChatLine(entry.id, text)
+  }
+
+  /**
+   * Распознаватель дописал новую реплику к фразе, уже закрытой до кнопки.
+   * Префикс — в чат как «до кнопки», в оценку только хвост. Пустой хвост — не ответ.
+   */
+  function unglueAnswer(raw: string, itemId: string | null): { text: string; gluedEmpty: boolean } {
+    const cut = cutGluedPhrase(raw, answerGluePhrase)
+    if (!cut) return { text: raw, gluedEmpty: false }
+    if (!glueReported) {
+      glueReported = true
+      const judged = cut.tail || '—'
+      const line = `распознаватель подклеил фразу до кнопки: отрезан префикс «${cut.prefix}», в оценку «${judged}»`
+      pushTrace('note', line)
+      pushSystemLine(line)
+      if (cut.tail) {
+        const glueId = itemId ? `${itemId}:prefix` : null
+        if (glueId) markPlayerLine(glueId, { kind: 'beforeButton' })
+        pushPlayerLine(cut.prefix, glueId)
+      }
+    }
+    if (itemId) client.replaceHeardTranscript(itemId, cut.tail)
+    if (!cut.tail) {
+      glueEmptied = true
+      if (itemId) {
+        markPlayerLine(itemId, { kind: 'beforeButton' })
+        client.suppressPlayerChat(itemId)
+      }
+      return { text: '', gluedEmpty: true }
+    }
+    rewritePlayerLine(itemId, cut.tail)
+    return { text: cut.tail, gluedEmpty: false }
   }
 
   /** Оценка по аудио: 'done' — вердикт отдан, 'dead' — попытка уже неактуальна, 'fallback' — переходить к тексту. */
@@ -1891,13 +1951,21 @@ export function attachController(options: {
     // Та же формула, что везде (transcriptWaitMs), но не дольше оставшегося окна оценки.
     // Чат-реплика: текст уже известен, транскриптора не ждём.
     const answerWait = Math.min(transcriptWaitMs(answerDurationMs), run.clock.remaining())
-    const heard = run.utterance.chatText != null
+    const heardRaw = run.utterance.chatText != null
       ? { text: run.utterance.chatText, arrived: true, confidence: null as number | null }
       : itemId
         ? await run.clock.within(() => client.waitForTranscript(itemId, answerWait), answerWait)
         : { text: '', arrived: false, confidence: null as number | null }
+    const peeled = run.utterance.chatText != null ? null : unglueAnswer(heardRaw.text, itemId)
+    const heard = peeled ? { ...heardRaw, text: peeled.text } : heardRaw
     await run.clock.active()
     if (!judgeLive(run) || run.clock.remaining() <= 0) return
+    if (peeled?.gluedEmpty || glueEmptied) {
+      client.suppressPlayerChat(itemId)
+      run.utterance.speech = 'noise'
+      finishAnswerUtterance(run.utterance, 'judged')
+      return
+    }
     // Чат-реплика напечатана игроком вручную: эхо подсказок и фантом Whisper к ней неприменимы.
     const chatTyped = run.utterance.chatText != null
     const answerPrompt = answerPromptFor(context)

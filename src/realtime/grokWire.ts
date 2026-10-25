@@ -10,15 +10,24 @@ export type GrokTurn = {
   responseId: string
   pendingTranscript: string
   pendingItemId: string | null
+  /** updated — черновик старого события; draft — незакрытый transcription.completed. */
+  pendingKind: 'none' | 'updated' | 'draft'
+  /** speech_stopped уже был: финал можно отдать, ранний черновик — нет. */
+  speechClosed: boolean
   transcriptDone: boolean
   handledCalls: string[]
 }
+
+/** Сколько ждём финальную completed после конца речи, если status=completed так и не пришёл. */
+export const grokTranscriptSettleMs = 1_200
 
 export function freshGrokTurn(): GrokTurn {
   return {
     responseId: '',
     pendingTranscript: '',
     pendingItemId: null,
+    pendingKind: 'none',
+    speechClosed: false,
     transcriptDone: false,
     handledCalls: [],
   }
@@ -30,16 +39,42 @@ export function grokOutbound(event: object): object | 'clear-output' | 'drop' {
   const type = text(record.type)
   if (type === 'output_audio_buffer.clear') return 'clear-output'
   if (type === 'session.update') return grokSession(asRecord(record.session))
-  if (type === 'response.create' && 'max_output_tokens' in asRecord(record.response)) {
-    // Потолок длины — поле OpenAI; Grok его не документирует, не рискуем ошибкой.
-    const { max_output_tokens: _cap, ...response } = asRecord(record.response)
-    void _cap
-    return { ...record, response }
-  }
+  if (type === 'response.create') return grokResponseCreate(record)
   return event
 }
 
-export function grokInbound(event: object, turn: GrokTurn): { turn: GrokTurn; events: object[]; audio: Int16Array | null } {
+/**
+ * Ответ xAI на `response.create`: инструмент `type=function` обязан иметь вложенное `function`
+ * (`name`, `description`, `parameters`). Плоская схема OpenAI даёт
+ * `Tool with type='function' must have 'function' field set`.
+ * `session.update` плоскую схему принимает и сам перекладывает её в этот вид — её не трогаем.
+ * `tool_choice` остаётся `{type, name}`: ошибка была только про `response.tools`.
+ */
+function grokResponseCreate(record: Loose): object {
+  const response = asRecord(record.response)
+  const tools = Array.isArray(response.tools) ? response.tools.map(grokFunctionTool) : undefined
+  if (!('max_output_tokens' in response) && !tools) return record
+  // Потолок длины — поле OpenAI; Grok его не документирует, не рискуем ошибкой.
+  const { max_output_tokens: _cap, ...rest } = response
+  void _cap
+  return { ...record, response: tools ? { ...rest, tools } : rest }
+}
+
+/** Вложить плоский инструмент OpenAI. Уже вложенный и не-function не меняются. */
+export function grokFunctionTool(tool: unknown): unknown {
+  const record = asRecord(tool)
+  if (record.type !== 'function') return tool
+  const nested = asRecord(record.function)
+  if (text(nested.name)) return tool
+  const name = text(record.name)
+  if (!name) return tool
+  const fn: Loose = { name }
+  if (typeof record.description === 'string') fn.description = record.description
+  if (record.parameters !== undefined) fn.parameters = record.parameters
+  return { type: 'function', function: fn }
+}
+
+export function grokInbound(event: object, turn: GrokTurn): { turn: GrokTurn; events: object[]; audio: Int16Array | null; holdDraft: boolean } {
   const record = asRecord(event)
   const type = text(record.type)
   const next: GrokTurn = { ...turn, handledCalls: [...turn.handledCalls] }
@@ -47,48 +82,55 @@ export function grokInbound(event: object, turn: GrokTurn): { turn: GrokTurn; ev
     const response = asRecord(record.response)
     const id = text(response.id)
     if (id) next.responseId = id
-    return { turn: next, events: [event], audio: null }
+    return { turn: next, events: [event], audio: null, holdDraft: false }
   }
   if (type === 'response.output_audio.delta' || type === 'response.audio.delta') {
     const delta = text(record.delta) || text(record.audio)
     const responseId = text(record.response_id) || next.responseId
     if (responseId) next.responseId = responseId
-    if (!delta) return { turn: next, events: [], audio: null }
-    return { turn: next, events: [], audio: base64ToPcm(delta) }
+    if (!delta) return { turn: next, events: [], audio: null, holdDraft: false }
+    return { turn: next, events: [], audio: base64ToPcm(delta), holdDraft: false }
   }
   if (type === 'conversation.item.input_audio_transcription.updated') {
     next.pendingTranscript = text(record.transcript)
     next.pendingItemId = text(record.item_id) || next.pendingItemId
+    if (next.pendingKind !== 'draft') next.pendingKind = 'updated'
     // Grok шлёт полный промежуточный текст — отдаём как delta с полным transcript.
     const events = next.pendingTranscript && !next.transcriptDone
       ? [{ type: 'conversation.item.input_audio_transcription.delta', item_id: next.pendingItemId, transcript: next.pendingTranscript }]
       : []
-    return { turn: next, events, audio: null }
+    return { turn: next, events, audio: null, holdDraft: false }
   }
   if (type === 'input_audio_buffer.speech_started') {
     next.pendingTranscript = ''
     next.pendingItemId = text(record.item_id) || null
+    next.pendingKind = 'none'
+    next.speechClosed = false
     next.transcriptDone = false
-    return { turn: next, events: [event], audio: null }
+    return { turn: next, events: [event], audio: null, holdDraft: false }
   }
   if (type === 'input_audio_buffer.speech_stopped') {
+    next.speechClosed = true
     const events: object[] = [event]
-    if (!next.transcriptDone && next.pendingTranscript) {
+    // Черновик `.updated` закрываем сразу. Повторные completed с status=in_progress
+    // не закрываем: финал приходит следом, ранний «Text» не должен запереть реплику.
+    if (!next.transcriptDone && next.pendingTranscript && next.pendingKind !== 'draft') {
       events.push(completedTranscript(next.pendingItemId, next.pendingTranscript))
       next.transcriptDone = true
+      next.pendingTranscript = ''
+      next.pendingKind = 'none'
     }
-    return { turn: next, events, audio: null }
+    const holdDraft = !next.transcriptDone && next.pendingKind === 'draft' && Boolean(next.pendingTranscript)
+    return { turn: next, events, audio: null, holdDraft }
   }
   if (type === 'conversation.item.input_audio_transcription.completed') {
-    next.transcriptDone = true
-    next.pendingTranscript = ''
-    return { turn: next, events: [event], audio: null }
+    return finishGrokTranscript(next, record)
   }
   if (type === 'response.function_call_arguments.done') {
     const callId = text(record.call_id)
-    if (!callId || next.handledCalls.includes(callId)) return { turn: next, events: [], audio: null }
+    if (!callId || next.handledCalls.includes(callId)) return { turn: next, events: [], audio: null, holdDraft: false }
     next.handledCalls.push(callId)
-    return { turn: next, events: [functionDone(next.responseId, record)], audio: null }
+    return { turn: next, events: [functionDone(next.responseId, record)], audio: null, holdDraft: false }
   }
   if (type === 'response.done') {
     const response = asRecord(record.response)
@@ -106,9 +148,45 @@ export function grokInbound(event: object, turn: GrokTurn): { turn: GrokTurn; ev
       turn: next,
       events: [{ ...record, response: { ...response, output: kept } }],
       audio: null,
+      holdDraft: false,
     }
   }
-  return { turn: next, events: [event], audio: null }
+  return { turn: next, events: [event], audio: null, holdDraft: false }
+}
+
+/**
+ * Повторные `transcription.completed` одного item: в ход идёт финальная
+ * (`status=completed` или единственная без status). `in_progress` — черновик.
+ * После финала поздняя правка не уходит клиенту и ход не открывает.
+ */
+function finishGrokTranscript(next: GrokTurn, record: Loose): { turn: GrokTurn; events: object[]; audio: Int16Array | null; holdDraft: boolean } {
+  if (next.transcriptDone) return { turn: next, events: [], audio: null, holdDraft: false }
+  const transcript = text(record.transcript)
+  const itemId = text(record.item_id) || next.pendingItemId
+  const status = text(record.status)
+  const final = status === 'completed' || status === ''
+  if (!final) {
+    next.pendingTranscript = transcript
+    next.pendingItemId = itemId
+    next.pendingKind = 'draft'
+    const events = transcript
+      ? [{ type: 'conversation.item.input_audio_transcription.delta', item_id: itemId, transcript }]
+      : []
+    return { turn: next, events, audio: null, holdDraft: next.speechClosed && Boolean(transcript) }
+  }
+  next.transcriptDone = true
+  next.pendingTranscript = ''
+  next.pendingKind = 'none'
+  return { turn: next, events: [record], audio: null, holdDraft: false }
+}
+
+/** Запасной финал, если после конца речи status=completed так и не пришёл. */
+export function grokReleaseDraft(turn: GrokTurn): { turn: GrokTurn; event: object | null } {
+  if (turn.transcriptDone || turn.pendingKind !== 'draft' || !turn.pendingTranscript) return { turn, event: null }
+  return {
+    turn: { ...turn, transcriptDone: true, pendingTranscript: '', pendingKind: 'none' },
+    event: completedTranscript(turn.pendingItemId, turn.pendingTranscript),
+  }
 }
 
 function grokSession(session: Loose): object {
@@ -204,6 +282,7 @@ export class GrokWire implements VoiceWire {
   private player: PcmPlayer
   private turn = freshGrokTurn()
   private opened = false
+  private draftTimer: ReturnType<typeof setTimeout> | null = null
   private readonly model: string
 
   constructor(model: string) {
@@ -259,6 +338,7 @@ export class GrokWire implements VoiceWire {
 
   close(): void {
     this.opened = false
+    this.clearDraftTimer()
     this.player.stop()
     this.mic?.close()
     this.mic = null
@@ -323,7 +403,29 @@ export class GrokWire implements VoiceWire {
     this.turn = parsed.turn
     if (parsed.audio) this.player.enqueue(parsed.audio)
     for (const item of parsed.events) this.emit(item)
+    this.syncDraft(parsed.holdDraft)
     if (text(asRecord(event).type) === 'response.done') this.player.finish()
+  }
+
+  /** Финал пришёл — таймер снять. Черновик после конца речи — отдать, если финал не придёт. */
+  private syncDraft(hold: boolean): void {
+    if (!hold) {
+      this.clearDraftTimer()
+      return
+    }
+    if (this.draftTimer) return
+    this.draftTimer = setTimeout(() => {
+      this.draftTimer = null
+      const released = grokReleaseDraft(this.turn)
+      this.turn = released.turn
+      if (released.event) this.emit(released.event)
+    }, grokTranscriptSettleMs)
+  }
+
+  private clearDraftTimer(): void {
+    if (!this.draftTimer) return
+    clearTimeout(this.draftTimer)
+    this.draftTimer = null
   }
 
   private socketSend(event: object): boolean {

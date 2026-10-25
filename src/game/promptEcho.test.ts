@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { echoesTranscriptionPrompt } from './promptEcho.ts'
+import { cutGluedPhrase, echoesTranscriptionPrompt } from './promptEcho.ts'
 
 describe('echoesTranscriptionPrompt', () => {
   it('ловит дословное эхо подсказки кнопки и чтения', () => {
@@ -10,5 +10,16 @@ describe('echoesTranscriptionPrompt', () => {
     expect(echoesTranscriptionPrompt(reading, reading)).toBe(true)
     expect(echoesTranscriptionPrompt('Ньютон', buzzer)).toBe(false)
     expect(echoesTranscriptionPrompt('Фотосинтез', reading)).toBe(false)
+  })
+})
+
+describe('cutGluedPhrase', () => {
+  const phrase = 'Текст 100. Давай, слушай, чё ты мне этот, голову-то морочишь?'
+
+  it('отрезает продолжение уже закрытой фразы и оставляет хвост', () => {
+    expect(cutGluedPhrase(`${phrase} Цицерон.`, phrase)).toEqual({ prefix: phrase, tail: 'Цицерон.' })
+    expect(cutGluedPhrase(phrase, phrase)).toEqual({ prefix: phrase, tail: '' })
+    expect(cutGluedPhrase('Цицерон', phrase)).toBeNull()
+    expect(cutGluedPhrase('Да, это Пушкин', 'да')).toBeNull()
   })
 })

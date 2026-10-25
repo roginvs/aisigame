@@ -644,6 +644,15 @@ export class RealtimeClient {
     }
   }
 
+  /** Подменить уже принятый текст реплики, не открывая ход заново и не зовя onTranscript. */
+  replaceHeardTranscript(itemId: string | null, text: string): void {
+    if (!itemId) return
+    const current = this.transcripts.get(itemId)
+    if (!current) return
+    this.transcripts.set(itemId, { text, confidence: current.confidence })
+    if (this.playerChatPending.has(itemId)) this.playerChatPending.set(itemId, text)
+  }
+
   allowPlayerChat(itemId: string | null): void {
     if (!itemId) return
     this.playerChatSuppressed.delete(itemId)
@@ -1959,6 +1968,7 @@ export type GameVoice = Pick<
   | 'setTranscriptionPrompt'
   | 'gatePlayerChat'
   | 'allowPlayerChat'
+  | 'replaceHeardTranscript'
   | 'suppressPlayerChat'
   | 'waitForTranscript'
   | 'peekTranscript'
