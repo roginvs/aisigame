@@ -20,6 +20,12 @@ export interface VoiceWire {
    * У OpenAI изолированный ход такого ответа не ждёт: там это invalid_tool_call_id.
    */
   readonly acksForeignToolCalls?: boolean
+  /**
+   * Реплика ведущей открылась (`response.created`), а звук так и не начался,
+   * или вместо речи пришёл вызов функции. Один повтор той же реплики.
+   * У OpenAI длинная генерация может молчать до `started` десятки секунд — там флаг выключен.
+   */
+  readonly restartsSilentSpeech?: boolean
   open(apiKey: string, sink: VoiceSink, options?: VoiceOpenOptions): Promise<void>
   send(event: object): boolean
   close(): void

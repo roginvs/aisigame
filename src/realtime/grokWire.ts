@@ -278,6 +278,8 @@ export class GrokWire implements VoiceWire {
   readonly supportsButtonCut = true
   /** xAI ждёт function_call_output даже на вызов, который игра не принимала. */
   readonly acksForeignToolCalls = true
+  /** Чтение и вердикт в дампе 25 октября открывались без звука: один повтор. */
+  readonly restartsSilentSpeech = true
   private sink: VoiceSink | null = null
   private socket: WebSocket | null = null
   private mic: PcmMic | null = null
@@ -328,6 +330,10 @@ export class GrokWire implements VoiceWire {
 
   setLocalPlayback(enabled: boolean): void {
     this.player.setLocalPlayback(enabled)
+  }
+
+  outputLevel(): number {
+    return this.player.outputLevel()
   }
 
   attachHostOutput(handler: (stream: MediaStream) => void): void {

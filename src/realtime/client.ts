@@ -49,6 +49,8 @@ type SpeechTurn = {
   mustSay?: string
   /** Накопленная расшифровка дословной фразы — чтобы оборвать «довесок» (ответ после вопроса). */
   liveTranscript?: string
+  /** Текст реплики для одного повтора, если Grok открыл ответ и не заговорил. */
+  cue: string
   /** Вопрос уже сгенерирован целиком, пошёл довесок: генерацию остановили, звук доигрывает до `stopped`. */
   overran?: boolean
   /** Date.now() на output_audio_buffer.started — позиция звука при обрыве, если truncated не придёт. */
@@ -148,6 +150,8 @@ export class RealtimeClient {
   private hardTimer: number | null = null
   /** Сервер так и не прислал response.created на эту реплику. */
   private unopenedTimer: number | null = null
+  /** Grok: response.created был, звука нет. OpenAI этот таймер не ставит. */
+  private silentTimer: number | null = null
   private flushTimer: number | null = null
   private playbackResponseId: string | null = null
   private pendingSpeak: string | null = null
@@ -829,6 +833,7 @@ export class RealtimeClient {
       dropResponseId: null,
       ignoreResponseId,
       itemId: null,
+      cue: instructions,
       chatNote,
       mustSay: expect ? undefined : revealedAnswer(instructions),
     }
@@ -874,10 +879,13 @@ export class RealtimeClient {
   }
 
   sendToolOutput(callId: string, output: unknown): void {
-    // У isolated tool response conversation:none — call_id в сессии нет,
+    // У OpenAI isolated tool response conversation:none — call_id в сессии нет,
     // conversation.item.create даёт invalid_tool_call_id и только шумит в лог.
+    // Grok ждёт function_call_output и на принятый вызов: без него следующая
+    // реплика (чтение, вердикт) приходит вызовом функции и без звука.
     const owner = this.toolOutputs.get(callId)
-    if (!owner || owner.isolated || owner.sent) return
+    if (!owner || owner.sent) return
+    if (owner.isolated && !this.wire?.acksForeignToolCalls) return
     owner.sent = true
     this.send({
       type: 'conversation.item.create',
@@ -1224,6 +1232,7 @@ export class RealtimeClient {
       if (id && this.skipsResponse(id)) return
       this.speech.liveResponseId = id
       this.clearUnopenedTimer()
+      this.armSilentSpeechWatch()
     }
 
     if (type === 'response.output_item.added' && this.speech) this.rememberAssistantItem(event)
@@ -1234,8 +1243,15 @@ export class RealtimeClient {
       this.speech.started = true
       this.speech.playStartedAt = Date.now()
       if (responseId) this.playbackResponseId = responseId
+      this.clearSilentTimer()
       this.syncHostAudioTimers(timersAfterPlaybackStarted(this.hostAudioTimers(), this.speech.ended))
       this.onLink({ host: 'speaking' })
+      diag('ведущая-звук', 'буфер ведущей запущен', {
+        responseId: responseId || null,
+        localPlayback: this.localPlayback,
+        outputMuted: this.outputMuted,
+        level: Math.round(this.outputLevel() * 1000) / 1000,
+      })
     }
 
     if (type === 'response.output_audio_transcript.delta' && this.speech?.expect) {
@@ -1355,7 +1371,7 @@ export class RealtimeClient {
     if (pendingTool && Number.isNaN(Number(earlyMeta.turn)) && !unmarkedToolDone &&
       (call || !request || Object.values(toolPurposes).includes(request.purpose))) {
       pushTrace('note', `поздний или неопознанный ответ без метки хода (${toolResponseId}), жду ${pendingTool.turn}`)
-      if (call) this.ackForeignToolCall(call)
+      if (call) this.ackForeignToolCall(call, toolResponseId)
       return
     }
     if (pendingTool && unmarkedToolDone && (!call || call.name !== pendingTool.name)) {
@@ -1393,16 +1409,16 @@ export class RealtimeClient {
       const responseId = toolResponseId
       if (pending && !Number.isNaN(turn) && turn !== pending.turn) {
         pushTrace('note', `поздний ${call.name} turn=${turn}, жду ${pending.turn}`)
-        this.ackForeignToolCall(call)
+        this.ackForeignToolCall(call, responseId)
         return
       }
       if (pending && request && request.token !== pending.responseToken) {
         pushTrace('note', `поздний ${call.name} от другой отправки (ответ ${responseId}), жду ${pending.turn}`)
-        this.ackForeignToolCall(call)
+        this.ackForeignToolCall(call, responseId)
         return
       }
       if (request?.cancelled) {
-        this.ackForeignToolCall(call)
+        this.ackForeignToolCall(call, responseId)
         return
       }
       // Qwen не эхомит ход: принимаем только отправку, связанную через created.
@@ -1410,7 +1426,7 @@ export class RealtimeClient {
       const owned = Boolean(pending && request && request.token === pending.responseToken)
       const markedSameTurn = Boolean(pending && !Number.isNaN(turn) && turn === pending.turn && (!request || owned))
       if (!pending || !(owned || markedSameTurn)) {
-        this.ackForeignToolCall(call)
+        this.ackForeignToolCall(call, responseId)
         return
       }
       if (call.name !== pending.name) {
@@ -1839,20 +1855,71 @@ export class RealtimeClient {
   }
 
   /** Вызов не нашего хода. Grok без function_call_output не открывает следующую реплику. */
-  private ackForeignToolCall(call: ToolCall): void {
+  private ackForeignToolCall(call: ToolCall, responseId = ''): void {
     if (!this.wire?.acksForeignToolCalls) return
     const known = this.toolOutputs.get(call.callId)
-    if (known?.sent) return
-    this.toolOutputs.set(call.callId, { isolated: false, sent: true })
-    if (this.toolOutputs.size > 256) this.toolOutputs.delete(this.toolOutputs.keys().next().value!)
-    this.send({
-      type: 'conversation.item.create',
-      item: {
-        type: 'function_call_output',
-        call_id: call.callId,
-        output: JSON.stringify({ accepted: false, reason: 'Вызов не относится к текущему ходу' }),
-      },
-    })
+    if (!known?.sent) {
+      this.toolOutputs.set(call.callId, { isolated: false, sent: true })
+      if (this.toolOutputs.size > 256) this.toolOutputs.delete(this.toolOutputs.keys().next().value!)
+      this.send({
+        type: 'conversation.item.create',
+        item: {
+          type: 'function_call_output',
+          call_id: call.callId,
+          output: JSON.stringify({ accepted: false, reason: 'Вызов не относится к текущему ходу' }),
+        },
+      })
+    }
+    this.restartSpeechIfThisResponse(responseId, 'вместо речи пришёл вызов функции')
+  }
+
+  /**
+   * Grok открыл реплику и не заговорил (дамп 25 октября: чтение 7–14 с без буфера,
+   * вердикт завершился повторным submitAnswerJudgment и 0 секунд звука).
+   * Один повтор той же реплики. OpenAI флаг не ставит.
+   */
+  private armSilentSpeechWatch(): void {
+    if (!this.wire?.restartsSilentSpeech) return
+    this.clearSilentTimer()
+    this.silentTimer = window.setTimeout(() => {
+      this.silentTimer = null
+      this.restartSpeechIfThisResponse(this.speech?.liveResponseId ?? '', 'звук не начался')
+    }, gameConfig.hostAudioFallbackMs)
+  }
+
+  private clearSilentTimer(): void {
+    if (this.silentTimer === null) return
+    window.clearTimeout(this.silentTimer)
+    this.silentTimer = null
+  }
+
+  private restartSpeechIfThisResponse(responseId: string, why: string): void {
+    const speech = this.speech
+    if (!this.wire?.restartsSilentSpeech || !speech || speech.started) return
+    if (!responseId || responseId !== speech.liveResponseId) return
+    if (speech.retries >= 1) {
+      pushTrace('note', `ведущая так и не заговорила (${why})`)
+      this.finishSpeech('fallback')
+      return
+    }
+    speech.retries += 1
+    speech.done = false
+    speech.ended = false
+    speech.liveTranscript = ''
+    speech.liveResponseId = null
+    pushTrace('note', `ведущая молчит (${why}) — повтор реплики`)
+    if (this.fallbackTimer !== null) {
+      window.clearTimeout(this.fallbackTimer)
+      this.fallbackTimer = null
+    }
+    this.clearSilentTimer()
+    this.responseRequests.cancel(speech.responseToken)
+    this.cancelActiveResponse()
+    if (!this.sendSpeech(speech.cue)) {
+      this.dropLink('Связь с ведущей прервалась. Начните игру ещё раз.')
+      return
+    }
+    this.armUnopenedWait()
   }
 
   private armHardLimit(): void {
@@ -1876,6 +1943,7 @@ export class RealtimeClient {
     if (this.fallbackTimer !== null) window.clearTimeout(this.fallbackTimer)
     if (this.hardTimer !== null) window.clearTimeout(this.hardTimer)
     this.clearUnopenedTimer()
+    this.clearSilentTimer()
     this.fallbackTimer = null
     this.hardTimer = null
   }

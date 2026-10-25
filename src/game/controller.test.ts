@@ -1650,6 +1650,22 @@ describe('выбор из нескольких реплик хода', () => {
     stop(); actor.stop()
   })
 
+  it('ясная ячейка не ждёт старые реплики в модели (дамп «Э, Детские загадки 200»)', async () => {
+    const client = new MockRealtimeClient()
+    const { actor, stop } = await boot(client)
+    await toChoosing(actor)
+    const tool = vi.spyOn(client, 'requestTool').mockImplementation(() => {})
+    client.hear('ну давайте посмотрим что там', 1500)
+    await vi.advanceTimersByTimeAsync(80)
+    expect(statePath(actor.getSnapshot().value)).toBe('choosing.listening')
+    client.hear('Э, Волга 200.', 1200)
+    await vi.advanceTimersByTimeAsync(80)
+    expect(tool).toHaveBeenCalled()
+    expect(actor.getSnapshot().context.activeQuestionId).toBe('v-200')
+    expect(getTrace().some((entry) => entry.kind === 'note' && entry.title.includes('берём реплику') && entry.title.includes('#1 pending') && entry.title.includes('ВОЛГА 200'))).toBe(true)
+    stop(); actor.stop()
+  })
+
   it('модель получает прошлые реплики хода по порядку', async () => {
     const client = new MockRealtimeClient()
     const { actor, stop } = await boot(client)

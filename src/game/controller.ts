@@ -1493,11 +1493,17 @@ export function attachController(options: {
       diag('слух', 'выбор: игрок ещё говорит — не решаем', { turn: choiceTurnLog() })
       return
     }
-    if (choiceTurn.some((u) => u.state === 'pending')) {
+    // Ячейка уже названа последней разобранной репликой. Более ранние, ещё висящие
+    // в модели, её не отменяют (дамп 25 октября: «Э, Детские загадки 200» ждала очередь).
+    // Более поздняя реплика в разборе решение держит: игрок мог поправиться.
+    const chosen = [...choiceTurn].reverse().find((u) => u.state === 'cell')
+    const pendingBlocks = chosen
+      ? choiceTurn.some((u) => u.order > chosen.order && u.state === 'pending')
+      : choiceTurn.some((u) => u.state === 'pending')
+    if (pendingBlocks) {
       diag('слух', 'выбор: реплики ещё в разборе — не решаем', { turn: choiceTurnLog() })
       return
     }
-    const chosen = [...choiceTurn].reverse().find((u) => u.state === 'cell')
     if (chosen?.cell) {
       markPlayerLine(chosen.itemId, { kind: 'picked', cell: chosen.cell.label })
       pushTrace('note', `выбор: берём реплику #${chosen.order} (${chosen.cell.label}) из ${choiceTurn.length}: ${choiceTurnLog()}`)

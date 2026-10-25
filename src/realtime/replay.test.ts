@@ -578,10 +578,11 @@ const pauseAfterThreeDump = `## trace
 
 function useGrokAckWire(): void {
   const opened = client as unknown as Harness & {
-    wire: { acksForeignToolCalls: boolean; send(event: object): boolean; close(): void }
+    wire: { acksForeignToolCalls: boolean; restartsSilentSpeech: boolean; send(event: object): boolean; close(): void }
   }
   opened.wire = {
     acksForeignToolCalls: true,
+    restartsSilentSpeech: true,
     send(event: object) {
       sent.push(event as Record<string, unknown>)
       return true
@@ -589,6 +590,28 @@ function useGrokAckWire(): void {
     close() {},
   }
 }
+
+/** Дамп 25 октября, загадки: вердикт без звука — повторный submitAnswerJudgment на реплике объявления. */
+const riddlesAnnounceDump = `## trace
+
+2026-10-25T08:43:46.046Z in response.done
+{"type":"response.done","response":{"id":"ca3a3d23-bd25-47ee-8295-e2902f5de55b","status":"completed","metadata":{"purpose":"judge","turn":"2"},"output":[{"type":"function_call","name":"submitAnswerJudgment","call_id":"call-f65d0100-475d-4dff-bef9-518dbb663f36-1","arguments":"{\\"status\\":\\"correct\\",\\"heard\\":\\"А, я знаю, что это буква Р. Это буква Р.\\",\\"speech\\":\\"answer\\",\\"guessing\\":false}"}]}}
+
+2026-10-25T08:43:47.607Z in response.created
+{"type":"response.created","response":{"id":"2030301a-eaa5-4545-98f8-68e0209428f8","status":"in_progress","metadata":{"purpose":"announce","turn":"9"}}}
+
+2026-10-25T08:43:48.331Z in response.done
+{"type":"response.done","response":{"id":"2030301a-eaa5-4545-98f8-68e0209428f8","output":[{"type":"function_call","name":"submitAnswerJudgment","call_id":"call-5a478dd6-e252-43d0-a8f6-deac7602f63e-1","arguments":"{\\"status\\":\\"correct\\",\\"heard\\":\\"А, я знаю, что это буква Р. Это буква Р.\\",\\"speech\\":\\"answer\\",\\"guessing\\":false}"}]}}
+`
+
+/** Дамп 25 октября, загадки: чтение вопроса открылось и 7 с не дало звука. */
+const riddlesReadDump = `## trace
+
+2026-10-25T08:43:34.106Z in response.created
+{"type":"response.created","response":{"id":"5744c8c5-ce52-4618-951a-fca64b666a13","status":"in_progress","metadata":{"purpose":"read","turn":"6"}}}
+`
+
+const riddleQuestion = 'Что в России на первом месте, а во Франции на втором?'
 
 describe('дамп 25 октября: квадрат и пауза после «три»', () => {
   it('ошибка чужой отмены не подменяет вердикт «Э, квадрат»; OpenAI чужой вызов не закрывает', () => {
@@ -627,5 +650,86 @@ describe('дамп 25 октября: квадрат и пауза после «
     expect(finished).toEqual([])
     vi.advanceTimersByTime(1)
     expect(finished).toEqual(['announce'])
+  })
+})
+
+describe('дамп 25 октября, загадки: выбор слышен, ведущая молчит', () => {
+  it('Grok закрывает принятый вердикт и повторяет объявление, которое пришло вызовом функции', () => {
+    useGrokAckWire()
+    client.onToolCall = (call) => {
+      if (call) client.sendToolOutput(call.callId, { accepted: true, status: 'correct' })
+    }
+    client.requestTool('judge', 2, 'submitAnswerJudgment', 'Оцени реплику', true)
+    const judge = eventsFromDebugDump(riddlesAnnounceDump)[0]
+    expect(judge).toBeTruthy()
+    feed({ type: 'response.created', response: { id: 'ca3a3d23-bd25-47ee-8295-e2902f5de55b', status: 'in_progress', metadata: { purpose: 'judge', turn: '2' } } })
+    if (judge) feed(judge)
+    const accepted = sent.filter((event) => event.type === 'conversation.item.create' && JSON.stringify(event).includes('call-f65d0100'))
+    expect(accepted).toHaveLength(1)
+    expect(JSON.stringify(accepted[0])).toContain('accepted\\":true')
+    client.requestSpeech('announce', 9, 'Скажи, что верно, Rogin, плюс 100.', undefined, true)
+    for (const event of eventsFromDebugDump(riddlesAnnounceDump).slice(1)) feed(event)
+    const foreign = sent.filter((event) => event.type === 'conversation.item.create' && JSON.stringify(event).includes('call-5a478dd6'))
+    expect(foreign).toHaveLength(1)
+    expect(JSON.stringify(foreign[0])).toContain('Вызов не относится к текущему ходу')
+    const announces = sent.filter((event) => event.type === 'response.create' && JSON.stringify(event).includes('"purpose":"announce"'))
+    expect(announces.length).toBeGreaterThanOrEqual(2)
+    expect(finished).toEqual([])
+    feed({ type: 'response.created', response: { id: 'retry-announce', status: 'in_progress', metadata: { purpose: 'announce', turn: '9' } } })
+    feed({ type: 'output_audio_buffer.started', response_id: 'retry-announce' })
+    feed({
+      type: 'response.done',
+      response: {
+        id: 'retry-announce',
+        status: 'completed',
+        metadata: { purpose: 'announce', turn: '9' },
+        output: [{ type: 'message', content: [{ type: 'audio', transcript: 'Верно, Rogin, плюс 100.' }] }],
+      },
+    })
+    feed({ type: 'output_audio_buffer.stopped', response_id: 'retry-announce' })
+    expect(finished).toEqual(['announce'])
+  })
+
+  it('OpenAI принятый isolated-вердикт function_call_output не шлёт и молчаливое чтение не повторяет', () => {
+    client.onToolCall = (call) => {
+      if (call) client.sendToolOutput(call.callId, { accepted: true, status: 'correct' })
+    }
+    client.requestTool('judge', 2, 'submitAnswerJudgment', 'Оцени реплику', true)
+    feed({ type: 'response.created', response: { id: 'ca3a3d23-bd25-47ee-8295-e2902f5de55b', status: 'in_progress', metadata: { purpose: 'judge', turn: '2' } } })
+    const judge = eventsFromDebugDump(riddlesAnnounceDump)[0]
+    if (judge) feed(judge)
+    expect(sent.some((event) => event.type === 'conversation.item.create')).toBe(false)
+    client.requestSpeech('read', 6, 'зачитай', riddleQuestion)
+    const before = sent.filter((event) => event.type === 'response.create').length
+    for (const event of eventsFromDebugDump(riddlesReadDump)) feed(event)
+    vi.advanceTimersByTime(gameConfig.hostAudioFallbackMs)
+    expect(sent.filter((event) => event.type === 'response.create').length).toBe(before)
+    expect(finished).toEqual([])
+  })
+
+  it('Grok повторяет чтение, если ответ открылся и звук не начался', () => {
+    useGrokAckWire()
+    client.requestSpeech('read', 6, 'зачитай', riddleQuestion)
+    for (const event of eventsFromDebugDump(riddlesReadDump)) feed(event)
+    vi.advanceTimersByTime(gameConfig.hostAudioFallbackMs - 1)
+    expect(sent.filter((event) => event.type === 'response.create')).toHaveLength(1)
+    expect(finished).toEqual([])
+    vi.advanceTimersByTime(1)
+    expect(sent.filter((event) => event.type === 'response.create')).toHaveLength(2)
+    expect(sent.some((event) => event.type === 'response.cancel' && JSON.stringify(event).includes('5744c8c5'))).toBe(true)
+    expect(finished).toEqual([])
+    feed({ type: 'response.created', response: { id: 'retry-read', status: 'in_progress', metadata: { purpose: 'read', turn: '6' } } })
+    feed({ type: 'output_audio_buffer.started', response_id: 'retry-read' })
+    feed({
+      type: 'response.done',
+      response: {
+        id: 'retry-read',
+        status: 'completed',
+        metadata: { purpose: 'read', turn: '6' },
+        output: [{ type: 'message', content: [{ type: 'audio', transcript: riddleQuestion }] }],
+      },
+    })
+    feed({ type: 'output_audio_buffer.stopped', response_id: 'retry-read' })
+    expect(finished).toEqual(['read'])
   })
 })

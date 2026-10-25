@@ -47,6 +47,8 @@ export class PcmPlayer {
   private epoch = 0
   private nodes: AudioBufferSourceNode[] = []
   private hostTap: MediaStreamAudioDestinationNode | null = null
+  /** Пик последнего куска, 0..1. Для дампа: был ли в PCM звук, а не тишина. */
+  private level = 0
   private readonly rate: number
   private readonly onStarted: () => void
   private readonly onDrained: () => void
@@ -63,7 +65,14 @@ export class PcmPlayer {
     void ctx.resume()
     const buffer = ctx.createBuffer(1, pcm.length, this.rate)
     const channel = buffer.getChannelData(0)
-    for (let index = 0; index < pcm.length; index += 1) channel[index] = (pcm[index] ?? 0) / 32768
+    let peak = 0
+    for (let index = 0; index < pcm.length; index += 1) {
+      const sample = (pcm[index] ?? 0) / 32768
+      channel[index] = sample
+      const abs = sample < 0 ? -sample : sample
+      if (abs > peak) peak = abs
+    }
+    this.level = peak
     const source = ctx.createBufferSource()
     source.buffer = buffer
     if (this.localPlayback || !this.hostTap) source.connect(gameOutput(ctx))
@@ -107,6 +116,11 @@ export class PcmPlayer {
     this.started = false
     this.finishing = false
     this.next = 0
+  }
+
+  /** Пик последнего куска 0..1. */
+  outputLevel(): number {
+    return this.level
   }
 
   /** false — только в поток комнаты (hostTap), без локального динамика. */

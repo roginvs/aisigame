@@ -13,6 +13,8 @@ export type ConferenceAudioSink = {
   release: () => void
   /** Переподключить тот же поток: браузер заново создаёт вывод звука. */
   refresh?: () => void
+  /** Состояние элемента для дампа: muted/paused и жива ли дорожка. */
+  playback?: () => { muted: boolean; paused: boolean; volume: number; readyState: number; track: string }
 }
 
 export type ConferenceAudioOutput = {
@@ -110,8 +112,16 @@ export function createConferenceAudioOutput(takeSink: (request: SinkRequest) => 
         sinks.set(participantId, sink)
       }
       sink.setStream(stream)
-      diag('звук', 'дорожка конференции → <audio>', () => ({ participantId, tracks: stream.getAudioTracks().map((track) => String(track.id ?? '').slice(0, 8)).join(',') }))
-      void Promise.resolve(sink.play()).catch((error: unknown) => {
+      const tracks = stream.getAudioTracks()
+      diag('звук', 'дорожка конференции → <audio>', () => ({
+        participantId,
+        tracks: tracks.map((track) => `${String(track.id ?? '').slice(0, 8)}:${track.readyState}/${track.muted ? 'muted' : 'live'}`).join(','),
+        ...(sink.playback?.() ?? {}),
+      }))
+      void Promise.resolve(sink.play()).then(() => {
+        const state = sink.playback?.()
+        if (state) diag('звук', '<audio> после play', () => ({ participantId, ...state }))
+      }, (error: unknown) => {
         pushTrace('note', 'Не удалось включить звук конференции', {
           participantId,
           error: error instanceof Error ? error.message : String(error),
@@ -223,6 +233,17 @@ function createDomSink(): ConferenceAudioSink & { prime: () => void } {
       audio.srcObject = null
       if (pool.length < poolLimit) pool.push(sink)
       else audio.remove()
+    },
+    playback() {
+      const stream = audio.srcObject
+      const track = stream instanceof MediaStream ? stream.getAudioTracks()[0] : undefined
+      return {
+        muted: audio.muted,
+        paused: audio.paused,
+        volume: audio.volume,
+        readyState: audio.readyState,
+        track: track ? `${track.readyState}/${track.muted ? 'muted' : 'live'}` : 'none',
+      }
     },
     prime() {
       audio.src = silentWav
