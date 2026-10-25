@@ -14,6 +14,12 @@ export interface VoiceWire {
    * Не включает запасной commit ответа (у Grok его нет, а разрез на кнопке есть).
    */
   readonly supportsButtonCut?: boolean
+  /**
+   * Чужой function_call (модель вызвала сама, не наш ход) нужно закрыть
+   * `function_call_output`, иначе следующий response.create может не открыться.
+   * У OpenAI изолированный ход такого ответа не ждёт: там это invalid_tool_call_id.
+   */
+  readonly acksForeignToolCalls?: boolean
   open(apiKey: string, sink: VoiceSink, options?: VoiceOpenOptions): Promise<void>
   send(event: object): boolean
   close(): void

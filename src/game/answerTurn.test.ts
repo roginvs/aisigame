@@ -264,6 +264,8 @@ describe('ответ из нескольких реплик', () => {
     expect(text).toContain('heard — дословная копия всей реплики игрока')
     expect(text).toContain('без сокращения, перевода и исправления под эталон')
     expect(text).toContain('При пустой расшифровке — unintelligible')
+    expect(text).toContain('квадрат, квадраты, квадратный')
+    expect(text).toContain('Слова-паразиты, мат, междометия')
     expect(judgmentInstructions(actor.getSnapshot().context, 'x')).not.toContain('Это не первая реплика')
     actor.stop()
   })

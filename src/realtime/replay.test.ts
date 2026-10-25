@@ -549,3 +549,83 @@ describe('Grok: подклеенная фраза и нарастающая ра
     actor.stop()
   })
 })
+
+/** Дамп 25 октября, «Э, квадрат»: ошибка отмены чужого id пришла раньше вердикта. */
+const squareJudgeDump = `## trace
+
+2026-10-25T07:53:29.678Z in response.done
+{"type":"response.done","response":{"id":"397ea7af-279c-4182-b6a9-d153454b84e0","output":[{"type":"function_call","name":"submitAnswerJudgment","call_id":"call-square-foreign","arguments":"{\\"status\\":\\"unintelligible\\",\\"heard\\":\\"Э, квадрат.\\",\\"reason\\":\\"чужой вызов\\",\\"speech\\":\\"answer\\",\\"guessing\\":false}"}]}}
+
+2026-10-25T07:53:29.774Z in error
+{"type":"error","error":{"message":"Response ID '8c8fffb6-4b49-4ae9-9909-c74d459bac21' does not match current response","type":"invalid_request_error","code":"invalid_request_error","event_id":"5abf5b5d-a8a4-4e2c-bfec-1440df1c447a"}}
+
+2026-10-25T07:53:29.926Z in response.created
+{"type":"response.created","response":{"id":"d1daaa3c-12ad-45b4-aa25-3dda055151b8","status":"in_progress","metadata":{"purpose":"judge","turn":"22"}}}
+
+2026-10-25T07:53:30.434Z in response.done
+{"type":"response.done","response":{"id":"d1daaa3c-12ad-45b4-aa25-3dda055151b8","status":"completed","metadata":{"purpose":"judge","turn":"22"},"output":[{"type":"function_call","name":"submitAnswerJudgment","call_id":"call-square","arguments":"{\\"status\\":\\"correct\\",\\"heard\\":\\"Э, квадрат.\\",\\"reason\\":\\"Квадрат совпадает с эталоном\\",\\"speech\\":\\"answer\\",\\"guessing\\":false}"}]}}
+`
+
+/** Дамп 25 октября, пауза после «три»: спонтанный вызов и объявление без response.created. */
+const pauseAfterThreeDump = `## trace
+
+2026-10-25T07:51:50.063Z in response.done
+{"type":"response.done","response":{"id":"2db7974e-12ad-45b4-aa25-3dda055151b8","output":[{"type":"function_call","name":"submitAnswerJudgment","call_id":"call-15943ad0-04b1-4a0d-8e1b-728435c95006-12","arguments":"{\\"status\\":\\"unintelligible\\",\\"heard\\":\\"Три\\",\\"reason\\":\\"Одно слово без контекста\\",\\"speech\\":\\"answer\\",\\"guessing\\":false}"}]}}
+
+2026-10-25T07:51:52.163Z in error
+{"type":"error","error":{"message":"Response ID '8c8fffb6-4b49-4ae9-9909-c74d459bac21' does not match current response","type":"invalid_request_error","code":"invalid_request_error"}}
+`
+
+function useGrokAckWire(): void {
+  const opened = client as unknown as Harness & {
+    wire: { acksForeignToolCalls: boolean; send(event: object): boolean; close(): void }
+  }
+  opened.wire = {
+    acksForeignToolCalls: true,
+    send(event: object) {
+      sent.push(event as Record<string, unknown>)
+      return true
+    },
+    close() {},
+  }
+}
+
+describe('дамп 25 октября: квадрат и пауза после «три»', () => {
+  it('ошибка чужой отмены не подменяет вердикт «Э, квадрат»; OpenAI чужой вызов не закрывает', () => {
+    const calls: Array<{ name: string | null; args: unknown }> = []
+    client.onToolCall = (call) => calls.push({ name: call?.name ?? null, args: call?.arguments ?? null })
+    feed({ type: 'response.created', response: { id: '8c8fffb6-4b49-4ae9-9909-c74d459bac21', status: 'in_progress' } })
+    client.requestTool('judge', 22, 'submitAnswerJudgment', 'Оцени реплику «Э, квадрат.»')
+    play([{ kind: 'in', events: eventsFromDebugDump(squareJudgeDump) }])
+    expect(calls.map((call) => call.name)).toEqual(['submitAnswerJudgment'])
+    expect(JSON.stringify(calls[0]?.args)).toContain('Э, квадрат.')
+    expect(JSON.stringify(calls[0]?.args)).toContain('correct')
+    expect(sent.some((event) => event.type === 'conversation.item.create')).toBe(false)
+  })
+
+  it('Grok закрывает чужой submitAnswerJudgment, вердикт «Э, квадрат» всё равно доходит', () => {
+    useGrokAckWire()
+    const calls: Array<{ name: string | null; args: unknown }> = []
+    client.onToolCall = (call) => calls.push({ name: call?.name ?? null, args: call?.arguments ?? null })
+    feed({ type: 'response.created', response: { id: '8c8fffb6-4b49-4ae9-9909-c74d459bac21', status: 'in_progress' } })
+    client.requestTool('judge', 22, 'submitAnswerJudgment', 'Оцени реплику «Э, квадрат.»')
+    play([{ kind: 'in', events: eventsFromDebugDump(squareJudgeDump) }])
+    expect(calls.map((call) => call.name)).toEqual(['submitAnswerJudgment'])
+    expect(JSON.stringify(calls[0]?.args)).toContain('correct')
+    const outputs = sent.filter((event) => event.type === 'conversation.item.create')
+    expect(outputs).toHaveLength(1)
+    expect(JSON.stringify(outputs[0])).toContain('call-square-foreign')
+    expect(JSON.stringify(outputs[0])).not.toContain('call-square"')
+  })
+
+  it('объявление без response.created заканчивается за 8 с, Grok перед этим закрывает вызов «Три»', () => {
+    useGrokAckWire()
+    play([{ kind: 'in', events: eventsFromDebugDump(pauseAfterThreeDump) }])
+    expect(sent.some((event) => JSON.stringify(event).includes('call-15943ad0'))).toBe(true)
+    client.requestSpeech('announce', 10, 'Скажи, что верно, и плюс 100.')
+    vi.advanceTimersByTime(gameConfig.hostAudioFallbackMs - 1)
+    expect(finished).toEqual([])
+    vi.advanceTimersByTime(1)
+    expect(finished).toEqual(['announce'])
+  })
+})

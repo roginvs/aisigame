@@ -146,6 +146,8 @@ export class RealtimeClient {
   private speech: SpeechTurn | null = null
   private fallbackTimer: number | null = null
   private hardTimer: number | null = null
+  /** Сервер так и не прислал response.created на эту реплику. */
+  private unopenedTimer: number | null = null
   private flushTimer: number | null = null
   private playbackResponseId: string | null = null
   private pendingSpeak: string | null = null
@@ -835,6 +837,7 @@ export class RealtimeClient {
       checkHostUtterance(expect)
     }
     this.armHardLimit()
+    this.armUnopenedWait()
     this.cancelActiveResponse()
     if (flushFirst) {
       if (!this.canSend()) {
@@ -972,9 +975,13 @@ export class RealtimeClient {
   }
 
   private cancelActiveResponse(): void {
-    for (const responseId of this.activeResponses) {
+    for (const responseId of [...this.activeResponses]) {
       // Нативный аудиосудья живёт параллельно и отменяется собственным AbortSignal.
-      if (!this.judgeResponseIds.has(responseId)) this.send({ type: 'response.cancel', response_id: responseId })
+      if (this.judgeResponseIds.has(responseId)) continue
+      // Мёртвый id сервер больше не считает текущим и done не пришлёт. Повтор на каждом
+      // ходе давал пачку «does not match» и этой ошибкой срывал уже отправленную оценку.
+      this.activeResponses.delete(responseId)
+      this.send({ type: 'response.cancel', response_id: responseId })
     }
   }
 
@@ -1155,6 +1162,8 @@ export class RealtimeClient {
       }
       const message = readErrorMessage(event)
       pushTrace('note', `Ошибка API: ${message}`)
+      const staleId = staleCancelledResponseId(message)
+      if (staleId) this.activeResponses.delete(staleId)
       const judge = this.judgeRequests.get(errorId || this.judgeResponseIds.get(responseId) || '')
       if (judge) { judge.finish(null, message); return }
       // Чужой найденный запрос не валит текущий ход. Незнакомый event_id — как раньше:
@@ -1214,6 +1223,7 @@ export class RealtimeClient {
       const id = typeof response.id === 'string' ? response.id : null
       if (id && this.skipsResponse(id)) return
       this.speech.liveResponseId = id
+      this.clearUnopenedTimer()
     }
 
     if (type === 'response.output_item.added' && this.speech) this.rememberAssistantItem(event)
@@ -1345,6 +1355,7 @@ export class RealtimeClient {
     if (pendingTool && Number.isNaN(Number(earlyMeta.turn)) && !unmarkedToolDone &&
       (call || !request || Object.values(toolPurposes).includes(request.purpose))) {
       pushTrace('note', `поздний или неопознанный ответ без метки хода (${toolResponseId}), жду ${pendingTool.turn}`)
+      if (call) this.ackForeignToolCall(call)
       return
     }
     if (pendingTool && unmarkedToolDone && (!call || call.name !== pendingTool.name)) {
@@ -1382,18 +1393,26 @@ export class RealtimeClient {
       const responseId = toolResponseId
       if (pending && !Number.isNaN(turn) && turn !== pending.turn) {
         pushTrace('note', `поздний ${call.name} turn=${turn}, жду ${pending.turn}`)
+        this.ackForeignToolCall(call)
         return
       }
       if (pending && request && request.token !== pending.responseToken) {
         pushTrace('note', `поздний ${call.name} от другой отправки (ответ ${responseId}), жду ${pending.turn}`)
+        this.ackForeignToolCall(call)
         return
       }
-      if (request?.cancelled) return
+      if (request?.cancelled) {
+        this.ackForeignToolCall(call)
+        return
+      }
       // Qwen не эхомит ход: принимаем только отправку, связанную через created.
       // OpenAI эхомит turn: тот же ход принимаем и без created, чужой turn уже отсеян выше.
       const owned = Boolean(pending && request && request.token === pending.responseToken)
       const markedSameTurn = Boolean(pending && !Number.isNaN(turn) && turn === pending.turn && (!request || owned))
-      if (!pending || !(owned || markedSameTurn)) return
+      if (!pending || !(owned || markedSameTurn)) {
+        this.ackForeignToolCall(call)
+        return
+      }
       if (call.name !== pending.name) {
         if (pending.retries < 1) {
           pending.retries += 1
@@ -1798,6 +1817,44 @@ export class RealtimeClient {
     }
   }
 
+  /**
+   * Ответ сервер не открыл. Жёсткие 30 с оставляли стол в announcing с закрытым
+   * микрофоном (дамп 25 октября, «три»). Те же 8 с, что и запас «звук не начался».
+   */
+  private armUnopenedWait(): void {
+    this.clearUnopenedTimer()
+    this.unopenedTimer = window.setTimeout(() => {
+      this.unopenedTimer = null
+      const speech = this.speech
+      if (!speech || speech.started || speech.liveResponseId) return
+      this.responseRequests.cancel(speech.responseToken)
+      this.finishSpeech('fallback')
+    }, gameConfig.hostAudioFallbackMs)
+  }
+
+  private clearUnopenedTimer(): void {
+    if (this.unopenedTimer === null) return
+    window.clearTimeout(this.unopenedTimer)
+    this.unopenedTimer = null
+  }
+
+  /** Вызов не нашего хода. Grok без function_call_output не открывает следующую реплику. */
+  private ackForeignToolCall(call: ToolCall): void {
+    if (!this.wire?.acksForeignToolCalls) return
+    const known = this.toolOutputs.get(call.callId)
+    if (known?.sent) return
+    this.toolOutputs.set(call.callId, { isolated: false, sent: true })
+    if (this.toolOutputs.size > 256) this.toolOutputs.delete(this.toolOutputs.keys().next().value!)
+    this.send({
+      type: 'conversation.item.create',
+      item: {
+        type: 'function_call_output',
+        call_id: call.callId,
+        output: JSON.stringify({ accepted: false, reason: 'Вызов не относится к текущему ходу' }),
+      },
+    })
+  }
+
   private armHardLimit(): void {
     if (this.hardTimer !== null) window.clearTimeout(this.hardTimer)
     this.hardTimer = window.setTimeout(() => {
@@ -1818,9 +1875,15 @@ export class RealtimeClient {
   private clearSpeechTimers(): void {
     if (this.fallbackTimer !== null) window.clearTimeout(this.fallbackTimer)
     if (this.hardTimer !== null) window.clearTimeout(this.hardTimer)
+    this.clearUnopenedTimer()
     this.fallbackTimer = null
     this.hardTimer = null
   }
+}
+
+/** Ошибка отмены чужого id. В сообщении есть сам id; «no active response» id не называет. */
+export function staleCancelledResponseId(message: string): string | null {
+  return /Response ID '([^']+)' does not match current response/u.exec(message)?.[1] ?? null
 }
 
 function waitForIce(pc: RTCPeerConnection): Promise<void> {
@@ -2010,5 +2073,9 @@ function readToolCall(response: Record<string, unknown>): ToolCall | null {
 
 /** Ошибка API, при которой ждущий tool-запрос не придёт. Отмена неактивного ответа — не про него. */
 export function failsPendingTool(message: string, code: string): boolean {
-  return !/cancel/i.test(`${code} ${message}`)
+  const text = `${code} ${message}`
+  if (/cancel/i.test(text)) return false
+  if (/does not match current response/i.test(text)) return false
+  if (/no active response/i.test(text)) return false
+  return true
 }

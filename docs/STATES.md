@@ -41,7 +41,7 @@
 | `earlyBuzzerCharsPerSec` | 12 | оценка длительности чтения по символам |
 | `earlyBuzzerJitterMs` | 700 | случайный разброс ± вокруг оценки |
 | `falseStartMs` | 2 500 | штраф фальстарта: этот игрок не проходит guard, чужие кнопки не держит |
-| `hostAudioFallbackMs` | 8 000 | не таймер фазы: если звук ведущей так и не начался, клиент шлёт тот же `HOST_AUDIO_FINISHED` |
+| `hostAudioFallbackMs` | 8 000 | не таймер фазы: если сервер так и не открыл ответ (`response.created` нет) или к `response.done` звук не начался, клиент шлёт тот же `HOST_AUDIO_FINISHED` |
 | `hostAudioHardLimitMs` | 30 000 | не таймер фазы: потолок звука ведущей, дальше тот же `HOST_AUDIO_FINISHED` |
 | `buzzerWarningMs` | 2 000 | не таймер фазы: за столько до конца полного `buzzerMs` контроллер ставит сигнал. На `stealBuzzerMs` сигнала нет |
 | `buzzerBeepMs` | 1 000 | длина этого сигнала. Кнопку ещё можно нажать |
