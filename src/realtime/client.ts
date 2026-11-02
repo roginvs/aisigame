@@ -2,7 +2,7 @@ import { diag } from '../debug/diag.ts'
 import { gameAudioContext, onAudioOutputsReopen, recreateStreamElement, reopenAudioOutputs, unlockAudio } from '../audio/beep.ts'
 import { createHostOutputReader } from './hostOutputLevel.ts'
 import { gameConfig, hostInstructions, withHostRules } from '../config.ts'
-import { noteUsageSession, recordResponseUsage, resetUsage, setUsageBilling } from './usage.ts'
+import { noteUsageSession, recordResponseUsage, recordTranscriptionUsage, resetUsage, setUsageBilling } from './usage.ts'
 import { livePlayerChatVisible } from './liveSpeech.ts'
 import { clearLivePlayerLine, editChatLine, logTrace, pushHostLine, pushPlayerLine, pushTrace, setLivePlayerLine } from '../debug/trace.ts'
 import { checkHostUtterance } from '../debug/suspicious.ts'
@@ -1303,6 +1303,7 @@ export class RealtimeClient {
         chars: failed ? 0 : readTranscript(event).length,
       })
       this.speechStoppedAt.delete(itemId)
+      if (!failed) recordTranscriptionUsage(event)
       this.rememberTranscript(itemId, failed ? '' : readTranscript(event), failed ? null : transcriptionConfidence(event.logprobs))
     }
 

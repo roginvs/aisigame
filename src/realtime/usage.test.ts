@@ -1,5 +1,5 @@
 import { describe, expect, it, beforeEach, afterEach, vi } from 'vitest'
-import { billedTokens, estimateGrokUsd, estimateUsd, formatTokens, formatUsd, getUsageSnapshot, noteGrokTextItem, noteUsageSession, recordResponseUsage, resetUsage, setUsageBilling } from './usage.ts'
+import { billedTokens, estimateGrokUsd, estimateUsd, formatTokens, formatUsd, getUsageSnapshot, noteGrokTextItem, noteUsageSession, recordResponseUsage, recordTranscriptionUsage, resetUsage, setUsageBilling } from './usage.ts'
 
 const sample = {
   id: 'resp_1',
@@ -49,6 +49,8 @@ describe('usage', () => {
       audioOut: 0,
       imageIn: 0,
       cachedImageIn: 0,
+      transcriptionIn: 0,
+      transcriptionOut: 0,
     })
     expect(usd).toBeCloseTo((600 * 0.6 + 400 * 0.06 + 200 * 10 + 800 * 0.3) / 1_000_000, 8)
   })
@@ -91,5 +93,27 @@ describe('usage', () => {
     expect(getUsageSnapshot().grok.sessionMs).toBe(90_000)
     noteGrokTextItem()
     expect(getUsageSnapshot().usd).toBeCloseTo(estimateGrokUsd(90_000, 3), 8)
+  })
+
+  it('транскрибация считается по своим ставкам и один item один раз', () => {
+    recordTranscriptionUsage({
+      item_id: 'item-1',
+      usage: {
+        input_tokens: 1_000_000,
+        output_tokens: 200_000,
+        input_token_details: { text_tokens: 0, audio_tokens: 1_000_000 },
+      },
+    })
+    recordTranscriptionUsage({
+      item_id: 'item-1',
+      usage: { input_tokens: 1_000_000, output_tokens: 200_000 },
+    })
+    const { totals, usd } = getUsageSnapshot()
+    expect(totals.transcriptionIn).toBe(1_000_000)
+    expect(totals.transcriptionOut).toBe(200_000)
+    expect(totals.textIn).toBe(0)
+    expect(usd).toBeCloseTo((1_000_000 * 1.25 + 200_000 * 5) / 1_000_000, 8)
+    recordTranscriptionUsage({ type: 'conversation.item.input_audio_transcription.completed', transcript: 'без usage' })
+    expect(getUsageSnapshot().usd).toBeCloseTo(usd, 8)
   })
 })

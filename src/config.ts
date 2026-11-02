@@ -28,6 +28,14 @@ export const gameConfig = {
     sessionPerMinute: 0.08,
     textItem: 0.004,
   },
+  /**
+   * gpt-4o-mini-transcribe, страница цен OpenAI (токены, не таблица realtime).
+   * Вход $1.25 и выход $5 за 1M. Оценка $0.003/мин на странице — не счётчик.
+   */
+  transcriptionRates: {
+    input: 1.25,
+    output: 5,
+  },
   welcomeSpeechSpeed: 1.25,
   speechSpeed: hostSpeechSpeed,
   questionsPath: 'public/packs/builtin/demo.siq',

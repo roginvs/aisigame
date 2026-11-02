@@ -10,6 +10,9 @@ export type UsageTotals = {
   audioOut: number
   imageIn: number
   cachedImageIn: number
+  /** Токены gpt-4o-mini-transcribe. Не по ставкам realtime. */
+  transcriptionIn: number
+  transcriptionOut: number
 }
 
 export type UsageBilling = 'tokens' | 'grok'
@@ -36,6 +39,8 @@ const empty = (): UsageTotals => ({
   audioOut: 0,
   imageIn: 0,
   cachedImageIn: 0,
+  transcriptionIn: 0,
+  transcriptionOut: 0,
 })
 
 /** Как часто пилюля Grok перечитывает длительность открытой сессии. Не кадр экрана. */
@@ -103,6 +108,8 @@ function record(value: Record<string, unknown>): boolean {
     audioOut: totals.audioOut + audioOut,
     imageIn: totals.imageIn + imageIn,
     cachedImageIn: totals.cachedImageIn + cachedImageIn,
+    transcriptionIn: totals.transcriptionIn,
+    transcriptionOut: totals.transcriptionOut,
   }
   return true
 }
@@ -130,7 +137,10 @@ export function estimateUsd(usage: UsageTotals): number {
       usage.audioOut * rates.audioOut +
       freshImage * rates.imageIn +
       usage.cachedImageIn * rates.cachedImageIn) /
-    million
+      million +
+    (usage.transcriptionIn * gameConfig.transcriptionRates.input +
+      usage.transcriptionOut * gameConfig.transcriptionRates.output) /
+      million
   )
 }
 
@@ -193,6 +203,34 @@ export function noteUsageSession(action: 'open' | 'close'): void {
 export function noteGrokTextItem(): void {
   if (billing !== 'grok') return
   textItems += 1
+  publish()
+}
+
+/**
+ * usage из conversation.item.input_audio_transcription.completed.
+ * Один item_id — один раз. Нет usage — ничего не прибавляем.
+ */
+export function recordTranscriptionUsage(event: unknown): void {
+  if (!event || typeof event !== 'object') return
+  const body = event as Record<string, unknown>
+  const id = typeof body.item_id === 'string' ? body.item_id : ''
+  const seenId = id ? `tr:${id}` : ''
+  if (seenId && seen.has(seenId)) return
+  const usage = body.usage
+  if (!usage || typeof usage !== 'object') return
+  const record = usage as Record<string, unknown>
+  const detailsRaw = record.input_token_details
+  const details = detailsRaw && typeof detailsRaw === 'object' ? (detailsRaw as Record<string, unknown>) : {}
+  const detailedIn = amount(details.text_tokens) + amount(details.audio_tokens)
+  const inputTokens = amount(record.input_tokens) || detailedIn
+  const outputTokens = amount(record.output_tokens)
+  if (inputTokens + outputTokens === 0) return
+  totals = {
+    ...totals,
+    transcriptionIn: totals.transcriptionIn + inputTokens,
+    transcriptionOut: totals.transcriptionOut + outputTokens,
+  }
+  if (seenId) seen.add(seenId)
   publish()
 }
 

@@ -123,7 +123,7 @@ function usageHint(usage: UsageSnapshot): string {
     return `Grok: ${minutes} мин сессии × $0,08 и ${usage.grok.textItems} текстовых item × $0,004. Токены OpenAI в эту сумму не входят.`
   }
   const totals = usage.totals
-  return `По завершённым ответам: текст ${totals.textIn} (кэш ${totals.cachedTextIn}), аудио ${totals.audioIn} (кэш ${totals.cachedAudioIn}), выход текст ${totals.textOut}, аудио ${totals.audioOut}. Транскрипция отдельно не входит.`
+  return `По завершённым ответам: текст ${totals.textIn} (кэш ${totals.cachedTextIn}), аудио ${totals.audioIn} (кэш ${totals.cachedAudioIn}), выход текст ${totals.textOut}, аудио ${totals.audioOut}. Транскрипция: вход ${totals.transcriptionIn}, выход ${totals.transcriptionOut} (ставки gpt-4o-mini-transcribe, не realtime).`
 }
 
 export function GameScreen(props: {
