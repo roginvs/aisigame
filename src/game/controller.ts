@@ -42,6 +42,7 @@ import {
 } from './machine.ts'
 import { buzzAnswererLine, openingChooser, playerName } from './players.ts'
 import { spokenAnswerCue } from './spokenAnswer.ts'
+import { FOCUS_UNHEARD_REASON } from './focusUnheard.ts'
 import type { AnnounceKind, AnswerJudgment, AuctionOption, GameContext, JudgmentStatus, PlayerId, SpeechPurpose } from './types.ts'
 
 /** Одна законченная реплика игрока в попытке ответа и её оценка моделью. */
@@ -737,6 +738,9 @@ export function attachController(options: {
     pushTrace('state', path, machineView(snapshot.context))
     const answererLine = buzzAnswererLine(from, path, snapshot.context.players, snapshot.context.activePlayerId)
     if (answererLine) pushSystemLine(answererLine)
+    if (path.startsWith('announcing') && snapshot.context.judgmentReason === FOCUS_UNHEARD_REASON) {
+      pushSystemLine('техническое: звук отвечающего не дошёл до модели, минус за молчание не ставим')
+    }
     if (!hostEarSurvives(path, from)) clearHostEar()
     enter(path, snapshot, from, fromRound)
     tryLateCredits()
@@ -3808,6 +3812,15 @@ export function announceInstructions(context: GameContext, extra: { guessing?: b
   if (kind === 'silence') {
     const rest = [named, minus, finalNote].filter(Boolean).join(' ')
     return `${withCloseGuess(cue, context)} Только после эталона коротко своими словами скажи, что за окно ответа ничего не услышала, можно упомянуть микрофон, и назови минус очков — не что ответ неверный.${rest ? ` ${rest}` : ''}`
+  }
+  if (kind === 'repeat' && context.judgmentReason === FOCUS_UNHEARD_REASON) {
+    return hostCue({
+      situation: `Исход: повтор. Звук игрока ${playerNameLine || 'игрока'} до модели не дошёл, очки не меняются; отвечает тот же игрок.`,
+      goal: 'Коротко попроси повторить ответ и скажи, что не расслышала. Не называй это неверным и не называй минус.',
+      constraints: [
+        'Правильный ответ не называй и не намекай. Не говори, что ответ неверный. Не зови нажимать кнопку. Очки не упоминай.',
+      ],
+    })
   }
   if (kind === 'repeat') {
     return hostCue({

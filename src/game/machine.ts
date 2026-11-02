@@ -14,6 +14,7 @@ import { demoPack } from './questions.ts'
 import { answerHasClip, publicAnswerHasPlayable } from './reveal.ts'
 import { answerMediaMaxMs, answerMediaMinMs } from '../options.ts'
 import { restoredMatch } from './savedGame.ts'
+import { FOCUS_UNHEARD_REASON, focusUnheard } from './focusUnheard.ts'
 import type { AnnounceKind, GameContext, GameEvent, JudgmentStatus, Player, PlayerId, QuestionPack, SpecialState } from './types.ts'
 
 /** true — назвать фальстарт. Тесты подменяют flip, чтобы не зависеть от случайности. */
@@ -1088,6 +1089,16 @@ export const gameMachine = setup({
       phaseStartedAt: () => null,
       phaseDurationMs: () => null,
     }),
+    /** Дорожка отвечающего не дошла до модели: очки не трогаем, тот же игрок повторяет. */
+    unheardRepeat: assign({
+      announceKind: () => 'repeat' as AnnounceKind,
+      judgmentReason: () => FOCUS_UNHEARD_REASON,
+      judgmentStatus: () => null,
+      sayCloseGuess: () => false,
+      statusLine: () => 'Не расслышала, повторите',
+      phaseStartedAt: () => null,
+      phaseDurationMs: () => null,
+    }),
     silencePenalty: assign({
       players: ({ context }) => isFinal(context) ? changeScore(context, context.activePlayerId, -stakeOf(context)) : settleOutcome(context, -stakeOf(context)).players,
       outcomes: ({ context }) => isFinal(context) ? context.outcomes : settleOutcome(context, -stakeOf(context)).outcomes,
@@ -1397,6 +1408,7 @@ export const gameMachine = setup({
   },
   guards: {
     idleNudgeDue: ({ context }) => !idleIsFinal(context.idle) || (context.idle?.kind === 'choosing' && context.players.length <= 1),
+    focusUnheard: () => focusUnheard(),
     validAppeal: ({ context, event }) => event.type === 'APPEAL_REQUESTED' &&
       appealRequestError(context, context.appeal?.activePlayerId !== null && context.appeal?.stage === 'closed' ? 'answering.waiting' : context.appeal?.stage === 'open' ? 'buzzing.open' : 'choosing.listening', event) === null,
     closedAppeal: ({ context }) => context.appeal?.stage === 'closed' && context.appeal.activePlayerId !== null,
@@ -2200,7 +2212,10 @@ export const gameMachine = setup({
       states: {
         waiting: {
           entry: 'startAnswerTimer',
-          after: { answerLeft: { target: '#game.announcing', actions: 'silencePenalty' } },
+          after: { answerLeft: [
+            { guard: 'focusUnheard', target: '#game.announcing', actions: 'unheardRepeat' },
+            { target: '#game.announcing', actions: 'silencePenalty' },
+          ] },
           on: {
             PLAYER_SPEECH_STARTED: { target: 'hearing', actions: 'clearTimer' },
             PLAYER_SPEECH_FINISHED: { target: 'settling', actions: 'clearTimer' },

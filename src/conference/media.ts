@@ -71,6 +71,8 @@ export type ConferenceMedia = {
    * комнату не переподключает. Пока микрофон не опубликован — запоминает флаг.
    */
   setPlayerMicProcess: (on: boolean) => Promise<void>
+  /** У фокуса нет живой дорожки или клон молчит: молчание не штрафовать. */
+  focusedTrackMissing: () => boolean
   /** Отвод выхода микшера модели для индикатора (только Jitsi-мастер). */
   modelMeter?: () => AnalyserNode | null
   /** Есть ли речь людей в комнате (без дорожки «Ведущей»). */
@@ -157,6 +159,7 @@ export function createBroadcastMedia(displayName: string): ConferenceMedia & { d
       return meterNode
     },
     setModelHearOnly() {},
+    focusedTrackMissing: () => false,
     async setPlayerMicProcess(on) {
       if (on === micProcess) return
       micProcess = on

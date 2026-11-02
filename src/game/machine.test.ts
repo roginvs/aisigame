@@ -3,6 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { gameConfig } from '../config.ts'
 import { answerMediaMaxMs, answerMediaMinMs } from '../options.ts'
 import { announceInstructions } from './controller.ts'
+import { FOCUS_UNHEARD_REASON, setFocusUnheard } from './focusUnheard.ts'
 import { earlyBuzzerRoll } from './earlyBuzzer.ts'
 import { closeGuessCoin, earlyPickOpen, falseStartCoin, gameMachine, phoneticRetryReason, pickOpen, statePath } from './machine.ts'
 import { answerChatLine } from './controller.ts'
@@ -768,6 +769,21 @@ describe('game machine', () => {
     expect(statePath(voice.getSnapshot().value)).toBe('announcing.holding')
     vi.advanceTimersByTime(1)
     expect(statePath(voice.getSnapshot().value)).toBe('choosing.listening')
+  })
+
+  it('нет дорожки отвечающего — окно молчания не списывает очки и просит повторить', () => {
+    setFocusUnheard(() => true)
+    try {
+      const actor = reachBuzzing()
+      actor.send({ type: 'BUZZER_PRESSED', playerId: 1 })
+      vi.advanceTimersByTime(gameConfig.answerMs)
+      expect(playerScore(actor, 1)).toBe(0)
+      expect(actor.getSnapshot().context.announceKind).toBe('repeat')
+      expect(actor.getSnapshot().context.judgmentReason).toBe(FOCUS_UNHEARD_REASON)
+      expect(actor.getSnapshot().context.missedIds).not.toContain(1)
+    } finally {
+      setFocusUnheard(() => false)
+    }
   })
 
   it('списывает номинал за молчание и не штрафует, если речь уже началась', () => {

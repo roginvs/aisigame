@@ -561,6 +561,8 @@ export async function connectJitsiConference(input: {
   const brokenCloneRmsCeil = 0.02
   let brokenCloneRun = 0
   let brokenCloneCooldownUntil = 0
+  /** Клон фокуса пересоздан и ещё не зазвучал: это не молчание игрока. */
+  let focusCloneBroken = false
 
   /** Замер окна слушания: ключ источника, владелец, уровень в миксе и уровень Jitsi. */
   type HearSampleView = {
@@ -573,8 +575,9 @@ export async function connectJitsiConference(input: {
   function trackBrokenFocusClone(samples: readonly HearSampleView[]): void {
     const focus = modelHearOnlyId
     if (typeof focus !== 'string') return
-    if (Date.now() < brokenCloneCooldownUntil) return
     const current = samples.find((item) => item.participantId === focus) ?? null
+    if (current !== null && current.rms >= brokenCloneRmsCeil) focusCloneBroken = false
+    if (Date.now() < brokenCloneCooldownUntil) return
     const broken = current !== null && current.jitsi !== null && current.jitsi >= SPEAKING_LEVEL && current.rms < brokenCloneRmsCeil
     if (!broken) {
       brokenCloneRun = 0
@@ -583,6 +586,7 @@ export async function connectJitsiConference(input: {
     brokenCloneRun += 1
     if (brokenCloneRun < brokenCloneSamples) return
     brokenCloneRun = 0
+    focusCloneBroken = true
     brokenCloneCooldownUntil = Date.now() + 15_000
     // Клон фокуса пересоздаём. Чужие микрофоны не открываем: иначе модель слышит не отвечающего.
     const key = current?.key ?? ''
@@ -1272,6 +1276,10 @@ export async function connectJitsiConference(input: {
       conferenceAudio.resume()
       emitTiles()
     },
+    focusedTrackMissing() {
+      if (typeof modelHearOnlyId !== 'string') return false
+      return lastFallbackFocus === modelHearOnlyId || focusCloneBroken
+    },
     async setPlayerMicProcess(on) {
       if (on === playerMicProcess) return
       playerMicProcess = on
@@ -1299,6 +1307,7 @@ export async function connectJitsiConference(input: {
       if (changed) {
         // Новый фокус — сторожка битого клона начинает с нуля.
         brokenCloneRun = 0
+        focusCloneBroken = false
         brokenCloneCooldownUntil = 0
       }
       syncModelMixer()

@@ -28,6 +28,7 @@ import { contextFromSnapshot } from './conference/snapshotView.ts'
 import { conferenceDisplayName, deviceSpeechPlayerId, rosterSeats } from './conference/seats.ts'
 import { jitsiHostFromBase, stripInviteParams } from './conference/stripInvite.ts'
 import { focusedModelParticipantId } from './conference/audioMix.ts'
+import { setFocusUnheard } from './game/focusUnheard.ts'
 import type { ConferenceHandle, ConferenceTile } from './conference/media.ts'
 import { createConferenceTransport } from './conference/transportFactory.ts'
 import { putPack, getPack } from './conference/packDb.ts'
@@ -232,6 +233,9 @@ export default function App() {
   const transportDisposeRef = useRef<(() => void) | null>(null)
   const conferenceHandleRef = useRef<ConferenceHandle | null>(null)
   useEffect(() => {
+    setFocusUnheard(() => conferenceHandleRef.current?.focusedTrackMissing() ?? false)
+  }, [])
+  useEffect(() => {
     const on = conferenceRole === 'master' ? micProcess : joinerSnapshot?.micProcess === true
     if (conferenceRole === null) return
     void conferenceHandleRef.current?.setPlayerMicProcess(on)
@@ -337,7 +341,11 @@ export default function App() {
       const livePath = statePath(live.value)
       const ctx = live.context
       const pairs = masterSnapshotRef.current?.jitsiIds
-      const jitsiOf = (clientId: string | null | undefined) => (clientId ? jitsiIdOfClient(pairs, clientId) : null)
+      const jitsiOf = (clientId: string | null | undefined) => {
+      if (!clientId) return null
+      // Живой endpoint того же clientId важнее пары из снимка: после перезахода снимок ещё старый.
+      return masterSessionRef.current?.endpointIdForClient(clientId) ?? jitsiIdOfClient(pairs, clientId)
+    }
       const answererNow = ctx.players.find((player) => player.id === ctx.activePlayerId)
       const chooserNow = ctx.players.find((player) => player.id === ctx.chooserId)
       const listener = specialListenerId(livePath, ctx)
