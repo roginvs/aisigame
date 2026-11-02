@@ -1,5 +1,17 @@
 import { describe, expect, it } from 'vitest'
+import { countLevelSamples, levelUiSampleMs } from '../options.ts'
 import { HEIGHT, INPUT_BAND_H, INPUT_CLOSED_COLOR, INPUT_OPEN_COLOR, inputBandColor, meterLevel, modelInputOpen } from './meterDraw.ts'
+
+describe('уровни UI в ожидании', () => {
+  it('кадры 60 Гц дают около 10 замеров в секунду, не по кадру', () => {
+    const frames = Array.from({ length: 60 }, (_, index) => index * (1000 / 60))
+    const samples = countLevelSamples(frames)
+    expect(levelUiSampleMs).toBe(100)
+    expect(samples).toBeGreaterThanOrEqual(9)
+    expect(samples).toBeLessThanOrEqual(11)
+    expect(samples).toBeLessThan(20)
+  })
+})
 
 describe('meterLevel', () => {
   it('тишина — 0, громкий сигнал — до 1', () => {

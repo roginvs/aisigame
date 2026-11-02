@@ -186,6 +186,30 @@ export const silentClonePeak = 0.003
 export const tileLevelSampleMs = 200
 
 /**
+ * Как часто экран читает и рисует уровни (индикатор модели, стрелки вопроса).
+ * Кадр requestAnimationFrame (~60 Гц) для этого слишком част: 2 ноября 2026 вкладка мастера
+ * держала ~150% CPU. 10 Гц достаточно, чтобы волна и стрелка двигались.
+ */
+export const levelUiSampleMs = 100
+
+/** Пора ли снять следующий замер уровня. Первый вызов (lastAt = −∞) — сразу. */
+export function levelUiDue(lastAt: number, now: number, intervalMs = levelUiSampleMs): boolean {
+  return now - lastAt >= intervalMs
+}
+
+/** Сколько замеров уровня попало бы в последовательность кадров (для проверки «в ожидании»). */
+export function countLevelSamples(frameTimesMs: readonly number[], intervalMs = levelUiSampleMs): number {
+  let last = Number.NEGATIVE_INFINITY
+  let count = 0
+  for (const now of frameTimesMs) {
+    if (!levelUiDue(last, now, intervalMs)) continue
+    last = now
+    count += 1
+  }
+  return count
+}
+
+/**
  * Темп речи ведущей после приветствия: OpenAI/Grok `session.audio.output.speed` (0.25–1.5).
  * У Gemini Live параметра нет — там просьба о темпе в systemInstruction (`geminiTempoRule`).
  */

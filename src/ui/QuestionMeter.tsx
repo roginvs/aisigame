@@ -1,5 +1,6 @@
 import { useEffect, useId, useRef, type RefObject } from 'react'
 import { attachQuestionMeter, readMeterLevels } from '../audio/questionMeter.ts'
+import { levelUiDue, levelUiSampleMs } from '../options.ts'
 
 /** Стрелка в покое смотрит влево, как на магнитофоне. */
 export const meterRestAngle = -46
@@ -33,17 +34,18 @@ export function QuestionMeter(props: { node: HTMLMediaElement | null; live: bool
     }
 
     let frame = 0
-    let last = performance.now()
+    let last = Number.NEGATIVE_INFINITY
     const shown = { left: 0, right: 0 }
     const tick = (now: number) => {
-      const dt = Math.min(0.05, (now - last) / 1000)
+      frame = requestAnimationFrame(tick)
+      if (!levelUiDue(last, now)) return
+      const dt = Math.min(levelUiSampleMs / 1000, (now - last) / 1000)
       last = now
       const target = node.paused ? { left: 0, right: 0 } : readMeterLevels(graph)
       shown.left = glide(shown.left, target.left, dt)
       shown.right = glide(shown.right, target.right, dt)
       placeNeedle(leftNeedle, shown.left, leftPivot)
       placeNeedle(rightNeedle, shown.right, rightPivot)
-      frame = requestAnimationFrame(tick)
     }
     frame = requestAnimationFrame(tick)
     return () => cancelAnimationFrame(frame)
