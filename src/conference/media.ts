@@ -65,7 +65,11 @@ export type ConferenceMedia = {
    * Кого слышит модель: id участника, `null` — все, `false` — никого.
    * HTML/Jitsi playback для людей не трогает.
    */
-  setModelHearOnly: (participantId: string | null | false) => void
+  setModelHearOnly: (participantId: import('./audioMix.ts').ModelHearFocus) => void
+  /** Текущие владельцы живых аудиодорожек, включая локальный id. */
+  liveAudioOwnerIds: () => readonly string[]
+  /** Дорожка сменила владельца или появилась — фокус надо пересчитать сразу. */
+  subscribeAudioOwners: (handler: () => void) => () => void
   /**
    * «ШК»: шумодав захвата и компрессор. Пересобирает только цепочку микрофона,
    * комнату не переподключает. Пока микрофон не опубликован — запоминает флаг.
@@ -159,6 +163,8 @@ export function createBroadcastMedia(displayName: string): ConferenceMedia & { d
       return meterNode
     },
     setModelHearOnly() {},
+    liveAudioOwnerIds: () => [],
+    subscribeAudioOwners: () => () => {},
     focusedTrackMissing: () => false,
     async setPlayerMicProcess(on) {
       if (on === micProcess) return

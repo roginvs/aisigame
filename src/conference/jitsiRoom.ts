@@ -18,7 +18,7 @@ import type { ConferenceTransport } from './transport.ts'
 import { createHearWindow } from './hearWindow.ts'
 import { hearWindowSampleMs, tileLevelSampleMs } from '../options.ts'
 import { SPEAKING_LEVEL } from './speakerActivity.ts'
-import { createMicMixer, type MicMixer, type MixerRemote } from './audioMix.ts'
+import { createMicMixer, type MicMixer, type MixerRemote, type ModelHearFocus } from './audioMix.ts'
 import { cameraFacing, isMobileCameraDevice, nextCameraDeviceId, shouldMirrorVideo, switchFacingCamera, type CameraFacing } from './camera.ts'
 import { createSpeakerActivity } from './speakerActivity.ts'
 import { conferenceAudioStream, createConferenceAudioOutput } from './conferenceAudio.ts'
@@ -483,9 +483,10 @@ export async function connectJitsiConference(input: {
   const videoBindings = new Map<string, HTMLVideoElement>()
   const conferenceAudio = createConferenceAudioOutput()
   let modelMixer: MicMixer | null = null
-  /** `null` — модель слышит всех; иначе только этот Jitsi participant id. */
-  let modelHearOnlyId: string | null | false = null
-  let lastFallbackFocus = ''
+  /** `null` — все; `false` или пустой список — никто; иначе id дорожек одного игрока. */
+  let modelHearOnlyId: ModelHearFocus = null
+  let hearFallback = false
+  const hearTrackListeners = new Set<() => void>()
   /** Последний уровень Jitsi по участнику (TRACK_AUDIO_LEVEL_CHANGED) — для сравнения с клоном в миксе. */
   const jitsiLevels = new Map<string, number>()
   /** Ключ источника микса → participant id на последнем синке. */
@@ -572,11 +573,17 @@ export async function connectJitsiConference(input: {
     jitsi: number | null
   }
 
+  function focusIds(): readonly string[] {
+    if (modelHearOnlyId === null || modelHearOnlyId === false) return []
+    return typeof modelHearOnlyId === 'string' ? [modelHearOnlyId] : modelHearOnlyId
+  }
+
   function trackBrokenFocusClone(samples: readonly HearSampleView[]): void {
-    const focus = modelHearOnlyId
-    if (typeof focus !== 'string') return
-    const current = samples.find((item) => item.participantId === focus) ?? null
-    if (current !== null && current.rms >= brokenCloneRmsCeil) focusCloneBroken = false
+    const ids = focusIds()
+    if (ids.length === 0) return
+    const owned = samples.filter((item) => ids.includes(item.participantId))
+    if (owned.some((item) => item.rms >= brokenCloneRmsCeil)) focusCloneBroken = false
+    const current = owned.find((item) => item.jitsi !== null && item.jitsi >= SPEAKING_LEVEL && item.rms < brokenCloneRmsCeil) ?? null
     if (Date.now() < brokenCloneCooldownUntil) return
     const broken = current !== null && current.jitsi !== null && current.jitsi >= SPEAKING_LEVEL && current.rms < brokenCloneRmsCeil
     if (!broken) {
@@ -592,8 +599,8 @@ export async function connectJitsiConference(input: {
     const key = current?.key ?? ''
     if (key !== 'bus' && key !== 'local') modelMixer?.reattach(key)
     pushTrace('note', 'Модель: у фокуса речь от Jitsi, а в миксе шёпот — пересоздаю клон, чужие закрыты', {
-      participantId: focus,
-      name: participantName(focus),
+      participantId: current?.participantId ?? ids[0] ?? '',
+      name: participantName(current?.participantId ?? ''),
       jitsiPeak: current?.jitsi ?? null,
       rms: current?.rms ?? null,
     })
@@ -785,12 +792,14 @@ export async function connectJitsiConference(input: {
     // Скрытых/ещё не пришедших участников не проигрываем (как раньше); userJoined дозовёт.
     if (!stream || !remoteNames.has(owner)) {
       syncModelMixer()
+      for (const listener of hearTrackListeners) listener()
       return
     }
     // <audio> по ключу дорожки: смена владельца не рвёт воспроизведение.
     if (isHostRemote(owner)) diag('ведущая-звук', 'дорожка «Ведущей» из комнаты → <audio>', { track: entry.key, participantId: owner })
     conferenceAudio.attach(entry.key, stream, remoteNames.get(owner) ?? '')
     syncModelMixer()
+    for (const listener of hearTrackListeners) listener()
   }
 
   function rememberRemoteTrack(jitsiTrack: JitsiTrack): void {
@@ -830,6 +839,7 @@ export async function connectJitsiConference(input: {
     entry.unsubOwner()
     conferenceAudio.remove(entry.key)
     remoteAudioTracks.delete(track)
+    for (const listener of hearTrackListeners) listener()
   }
 
   function dropRemoteAudio(id: string): void {
@@ -865,17 +875,16 @@ export async function connectJitsiConference(input: {
       focus: modelHearOnlyId,
     })
     const focus = modelHearOnlyId
-    const fallbackKey = typeof focus === 'string' ? focus : ''
-    if (result.fallback && fallbackKey !== lastFallbackFocus) {
+    const focusLabel = typeof focus === 'string' ? focus : Array.isArray(focus) ? focus.join(',') : ''
+    if (result.fallback && !hearFallback) {
       pushTrace('note', 'Модель: у фокуса нет живой дорожки, чужие микрофоны закрыты', {
-        participantId: fallbackKey,
-        name: participantName(fallbackKey),
+        participantId: focusLabel,
         owners: remotes
           .map((item) => `${item.participantId}${participantName(item.participantId) ? ` ${participantName(item.participantId)}` : ''}${item.muted ? '(muted)' : ''}`)
           .join(','),
       })
     }
-    lastFallbackFocus = result.fallback ? fallbackKey : ''
+    hearFallback = result.fallback
   }
 
   function stopWatchingLocalMic(): void {
@@ -1277,8 +1286,24 @@ export async function connectJitsiConference(input: {
       emitTiles()
     },
     focusedTrackMissing() {
-      if (typeof modelHearOnlyId !== 'string') return false
-      return lastFallbackFocus === modelHearOnlyId || focusCloneBroken
+      if (modelHearOnlyId === null) return false
+      if (modelHearOnlyId === false) return true
+      if (typeof modelHearOnlyId !== 'string' && modelHearOnlyId.length === 0) return true
+      return hearFallback || focusCloneBroken
+    },
+    liveAudioOwnerIds() {
+      const ids: string[] = []
+      for (const track of remoteAudioTracks.keys()) {
+        const owner = trackOwner(track)
+        if (owner) ids.push(owner)
+      }
+      const self = localId()
+      if (self) ids.push(self)
+      return ids
+    },
+    subscribeAudioOwners(handler: () => void) {
+      hearTrackListeners.add(handler)
+      return () => hearTrackListeners.delete(handler)
     },
     async setPlayerMicProcess(on) {
       if (on === playerMicProcess) return
@@ -1302,18 +1327,21 @@ export async function connectJitsiConference(input: {
     },
     modelMeter: () => modelMixer?.meter() ?? null,
     setModelHearOnly(participantId) {
-      const changed = participantId !== modelHearOnlyId
+      const keyOf = (focus: ModelHearFocus) => focus === false ? 'false' : focus === null ? 'null' : typeof focus === 'string' ? focus : focus.join('|')
+      const changed = keyOf(participantId) !== keyOf(modelHearOnlyId)
       modelHearOnlyId = participantId
       if (changed) {
-        // Новый фокус — сторожка битого клона начинает с нуля.
         brokenCloneRun = 0
         focusCloneBroken = false
         brokenCloneCooldownUntil = 0
       }
       syncModelMixer()
       if (changed) {
-        pushTrace('note', 'Модель: фокус микшера', { focus: participantId, name: participantName(String(participantId ?? '')) })
-        openHearWindow(participantId)
+        const primary = participantId === false || participantId === null || typeof participantId === 'string'
+          ? participantId
+          : (participantId[0] ?? false)
+        pushTrace('note', 'Модель: фокус микшера', { focus: keyOf(participantId), name: typeof primary === 'string' ? participantName(primary) : '' })
+        openHearWindow(primary)
       }
     },
     anyoneSpeaking,

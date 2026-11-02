@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { createMicMixer, focusedModelParticipantId, LOCAL_KEY, modelHearGains, type MixerRemote } from './audioMix.ts'
+import { createMicMixer, focusedModelParticipantId, hearParticipantIds, LOCAL_KEY, modelHearGains, nextHearBinding, type MixerRemote } from './audioMix.ts'
 
 class FakeTrack {
   id: string
@@ -92,6 +92,82 @@ it('keeps the current final bettor audible with or without turn-only mode', () =
     }
     expect(focusedModelParticipantId('finalBets.hearing', null, null, turnOnly, null)).toBe(false)
   }
+})
+
+describe('привязка игрока к дорожкам', () => {
+  const owners = ['j-old', 'j-new', 'j-other']
+
+  it('перезаход: слышны и старая, и новая дорожка того же игрока, чужая нет', () => {
+    const ids = hearParticipantIds({
+      clientId: 'c1',
+      liveEndpointId: 'j-new',
+      pairs: [['j-new', 'c1'], ['j-other', 'c2']],
+      selfParticipantId: null,
+      liveOwnerIds: owners,
+      previousBoundIds: ['j-old'],
+    })
+    expect(ids).toEqual(['j-new', 'j-old'])
+    const { gains, fallback } = modelHearGains({
+      remotes: owners.map((participantId) => ({ key: participantId, participantId, audible: true })),
+      local: { participantId: 'master', audible: true },
+      focus: ids,
+    })
+    expect(fallback).toBe(false)
+    expect(gains.get('j-old')).toBe(1)
+    expect(gains.get('j-new')).toBe(1)
+    expect(gains.get('j-other')).toBe(0)
+    expect(gains.get(LOCAL_KEY)).toBe(0)
+  })
+
+  it('старый id уже принадлежит другому — его дорожка гаснет', () => {
+    const ids = hearParticipantIds({
+      clientId: 'c1',
+      liveEndpointId: 'j-new',
+      pairs: [['j-new', 'c1'], ['j-old', 'c2']],
+      selfParticipantId: null,
+      liveOwnerIds: owners,
+      previousBoundIds: ['j-old'],
+    })
+    expect(ids).toEqual(['j-new'])
+  })
+
+  it('смена трека: фокус на новом id владельца, не на прежнем', () => {
+    const ids = hearParticipantIds({
+      clientId: 'c1',
+      liveEndpointId: 'j-new',
+      pairs: [['j-new', 'c1']],
+      selfParticipantId: null,
+      liveOwnerIds: ['j-new', 'j-other'],
+      previousBoundIds: [],
+    })
+    const { gains } = modelHearGains({
+      remotes: [
+        { key: 't', participantId: 'j-new', audible: true },
+        { key: 'o', participantId: 'j-other', audible: true },
+      ],
+      local: { participantId: 'master', audible: false },
+      focus: ids,
+    })
+    expect(gains.get('t')).toBe(1)
+    expect(gains.get('o')).toBe(0)
+  })
+
+  it('быстрая смена отвечающего после кнопки оставляет только нового', () => {
+    let binding: { clientId: string | null; ids: readonly string[] } = { clientId: null, ids: [] }
+    const step = (clientId: string, endpoint: string) => {
+      binding = nextHearBinding(binding, clientId, (previousBoundIds) => hearParticipantIds({
+        clientId,
+        liveEndpointId: endpoint,
+        pairs: [['ja', 'a'], ['jb', 'b']],
+        selfParticipantId: null,
+        liveOwnerIds: ['ja', 'jb'],
+        previousBoundIds,
+      }))
+      return binding.ids
+    }
+    expect(step('a', 'ja')).toEqual(['ja'])
+    expect(step('b', 'jb')).toEqual(['jb'])
+  })
 })
 
 describe('modelHearGains', () => {

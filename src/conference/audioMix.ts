@@ -35,11 +35,11 @@ export type MixerSourceEvent = { key: string; kind: 'added' | 'replaced' | 'remo
 /**
  * Кого модель слышит в миксе конференции.
  * - `null` — все (лобби; без «Меньше слышать» — окно кнопки, ставки и т.п.)
- * - `string` — один участник (`choosing.*` / `answering.*` / `finalBets.*`)
- * - `false` — никого («Меньше слышать» вне выбора, ответа и ставки: глухо, не «чуть тише»)
- * Если Jitsi id ещё не известен на выборе/ответе/ставке — тишина (`false`), не все.
+ * - `string` или список id — живые дорожки одного игрока (`choosing.*` / `answering.*` / `finalBets.*`)
+ * - `false` — никого («Меньше слышать» вне выбора, ответа и ставки, либо id хода ещё нет)
+ * Пустой список — ход есть, но ни одной дорожки этого игрока: тишина, не чужие.
  */
-export type ModelHearFocus = string | null | false
+export type ModelHearFocus = string | readonly string[] | null | false
 
 export function focusedModelParticipantId(
   phase: string,
@@ -47,7 +47,7 @@ export function focusedModelParticipantId(
   answererParticipantId: string | null,
   hearTurnOnly = false,
   bettorParticipantId: string | null = null,
-): ModelHearFocus {
+): string | null | false {
   const root = phase.split('.')[0] ?? phase
   // Нет id на ходе — тишина, не «все»: иначе модель слышит чужого (инвариант 14).
   if (root === 'choosing') return chooserParticipantId ?? false
@@ -72,6 +72,11 @@ export type ModelHearGains = { gains: Map<string, 0 | 1>; fallback: boolean }
  * даже если его дорожки нет (устаревший id, mute, смена владельца): чужой микрофон
  * не подменяет отвечающего. Нет id (`null`) — по-прежнему все живые.
  */
+function focusIdList(focus: ModelHearFocus): readonly string[] | null | false {
+  if (focus === false || focus === null) return focus
+  return typeof focus === 'string' ? [focus] : focus
+}
+
 export function modelHearGains(input: {
   remotes: Array<{ key: string; participantId: string; audible: boolean }>
   local: { participantId: string; audible: boolean }
@@ -79,21 +84,62 @@ export function modelHearGains(input: {
 }): ModelHearGains {
   const gains = new Map<string, 0 | 1>()
   const { focus } = input
+  const ids = focusIdList(focus)
   const all = [
     ...input.remotes,
     { key: LOCAL_KEY, participantId: input.local.participantId, audible: input.local.audible },
   ]
   let fallback = false
   let pick: (item: { participantId: string }) => boolean
-  if (focus === false) pick = () => false
-  else if (focus === null) pick = () => true
-  else if (all.some((item) => item.audible && item.participantId === focus)) pick = (item) => item.participantId === focus
-  else {
+  if (ids === false) pick = () => false
+  else if (ids === null) pick = () => true
+  else if (ids.some((id) => all.some((item) => item.audible && item.participantId === id))) {
+    pick = (item) => ids.includes(item.participantId)
+  } else {
     fallback = true
     pick = () => false
   }
   for (const item of all) gains.set(item.key, item.audible && pick(item) ? 1 : 0)
   return { gains, fallback }
+}
+
+/**
+ * Все id соединений одного игрока, чьи дорожки можно открыть модели.
+ * Перезаход: новый endpoint и ещё живая старая дорожка (previousBoundIds), пока её id не отдан другому clientId.
+ * Чужой id из пар не попадает никогда.
+ */
+export function hearParticipantIds(input: {
+  clientId: string
+  liveEndpointId: string | null
+  pairs: readonly (readonly [string, string])[]
+  selfParticipantId: string | null
+  liveOwnerIds: readonly string[]
+  previousBoundIds: readonly string[]
+}): string[] {
+  const foreign = new Set<string>()
+  for (const [id, owner] of input.pairs) if (owner !== input.clientId) foreign.add(id)
+  const mine = new Set<string>()
+  const take = (id: string | null) => {
+    if (!id || foreign.has(id)) return
+    mine.add(id)
+  }
+  take(input.liveEndpointId)
+  take(input.selfParticipantId)
+  for (const [id, owner] of input.pairs) if (owner === input.clientId) take(id)
+  const live = new Set(input.liveOwnerIds)
+  for (const id of input.previousBoundIds) if (live.has(id)) take(id)
+  return [...mine]
+}
+
+/** Смена отвечающего сбрасывает прилипшие id предыдущего. Тот же игрок их сохраняет. */
+export function nextHearBinding(
+  previous: { clientId: string | null; ids: readonly string[] },
+  clientId: string | null,
+  resolve: (previousBoundIds: readonly string[]) => readonly string[],
+): { clientId: string | null; ids: string[] } {
+  if (!clientId) return { clientId: null, ids: [] }
+  const prev = previous.clientId === clientId ? previous.ids : []
+  return { clientId, ids: [...resolve(prev)] }
 }
 
 export const LOCAL_KEY = 'local'

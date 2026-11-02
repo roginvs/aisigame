@@ -27,7 +27,7 @@ import {
 import { contextFromSnapshot } from './conference/snapshotView.ts'
 import { conferenceDisplayName, deviceSpeechPlayerId, rosterSeats } from './conference/seats.ts'
 import { jitsiHostFromBase, stripInviteParams } from './conference/stripInvite.ts'
-import { focusedModelParticipantId } from './conference/audioMix.ts'
+import { focusedModelParticipantId, hearParticipantIds, nextHearBinding } from './conference/audioMix.ts'
 import { setFocusUnheard } from './game/focusUnheard.ts'
 import type { ConferenceHandle, ConferenceTile } from './conference/media.ts'
 import { createConferenceTransport } from './conference/transportFactory.ts'
@@ -243,6 +243,7 @@ export default function App() {
   const tilesUnsubRef = useRef<(() => void) | null>(null)
   const hostSpeakingUnsubRef = useRef<(() => void) | null>(null)
   const speechActivityUnsubRef = useRef<(() => void) | null>(null)
+  const hearOwnersUnsubRef = useRef<(() => void) | null>(null)
   const tearingDownConferenceRef = useRef(false)
   const [conferenceTiles, setConferenceTiles] = useState<ConferenceTile[]>([])
   const [conferenceHostSpeaking, setConferenceHostSpeaking] = useState(false)
@@ -331,6 +332,7 @@ export default function App() {
   }, [packId])
 
   const syncModelHearRef = useRef<() => void>(() => {})
+  const hearStickyRef = useRef<{ clientId: string | null; ids: readonly string[] }>({ clientId: null, ids: [] })
 
   useEffect(() => {
     syncModelHearRef.current = () => {
@@ -340,30 +342,47 @@ export default function App() {
       const live = actor.getSnapshot()
       const livePath = statePath(live.value)
       const ctx = live.context
-      const pairs = masterSnapshotRef.current?.jitsiIds
-      const jitsiOf = (clientId: string | null | undefined) => {
-      if (!clientId) return null
-      // Живой endpoint того же clientId важнее пары из снимка: после перезахода снимок ещё старый.
-      return masterSessionRef.current?.endpointIdForClient(clientId) ?? jitsiIdOfClient(pairs, clientId)
-    }
+      const pairs = masterSnapshotRef.current?.jitsiIds ?? []
       const answererNow = ctx.players.find((player) => player.id === ctx.activePlayerId)
       const chooserNow = ctx.players.find((player) => player.id === ctx.chooserId)
       const listener = specialListenerId(livePath, ctx)
       const bettorSeat = listener ?? ctx.finalists[ctx.finalCursor]
       const bettorNow = ctx.players.find((player) => player.id === bettorSeat)
-      // До setMicEnabled контроллера: иначе на время кадра модель ещё слышит прошлый ход.
-      handle.setModelHearOnly(focusedModelParticipantId(
+      const turnClient = (focusedModelParticipantId(
         livePath,
-        jitsiOf(chooserNow?.clientId),
-        jitsiOf(answererNow?.clientId),
+        chooserNow?.clientId ?? null,
+        answererNow?.clientId ?? null,
         hearTurnOnlyRef.current,
-        jitsiOf(bettorNow?.clientId),
+        bettorNow?.clientId ?? null,
       ))
+      // focusedModelParticipantId здесь получает clientId как «id участника»:
+      // строка — чей ход, false — тишина, null — все. Дальше строка раскрывается в дорожки.
+      if (turnClient === null || turnClient === false) {
+        hearStickyRef.current = { clientId: null, ids: [] }
+        handle.setModelHearOnly(turnClient)
+        return
+      }
+      const clientId = turnClient
+      const binding = nextHearBinding(hearStickyRef.current, clientId, (previousBoundIds) => hearParticipantIds({
+        clientId,
+        liveEndpointId: masterSessionRef.current?.endpointIdForClient(clientId) ?? null,
+        pairs,
+        selfParticipantId: clientId === masterClientId ? handle.localParticipantId() : null,
+        liveOwnerIds: handle.liveAudioOwnerIds(),
+        previousBoundIds,
+      }))
+      hearStickyRef.current = binding
+      handle.setModelHearOnly(binding.ids)
     }
     const hearSub = actor.subscribe(() => {
       syncModelHearRef.current()
     })
     const client = createVoice(modelId)
+    const openMic = client.setMicEnabled.bind(client)
+    client.setMicEnabled = (enabled: boolean) => {
+      if (enabled) syncModelHearRef.current()
+      openMic(enabled)
+    }
     voiceClientRef.current = client
     if (client instanceof MockRealtimeClient) {
       window.__aisigame = {
@@ -731,6 +750,7 @@ export default function App() {
     const unsubscribeTiles = tilesUnsubRef.current
     const unsubscribeHostSpeaking = hostSpeakingUnsubRef.current
     const unsubscribeSpeechActivity = speechActivityUnsubRef.current
+    const unsubscribeHearOwners = hearOwnersUnsubRef.current
     const disposeTransport = transportDisposeRef.current
     masterSessionRef.current = null
     setMasterSnapshot(null)
@@ -739,6 +759,7 @@ export default function App() {
     tilesUnsubRef.current = null
     hostSpeakingUnsubRef.current = null
     speechActivityUnsubRef.current = null
+    hearOwnersUnsubRef.current = null
     transportDisposeRef.current = null
     conferenceHandleRef.current = null
     conferenceLobbyRef.current = false
@@ -750,6 +771,7 @@ export default function App() {
       unsubscribeTiles?.()
       unsubscribeHostSpeaking?.()
       unsubscribeSpeechActivity?.()
+      unsubscribeHearOwners?.()
       disposeTransport?.()
       setGameSoundRoute('local')
       voiceClientRef.current?.stopSession()
@@ -803,6 +825,8 @@ export default function App() {
     hostSpeakingUnsubRef.current?.()
     hostSpeakingUnsubRef.current = handle.subscribeHostSpeaking(setConferenceHostSpeaking)
     speechActivityUnsubRef.current?.()
+    hearOwnersUnsubRef.current?.()
+    hearOwnersUnsubRef.current = handle.subscribeAudioOwners(() => syncModelHearRef.current())
     speechActivityUnsubRef.current = handle.subscribeSpeechActivity((participantId, end) => {
       // Реплика ≥1 с по уровню: если это человек, ждущий кнопки, контроллер напомнит про кнопку.
       // Конец реплики, которую модель не заметила, — запасной commit в буфер (fa584db п. 1).
