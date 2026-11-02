@@ -94,11 +94,15 @@ test(`живой ход: ${scenario}`, async ({ browser }) => {
   const scoreBefore = await master.locator('[role=group][aria-label^="Анна:"]').first().getAttribute('aria-label')
   await buzzA.click()
   mark('кнопка A')
-  await master.waitForTimeout(600)
+  await master.evaluate(() => {
+    const w = window as unknown as { __mixLog: unknown[]; __fakeConf: { levels: () => Array<{ key: string; gain: number; rms: number; postRms: number }> } }
+    w.__mixLog = []
+    setInterval(() => { for (const l of w.__fakeConf.levels()) if (l.key.includes('Борис')) w.__mixLog.push({ t: Date.now(), gain: l.gain, rms: l.rms, post: l.postRms }) }, 100)
+  })
   const sayB = master.evaluate(([n, w]) => (window as unknown as { __fakeConf: { say: (n: string, w: string) => Promise<void> } }).__fakeConf.say(n, w), ['Борис', b] as const)
   mark('B говорит')
   if (scenario === 'answer') {
-    await master.waitForTimeout(400)
+    await master.waitForTimeout(1500)
     mark('A говорит')
     await master.evaluate(([n, w]) => (window as unknown as { __fakeConf: { say: (n: string, w: string) => Promise<void> } }).__fakeConf.say(n, w), ['Анна', a] as const)
     mark('A закончил')
@@ -120,6 +124,34 @@ test(`живой ход: ${scenario}`, async ({ browser }) => {
   console.log('SCORE', scoreBefore, '→', scoreAfter, '| B', scoreB)
   console.log('USAGE', JSON.stringify(usage.totals), 'usd', usage.usd.toFixed(4))
   console.log('LOG', out)
+  const mix = await master.evaluate(() => (window as unknown as { __mixLog: Array<{ gain: number; rms: number; post: number }> }).__mixLog)
+  const at = (re: RegExp) => log.filter((l) => re.test(l.text))
+  const first = (re: RegExp) => at(re)[0]?.t ?? Infinity
+  const buzzAt = first(/### кнопка A/)
+  const aStart = first(/стенд: говорит Анна/)
+  const aEnd = first(/стенд: замолчал Анна/)
+  const commits = at(/input_audio_buffer\.committed|запасной commit/).filter((l) => l.t > buzzAt)
+  const cuts = at(/обрыв|игрок заговорил|response\.cancel|output_audio_buffer\.clear/).filter((l) => l.t > buzzAt)
+  const scoreLines = at(/state /).map((l) => l.text.match(/statusLine: ([^,]*)/)?.[1]).filter(Boolean)
+  const checks: Record<string, boolean> = {
+    'B никогда в миксе': mix.filter((m) => m.rms > 0.01).length > 5 && mix.every((m) => m.gain === 0 && m.post < 1e-4),
+    'B не обрывает ведущую': cuts.every((l) => l.t >= aStart),
+    'B без штрафа': scoreB === 'Борис: 0',
+  }
+  if (scenario === 'answer') {
+    checks['вердикт верный'] = scoreAfter === 'Анна: 100' && /Верно/.test(chat)
+    checks['B не завершает попытку'] = commits.every((l) => l.t >= aEnd - 300)
+    checks['один commit на попытку'] = at(/input_audio_buffer\.committed/).filter((l) => l.t > buzzAt).length === 1
+    checks['«ваш ответ» режет только A'] = cuts.every((l) => l.t >= aStart)
+  } else {
+    checks['нет commit от B'] = at(/input_audio_buffer\.committed/).filter((l) => l.t > buzzAt).length === 0 && at(/запасной commit/).filter((l) => l.t > buzzAt).length === 0
+  }
+  console.log('MIX', mix.length, 'B rms>0.01:', mix.filter((m) => m.rms > 0.01).length, 'max post', Math.max(0, ...mix.map((m) => m.post)))
+  console.log('COMMITS', JSON.stringify(commits.map((l) => [l.t - buzzAt, l.text.slice(30, 110)])))
+  console.log('CUTS', JSON.stringify(cuts.map((l) => [l.t - buzzAt, l.text.slice(30, 110)])))
+  console.log('A', aStart - buzzAt, '…', aEnd - buzzAt, 'STATUS', JSON.stringify(scoreLines.slice(-8)))
+  for (const [k, v] of Object.entries(checks)) console.log(v ? 'PASS' : 'FAIL', k)
+  expect(Object.entries(checks).filter(([, v]) => !v)).toEqual([])
   await shared?.close()
   shared = null
 })
