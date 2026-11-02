@@ -50,7 +50,7 @@ describe('deviceSpeechPlayerId', () => {
     })).toBe(3)
   })
 
-  it('речь устройства на чужом ходе остаётся id своего места, не отвечающего', () => {
+  it('речь устройства на чужом ходе не приписывается ни отвечающему, ни первому месту', () => {
     expect(deviceSpeechPlayerId({
       seatIds: seats,
       phase: 'answering.waiting',
@@ -58,7 +58,18 @@ describe('deviceSpeechPlayerId', () => {
       chooserId: 1,
       missedIds: [],
       listenerId: null,
-    })).toBe(2)
+    })).toBeNull()
+  })
+
+  it('в окне кнопки два живых места не называют первое', () => {
+    expect(deviceSpeechPlayerId({
+      seatIds: seats,
+      phase: 'buzzing.open',
+      answererId: null,
+      chooserId: 1,
+      missedIds: [],
+      listenerId: null,
+    })).toBeNull()
   })
 
   it('в окне кнопки пропускает того, кто уже отвечал', () => {

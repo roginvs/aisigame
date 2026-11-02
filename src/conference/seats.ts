@@ -62,8 +62,9 @@ export function rosterSeats(entry: {
 }
 
 /**
- * Чей ход на общем микрофоне устройства. Голос не делится: если ход у места этого
- * устройства — это оно; иначе первое место, которое ещё может жать кнопку.
+ * Чей голос на общем микрофоне устройства. Если ход у места этого устройства — это оно.
+ * Иначе называем место, только когда на устройстве оно одно ещё может жать: несколько
+ * живых мест не различаются одним микрофоном, и первое имя было бы чужим.
  */
 export function deviceSpeechPlayerId(input: {
   seatIds: readonly number[]
@@ -83,5 +84,6 @@ export function deviceSpeechPlayerId(input: {
   if (phase.startsWith('choosing') && has(input.chooserId)) return input.chooserId
   if ((phase.startsWith('cat.') || phase.startsWith('auction.')) && has(input.listenerId)) return input.listenerId
   const missed = new Set(input.missedIds)
-  return ids.find((id) => !missed.has(id)) ?? ids[0] ?? null
+  const eligible = ids.filter((id) => !missed.has(id))
+  return eligible.length === 1 ? eligible[0] ?? null : null
 }
