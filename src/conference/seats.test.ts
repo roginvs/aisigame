@@ -72,7 +72,7 @@ describe('deviceSpeechPlayerId', () => {
     })).toBeNull()
   })
 
-  it('в окне кнопки пропускает того, кто уже отвечал', () => {
+  it('в окне кнопки не называет оставшееся место: микрофон не знает, кто говорил', () => {
     expect(deviceSpeechPlayerId({
       seatIds: seats,
       phase: 'buzzing.open',
@@ -80,6 +80,14 @@ describe('deviceSpeechPlayerId', () => {
       chooserId: 1,
       missedIds: [2],
       listenerId: null,
-    })).toBe(3)
+    })).toBeNull()
+    expect(deviceSpeechPlayerId({
+      seatIds: [3],
+      phase: 'buzzing.open',
+      answererId: null,
+      chooserId: 1,
+      missedIds: [],
+      listenerId: null,
+    })).toBeNull()
   })
 })
