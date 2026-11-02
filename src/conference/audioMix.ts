@@ -37,7 +37,7 @@ export type MixerSourceEvent = { key: string; kind: 'added' | 'replaced' | 'remo
  * - `null` — все (лобби; без «Меньше слышать» — окно кнопки, ставки и т.п.)
  * - `string` — один участник (`choosing.*` / `answering.*` / `finalBets.*`)
  * - `false` — никого («Меньше слышать» вне выбора, ответа и ставки: глухо, не «чуть тише»)
- * Если Jitsi id ещё не известен на выборе/ответе, оставляем всех (fail open).
+ * Если Jitsi id ещё не известен на выборе/ответе/ставке — тишина (`false`), не все.
  */
 export type ModelHearFocus = string | null | false
 
@@ -49,9 +49,10 @@ export function focusedModelParticipantId(
   bettorParticipantId: string | null = null,
 ): ModelHearFocus {
   const root = phase.split('.')[0] ?? phase
-  if (root === 'choosing') return chooserParticipantId
-  if (root === 'answering' || root === 'appealCue') return answererParticipantId
-  if (root === 'finalBets' || root === 'cat' || root === 'auction') return bettorParticipantId
+  // Нет id на ходе — тишина, не «все»: иначе модель слышит чужого (инвариант 14).
+  if (root === 'choosing') return chooserParticipantId ?? false
+  if (root === 'answering' || root === 'appealCue') return answererParticipantId ?? false
+  if (root === 'finalBets' || root === 'cat' || root === 'auction') return bettorParticipantId ?? false
   if (!hearTurnOnly) return null
   // Лобби / меню: все; уже в партии вне выбора, ответа и ставки — тишина для модели.
   if (root === 'startMenu' || root === 'connecting' || root === 'failed') return null

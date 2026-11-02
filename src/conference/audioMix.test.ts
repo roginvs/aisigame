@@ -65,12 +65,12 @@ describe('focusedModelParticipantId', () => {
     expect(focusedModelParticipantId('answering.hearing', 'chooser', 'answerer')).toBe('answerer')
   })
 
-  it('в остальных фазах и при неизвестном id оставляет общий микс', () => {
+  it('вне хода общий микс; на ходе без id — тишина, не чужие микрофоны', () => {
     expect(focusedModelParticipantId('buzzing.open', 'chooser', 'answerer')).toBeNull()
     expect(focusedModelParticipantId('lobby', null, null)).toBeNull()
-    expect(focusedModelParticipantId('finalBets.hearing', 'a', 'b')).toBeNull()
-    expect(focusedModelParticipantId('choosing.listening', null, 'answerer')).toBeNull()
-    expect(focusedModelParticipantId('answering.waiting', 'chooser', null)).toBeNull()
+    expect(focusedModelParticipantId('finalBets.hearing', 'a', 'b')).toBe(false)
+    expect(focusedModelParticipantId('choosing.listening', null, 'answerer')).toBe(false)
+    expect(focusedModelParticipantId('answering.waiting', 'chooser', null)).toBe(false)
   })
 
   it('с «Меньше слышать» глушит партию вне выбора и ответа, лобби оставляет общим', () => {
@@ -90,7 +90,7 @@ it('keeps the current final bettor audible with or without turn-only mode', () =
     for (const phase of ['finalBets.asking', 'finalBets.hearing', 'finalBets.resolving']) {
       expect(focusedModelParticipantId(phase, 'chooser', 'answerer', turnOnly, 'bettor')).toBe('bettor')
     }
-    expect(focusedModelParticipantId('finalBets.hearing', null, null, turnOnly, null)).toBeNull()
+    expect(focusedModelParticipantId('finalBets.hearing', null, null, turnOnly, null)).toBe(false)
   }
 })
 
