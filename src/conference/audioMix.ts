@@ -110,7 +110,8 @@ export function modelHearGains(input: {
  */
 export function hearParticipantIds(input: {
   clientId: string
-  liveEndpointId: string | null
+  /** Все известные endpoint этого clientId: две вкладки, перезаход, смена микрофона. */
+  liveEndpointIds: readonly string[]
   pairs: readonly (readonly [string, string])[]
   selfParticipantId: string | null
   liveOwnerIds: readonly string[]
@@ -123,7 +124,7 @@ export function hearParticipantIds(input: {
     if (!id || foreign.has(id)) return
     mine.add(id)
   }
-  take(input.liveEndpointId)
+  for (const id of input.liveEndpointIds) take(id)
   take(input.selfParticipantId)
   for (const [id, owner] of input.pairs) if (owner === input.clientId) take(id)
   const live = new Set(input.liveOwnerIds)

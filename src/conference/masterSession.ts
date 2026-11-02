@@ -125,6 +125,8 @@ export class MasterSession {
   private authorityToken: string
   private clientAuth = new Map<string, string>()
   private clientSender = new Map<string, string>()
+  /** clientId → все его jitsi endpoint, не только последний hello. */
+  private clientEndpoints = new Map<string, Set<string>>()
   private senderClient = new Map<string, string>()
   /** Оценка скорости/ETA по packAck, отдельно для каждого клиента. */
   private transferPace = new Map<string, TransferPace>()
@@ -326,6 +328,11 @@ export class MasterSession {
 
   endpointIdForClient(clientId: string): string | null {
     return this.clientSender.get(clientId) ?? null
+  }
+
+  /** Все endpoint этого clientId, включая вторую вкладку и ещё живой старый после перезахода. */
+  endpointIdsForClient(clientId: string): readonly string[] {
+    return [...(this.clientEndpoints.get(clientId) ?? [])]
   }
 
   /** Id в Jitsi сменились (переподключились «Звуки игры» и т.п.) — разослать снимок заново (уходит только разница). */
@@ -975,7 +982,19 @@ export class MasterSession {
     this.clientAuth.set(clientId, authToken)
     this.clientSender.set(clientId, senderId)
     this.senderClient.set(senderId, clientId)
+    this.rememberEndpoint(clientId, senderId)
     return true
+  }
+
+  /** Один игрок — несколько соединений. Чужой hello забирает id себе. */
+  private rememberEndpoint(clientId: string, senderId: string): void {
+    for (const [other, ids] of this.clientEndpoints) if (other !== clientId) ids.delete(senderId)
+    let ids = this.clientEndpoints.get(clientId)
+    if (!ids) {
+      ids = new Set()
+      this.clientEndpoints.set(clientId, ids)
+    }
+    ids.add(senderId)
   }
 
   private clientMatches(clientId: string, authToken: string, senderId: string): boolean {

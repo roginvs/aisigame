@@ -365,7 +365,7 @@ export default function App() {
       const clientId = turnClient
       const binding = nextHearBinding(hearStickyRef.current, clientId, (previousBoundIds) => hearParticipantIds({
         clientId,
-        liveEndpointId: masterSessionRef.current?.endpointIdForClient(clientId) ?? null,
+        liveEndpointIds: masterSessionRef.current?.endpointIdsForClient(clientId) ?? [],
         pairs,
         selfParticipantId: clientId === masterClientId ? handle.localParticipantId() : null,
         liveOwnerIds: handle.liveAudioOwnerIds(),

@@ -1090,6 +1090,34 @@ describe('MasterSession resume', () => {
     actor.stop()
   })
 
+  it('две вкладки одного clientId обе остаются в списке для слуха', () => {
+    const actor = createActor(gameMachine)
+    actor.start()
+    const transport = new MemoryTransport()
+    const session = new MasterSession({
+      transport,
+      client: { requestSpeech: vi.fn() } as unknown as GameVoice,
+      actor,
+      masterClientId: 'master-client',
+      masterName: 'Мастер',
+      pack: demoPack,
+      packBytes: new Uint8Array([1]),
+      packHash: 'hash',
+      authorityToken: 'master-token',
+      onRoster: () => {},
+    })
+    const hello = (endpoint: string) => transport.receive(
+      { type: 'hello', clientId: 'c1', authToken: 't', name: 'Аня' },
+      endpoint,
+    )
+    hello('phone')
+    hello('laptop')
+    expect([...session.endpointIdsForClient('c1')].sort()).toEqual(['laptop', 'phone'])
+    expect(session.endpointIdForClient('c1')).toBe('laptop')
+    session.dispose()
+    actor.stop()
+  })
+
   it('через 10 секунд передаёт выбор отключившегося игрока мастеру', () => {
     const actor = createActor(gameMachine)
     actor.start()

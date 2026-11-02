@@ -100,7 +100,7 @@ describe('привязка игрока к дорожкам', () => {
   it('перезаход: слышны и старая, и новая дорожка того же игрока, чужая нет', () => {
     const ids = hearParticipantIds({
       clientId: 'c1',
-      liveEndpointId: 'j-new',
+      liveEndpointIds: ['j-new'],
       pairs: [['j-new', 'c1'], ['j-other', 'c2']],
       selfParticipantId: null,
       liveOwnerIds: owners,
@@ -122,7 +122,7 @@ describe('привязка игрока к дорожкам', () => {
   it('старый id уже принадлежит другому — его дорожка гаснет', () => {
     const ids = hearParticipantIds({
       clientId: 'c1',
-      liveEndpointId: 'j-new',
+      liveEndpointIds: ['j-new'],
       pairs: [['j-new', 'c1'], ['j-old', 'c2']],
       selfParticipantId: null,
       liveOwnerIds: owners,
@@ -134,7 +134,7 @@ describe('привязка игрока к дорожкам', () => {
   it('смена трека: фокус на новом id владельца, не на прежнем', () => {
     const ids = hearParticipantIds({
       clientId: 'c1',
-      liveEndpointId: 'j-new',
+      liveEndpointIds: ['j-new'],
       pairs: [['j-new', 'c1']],
       selfParticipantId: null,
       liveOwnerIds: ['j-new', 'j-other'],
@@ -152,12 +152,52 @@ describe('привязка игрока к дорожкам', () => {
     expect(gains.get('o')).toBe(0)
   })
 
+  it('две вкладки одного игрока — обе дорожки в миксе, чужая нет', () => {
+    const ids = hearParticipantIds({
+      clientId: 'c1',
+      liveEndpointIds: ['j-phone', 'j-laptop'],
+      pairs: [['j-laptop', 'c1'], ['j-other', 'c2']],
+      selfParticipantId: null,
+      liveOwnerIds: ['j-phone', 'j-laptop', 'j-other'],
+      previousBoundIds: [],
+    })
+    expect(ids).toEqual(['j-phone', 'j-laptop'])
+    const { gains } = modelHearGains({
+      remotes: [
+        { key: 'phone', participantId: 'j-phone', audible: true },
+        { key: 'laptop', participantId: 'j-laptop', audible: true },
+        { key: 'other', participantId: 'j-other', audible: true },
+      ],
+      local: { participantId: 'master', audible: true },
+      focus: ids,
+    })
+    expect(gains.get('phone')).toBe(1)
+    expect(gains.get('laptop')).toBe(1)
+    expect(gains.get('other')).toBe(0)
+    expect(gains.get(LOCAL_KEY)).toBe(0)
+  })
+
+  it('две дорожки одного jitsi-участника обе в миксе, соседний игрок нет', () => {
+    const { gains } = modelHearGains({
+      remotes: [
+        { key: 'mic', participantId: 'j1', audible: true },
+        { key: 'mic-2', participantId: 'j1', audible: true },
+        { key: 'other', participantId: 'j2', audible: true },
+      ],
+      local: { participantId: 'master', audible: true },
+      focus: ['j1'],
+    })
+    expect(gains.get('mic')).toBe(1)
+    expect(gains.get('mic-2')).toBe(1)
+    expect(gains.get('other')).toBe(0)
+  })
+
   it('быстрая смена отвечающего после кнопки оставляет только нового', () => {
     let binding: { clientId: string | null; ids: readonly string[] } = { clientId: null, ids: [] }
     const step = (clientId: string, endpoint: string) => {
       binding = nextHearBinding(binding, clientId, (previousBoundIds) => hearParticipantIds({
         clientId,
-        liveEndpointId: endpoint,
+        liveEndpointIds: [endpoint],
         pairs: [['ja', 'a'], ['jb', 'b']],
         selfParticipantId: null,
         liveOwnerIds: ['ja', 'jb'],
