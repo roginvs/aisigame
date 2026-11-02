@@ -24,6 +24,7 @@ test('живой ответ: модель судит A по смыслу, B не
     const { RealtimeClient } = await import('/src/realtime/client.ts')
     const { createMicMixer } = await import('/src/conference/audioMix.ts')
     const { getUsageSnapshot, resetUsage } = await import('/src/realtime/usage.ts')
+    const { getTrace } = await import('/src/debug/trace.ts')
     resetUsage()
     const ctx = new AudioContext()
     const voice = async (wav: string) => {
@@ -85,7 +86,8 @@ test('живой ответ: модель судит A по смыслу, B не
       'Оцени только приложенное аудио, засчитывай последний окончательный вариант игрока, размышления вслух и самоисправление допустимы. Вопрос: Как называются четырёхугольники, у которых все стороны равны и все углы прямые? (во множественном числе). Эталонные ответы: квадраты. Шум/тишина: unintelligible. Верни submitAnswerJudgment с questionId=live, playerId=1, attemptId=1, status, дословным heard и коротким reason.', abort.signal)
       await new Promise((s) => setTimeout(s, 800))
       return { startA, aEndedAt, vad, stoppedCount: stopped.length, levels, initialGains: [...gains.gains], fallback: gains.fallback,
-        args: call.arguments, usage: getUsageSnapshot(), sessionMs: at() }
+        args: call.arguments, usage: getUsageSnapshot(),
+        rawUsage: getTrace().filter((e) => e.kind === 'in' && e.title.includes('response.done')).map((e) => (e.detail as { response?: { usage?: unknown } })?.response?.usage ?? e.detail), sessionMs: at() }
     } finally {
       clearInterval(sampler)
       client.stopSession()
@@ -93,6 +95,7 @@ test('живой ответ: модель судит A по смыслу, B не
       await ctx.close()
     }
   }, { key: key!, a, b })
+  console.log('RAWUSAGE', JSON.stringify(r.rawUsage))
   console.log('LIVE', JSON.stringify({ ...r, levels: undefined }))
   const bSpeaking = r.levels.filter((l) => l.bPre > 0.01)
   console.log(`B говорил ${bSpeaking.length} отсчётов, max bPost ${Math.max(...r.levels.map((l) => l.bPost))}, max aPost ${Math.max(...r.levels.map((l) => l.aPost))}`)
