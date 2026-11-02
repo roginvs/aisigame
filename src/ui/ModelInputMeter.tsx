@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, type MouseEvent } from 'react'
-import { levelUiDue, meterHitTolerancePx } from '../options.ts'
+import { levelUiSampleMs, meterHitTolerancePx } from '../options.ts'
 import { getLinkStatus, getTrace, pushTrace, subscribeTrace } from '../debug/trace.ts'
 import { createMarkerCollector, hitTest, type MeterHit, meterLegendText, meterMarkerColors, meterMarkerLegend, type MeterMarker } from './meterMarkers.ts'
 import { CLOSED_OVERLAY, INPUT_BAND_H, OUTPUT_WAVE_COLOR, drawMarkers, HEIGHT, inputBandColor, meterLevel, modelInputOpen, waveColor, WIDTH } from './meterDraw.ts'
@@ -42,13 +42,9 @@ export function ModelInputMeter({ getAnalyser, getLevel, getOutLevel }: { getAna
     const collector = createMarkerCollector()
     let markers: MeterMarker[] = collector.ingest(getTrace())
     const unsubscribe = subscribeTrace(() => { markers = collector.ingest(getTrace()) })
-    let lastSample = Number.NEGATIVE_INFINITY
-    const tick = (now: number) => {
+    const tick = () => {
       if (stopped) return
-      frame = requestAnimationFrame(tick)
-      // Кадр экрана чаще, чем нужно волне: анализатор и canvas — только ~10 раз в секунду.
-      if (!levelUiDue(lastSample, now)) return
-      lastSample = now
+      frame = window.setTimeout(tick, levelUiSampleMs)
       const canvas = canvasRef.current
       const ctx = canvas?.getContext('2d')
       if (!canvas || !ctx) return
@@ -96,11 +92,11 @@ export function ModelInputMeter({ getAnalyser, getLevel, getOutLevel }: { getAna
       }
       hitsRef.current = drawMarkers(ctx, markers, times, head)
     }
-    frame = requestAnimationFrame(tick)
+    frame = window.setTimeout(tick, levelUiSampleMs)
     return () => {
       stopped = true
       unsubscribe()
-      cancelAnimationFrame(frame)
+      window.clearTimeout(frame)
     }
   }, [getAnalyser, getLevel, getOutLevel])
 
