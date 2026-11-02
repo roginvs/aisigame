@@ -17,6 +17,8 @@ export async function createConferenceTransport(input: {
 }): Promise<ConferenceHandle> {
   const displayName = input.displayName ?? 'Игрок'
   if (input.useBroadcast) {
+    const fake = await import('./fakeConference.ts')
+    if (fake.fakeConferenceEnabled()) return fake.createFakeConference(input.roomId, displayName)
     const transport = new BroadcastChannelTransport(input.roomId)
     const media = createBroadcastMedia(displayName)
     return {
