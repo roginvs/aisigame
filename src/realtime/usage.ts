@@ -12,9 +12,18 @@ export type UsageTotals = {
   cachedImageIn: number
 }
 
+export type UsageBilling = 'tokens' | 'grok'
+
+export type GrokUsage = {
+  sessionMs: number
+  textItems: number
+}
+
 export type UsageSnapshot = {
   totals: UsageTotals
   usd: number
+  billing: UsageBilling
+  grok: GrokUsage
 }
 
 const empty = (): UsageTotals => ({
@@ -29,10 +38,18 @@ const empty = (): UsageTotals => ({
   cachedImageIn: 0,
 })
 
+/** Как часто пилюля Grok перечитывает длительность открытой сессии. Не кадр экрана. */
+const grokUsageTickMs = 1000
+
 const seen = new Set<string>()
 const listeners = new Set<() => void>()
 let totals = empty()
-let snapshot: UsageSnapshot = { totals, usd: 0 }
+let billing: UsageBilling = 'tokens'
+let sessionMs = 0
+let sessionStartedAt: number | null = null
+let textItems = 0
+let tick: ReturnType<typeof setTimeout> | null = null
+let snapshot: UsageSnapshot = { totals, usd: 0, billing, grok: { sessionMs: 0, textItems: 0 } }
 
 function amount(value: unknown): number {
   return typeof value === 'number' && Number.isFinite(value) && value > 0 ? value : 0
@@ -90,6 +107,14 @@ function record(value: Record<string, unknown>): boolean {
   return true
 }
 
+/** Минуты открытой сессии Grok и штучные текстовые item. Таблицу токенов не использует. */
+export function estimateGrokUsd(sessionMs: number, textItems: number): number {
+  const rates = gameConfig.grokRates
+  const minutes = Math.max(0, sessionMs) / 60_000
+  const items = Math.max(0, textItems)
+  return minutes * rates.sessionPerMinute + items * rates.textItem
+}
+
 export function estimateUsd(usage: UsageTotals): number {
   const rates = gameConfig.rates
   const million = 1_000_000
@@ -109,9 +134,66 @@ export function estimateUsd(usage: UsageTotals): number {
   )
 }
 
+function liveSessionMs(now = Date.now()): number {
+  if (sessionStartedAt === null) return sessionMs
+  return sessionMs + Math.max(0, now - sessionStartedAt)
+}
+
 function publish(): void {
-  snapshot = { totals, usd: estimateUsd(totals) }
+  const grok = { sessionMs: liveSessionMs(), textItems }
+  const usd = billing === 'grok' ? estimateGrokUsd(grok.sessionMs, grok.textItems) : estimateUsd(totals)
+  snapshot = { totals, usd, billing, grok }
   for (const listener of listeners) listener()
+}
+
+function armTick(): void {
+  if (tick !== null) return
+  tick = setTimeout(() => {
+    tick = null
+    if (sessionStartedAt === null) return
+    publish()
+    armTick()
+  }, grokUsageTickMs)
+}
+
+function disarmTick(): void {
+  if (tick === null) return
+  clearTimeout(tick)
+  tick = null
+}
+
+function closeClock(): void {
+  if (sessionStartedAt !== null) {
+    sessionMs += Math.max(0, Date.now() - sessionStartedAt)
+    sessionStartedAt = null
+  }
+  disarmTick()
+}
+
+/** Какой счётчик пишет пилюля. OpenAI остаётся на токенах. */
+export function setUsageBilling(mode: UsageBilling): void {
+  if (mode !== 'grok') closeClock()
+  billing = mode
+  publish()
+}
+
+/** Часы сессии Grok. Повторный open не сдвигает старт, close без open ничего не делает. */
+export function noteUsageSession(action: 'open' | 'close'): void {
+  if (billing !== 'grok') return
+  if (action === 'open') {
+    if (sessionStartedAt === null) {
+      sessionStartedAt = Date.now()
+      armTick()
+    }
+  } else closeClock()
+  publish()
+}
+
+/** Один оплачиваемый текстовый item, уже отправленный в сокет xAI. */
+export function noteGrokTextItem(): void {
+  if (billing !== 'grok') return
+  textItems += 1
+  publish()
 }
 
 export function recordResponseUsage(response: unknown): void {
@@ -129,6 +211,11 @@ export function recordResponseUsage(response: unknown): void {
 export function resetUsage(): void {
   seen.clear()
   totals = empty()
+  billing = 'tokens'
+  sessionMs = 0
+  sessionStartedAt = null
+  textItems = 0
+  disarmTick()
   publish()
 }
 

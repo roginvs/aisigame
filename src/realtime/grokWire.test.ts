@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { freshGrokTurn, grokFunctionTool, grokInbound, grokOutbound, grokReleaseDraft, keyterms } from './grokWire.ts'
+import { freshGrokTurn, grokBillableTextItem, grokFunctionTool, grokInbound, grokOutbound, grokReleaseDraft, keyterms } from './grokWire.ts'
 import { selectQuestionTool, submitAnswerJudgmentTool } from './tools.ts'
 import { pcmToBase64 } from './pcm.ts'
 
@@ -157,6 +157,16 @@ describe('grok: финальная расшифровка и инструмен�
       item: { type: 'function_call_output', call_id: 'c1', output: '{"accepted":true}' },
     }
     expect(grokOutbound(output)).toEqual(output)
+    expect(grokBillableTextItem(output)).toBe(false)
+    expect(grokBillableTextItem({
+      type: 'conversation.item.create',
+      item: { type: 'message', role: 'user', content: [{ type: 'input_text', text: 'ход' }] },
+    })).toBe(true)
+    expect(grokBillableTextItem({
+      type: 'conversation.item.create',
+      item: { type: 'message', content: [{ type: 'input_audio' }] },
+    })).toBe(false)
+    expect(grokBillableTextItem({ type: 'response.create', response: { input: [{ type: 'message' }] } })).toBe(false)
     const call = grokInbound(
       { type: 'response.function_call_arguments.done', name: 'submitAnswerJudgment', call_id: 'c1', arguments: '{"status":"correct"}' },
       freshGrokTurn(),

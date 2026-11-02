@@ -1,4 +1,5 @@
 import { base64ToPcm, pcmToBase64, PcmMic, PcmPlayer } from './pcm.ts'
+import { noteGrokTextItem } from './usage.ts'
 import type { VoiceSink, VoiceWire } from './wire.ts'
 
 const sampleRate = 24_000
@@ -31,6 +32,27 @@ export function freshGrokTurn(): GrokTurn {
     transcriptDone: false,
     handledCalls: [],
   }
+}
+
+/**
+ * Текстовый item xAI: каждый `conversation.item.create`, кроме результата
+ * инструмента и item, где всё содержимое — аудио (его берёт поминутный счёт).
+ * `response.create` сюда не входит: страница Speech to Speech его не тарифицирует.
+ */
+export function grokBillableTextItem(event: object): boolean {
+  const record = asRecord(event)
+  if (text(record.type) !== 'conversation.item.create') return false
+  const item = asRecord(record.item)
+  if (text(item.type) === 'function_call_output') return false
+  const parts: readonly unknown[] = Array.isArray(item.content) ? item.content : []
+  if (parts.length > 0) {
+    const audioOnly = parts.every((part) => {
+      const kind = text(asRecord(part).type)
+      return kind === 'input_audio' || kind === 'audio'
+    })
+    if (audioOnly) return false
+  }
+  return true
 }
 
 /** Исходящее событие OpenAI → событие Grok. `null` значит «не слать, сделать локально». */
@@ -317,7 +339,9 @@ export class GrokWire implements VoiceWire {
       return true
     }
     if (outbound === 'drop') return true
-    return this.socketSend(outbound)
+    const sent = this.socketSend(outbound)
+    if (sent && grokBillableTextItem(outbound)) noteGrokTextItem()
+    return sent
   }
 
   setMicEnabled(enabled: boolean): void {

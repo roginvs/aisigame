@@ -2,7 +2,8 @@ import { diag } from '../debug/diag.ts'
 import { gameAudioContext, onAudioOutputsReopen, recreateStreamElement, reopenAudioOutputs, unlockAudio } from '../audio/beep.ts'
 import { createHostOutputReader } from './hostOutputLevel.ts'
 import { gameConfig, hostInstructions, withHostRules } from '../config.ts'
-import { recordResponseUsage, resetUsage } from './usage.ts'
+import { voiceById } from './models.ts'
+import { noteUsageSession, recordResponseUsage, resetUsage, setUsageBilling } from './usage.ts'
 import { livePlayerChatVisible } from './liveSpeech.ts'
 import { clearLivePlayerLine, editChatLine, logTrace, pushHostLine, pushPlayerLine, pushTrace, setLivePlayerLine } from '../debug/trace.ts'
 import { checkHostUtterance } from '../debug/suspicious.ts'
@@ -898,6 +899,7 @@ export class RealtimeClient {
   }
 
   stopSession(): void {
+    noteUsageSession('close')
     clearLivePlayerLine()
     this.livePartials.clear()
     this.sessionToken += 1
@@ -966,6 +968,7 @@ export class RealtimeClient {
   private dropLink(message: string): void {
     if (this.dropped) return
     this.dropped = true
+    noteUsageSession('close')
     this.resetAudioJudgments()
     this.clearSpeechTimers()
     this.clearFlushTimer()
@@ -1109,6 +1112,10 @@ export class RealtimeClient {
     }
     if (!alive()) return
     this.wireOpen = true
+    if (voiceById(this.model).provider === 'xai') {
+      setUsageBilling('grok')
+      noteUsageSession('open')
+    }
     this.onLink({ mic: 'muted' })
     this.send({
       type: 'session.update',

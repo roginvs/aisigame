@@ -7,7 +7,7 @@ export const gameConfig = {
   values: [100, 200, 300, 400, 500],
   model: 'gpt-realtime-2.1-mini',
   voice: 'marin',
-  /** Доллары за 1M токенов, страница модели gpt-realtime-2.1-mini. */
+  /** Доллары за 1M токенов, страница модели gpt-realtime-2.1-mini. Только OpenAI. */
   rates: {
     textIn: 0.6,
     cachedTextIn: 0.06,
@@ -17,6 +17,16 @@ export const gameConfig = {
     audioOut: 20,
     imageIn: 0.8,
     cachedImageIn: 0.08,
+  },
+  /**
+   * Grok Speech to Speech, страница xAI и план 2531775.
+   * Сессия с server VAD тарифицируется целиком, не по секундам речи.
+   * Текстовый item — отправленный `conversation.item.create`, кроме
+   * `function_call_output` и содержимого из аудио. `response.create` сюда не входит.
+   */
+  grokRates: {
+    sessionPerMinute: 0.08,
+    textItem: 0.004,
   },
   welcomeSpeechSpeed: 1.25,
   speechSpeed: hostSpeechSpeed,

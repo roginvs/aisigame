@@ -1,5 +1,5 @@
-import { describe, expect, it, beforeEach } from 'vitest'
-import { billedTokens, estimateUsd, formatTokens, formatUsd, getUsageSnapshot, recordResponseUsage, resetUsage } from './usage.ts'
+import { describe, expect, it, beforeEach, afterEach, vi } from 'vitest'
+import { billedTokens, estimateGrokUsd, estimateUsd, formatTokens, formatUsd, getUsageSnapshot, noteGrokTextItem, noteUsageSession, recordResponseUsage, resetUsage, setUsageBilling } from './usage.ts'
 
 const sample = {
   id: 'resp_1',
@@ -20,6 +20,10 @@ const sample = {
 
 describe('usage', () => {
   beforeEach(() => resetUsage())
+  afterEach(() => {
+    vi.useRealTimers()
+    resetUsage()
+  })
 
   it('складывает usage из response.done и не считает ответ дважды', () => {
     recordResponseUsage(sample)
@@ -64,5 +68,28 @@ describe('usage', () => {
     const { totals } = getUsageSnapshot()
     expect(totals.textIn).toBe(100)
     expect(totals.textOut).toBe(20)
+  })
+
+  it('Grok считает минуты сессии и текстовые item, не токены OpenAI', () => {
+    expect(estimateGrokUsd(10 * 60_000, 2)).toBeCloseTo(10 * 0.08 + 2 * 0.004, 8)
+    vi.useFakeTimers()
+    setUsageBilling('grok')
+    noteUsageSession('open')
+    noteUsageSession('open')
+    vi.advanceTimersByTime(90_000)
+    noteGrokTextItem()
+    noteGrokTextItem()
+    const live = getUsageSnapshot()
+    expect(live.billing).toBe('grok')
+    expect(live.grok.textItems).toBe(2)
+    expect(live.grok.sessionMs).toBe(90_000)
+    expect(live.usd).toBeCloseTo(1.5 * 0.08 + 2 * 0.004, 8)
+    recordResponseUsage({ id: 'grok-resp', usage: { input_tokens: 1_000_000, output_tokens: 1_000_000 } })
+    expect(getUsageSnapshot().usd).toBeCloseTo(1.5 * 0.08 + 2 * 0.004, 8)
+    noteUsageSession('close')
+    vi.advanceTimersByTime(60_000)
+    expect(getUsageSnapshot().grok.sessionMs).toBe(90_000)
+    noteGrokTextItem()
+    expect(getUsageSnapshot().usd).toBeCloseTo(estimateGrokUsd(90_000, 3), 8)
   })
 })

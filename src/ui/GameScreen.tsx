@@ -17,7 +17,7 @@ import { choiceIsAnswer } from '../game/choices.ts'
 import { answerIsPublic, stageMedia, answerMediaVisible } from '../game/reveal.ts'
 import type { LinkStatus } from '../realtime/client.ts'
 import { voiceById, voiceModels } from '../realtime/models.ts'
-import { billedTokens, formatTokens, getUsageSnapshot, subscribeUsage, type UsageTotals } from '../realtime/usage.ts'
+import { billedTokens, formatTokens, formatUsd, getUsageSnapshot, subscribeUsage, type UsageSnapshot } from '../realtime/usage.ts'
 import type { AppealRequest, GameContext, PlayerId } from '../game/types.ts'
 import type { ConferenceMessageRing, ConferenceSnapshot } from '../conference/messages.ts'
 import type { RosterEntry } from '../conference/roster.ts'
@@ -117,7 +117,12 @@ function ModelName(props: { modelId: string; onModel: (id: string) => void }) {
   )
 }
 
-function usageHint(totals: UsageTotals): string {
+function usageHint(usage: UsageSnapshot): string {
+  if (usage.billing === 'grok') {
+    const minutes = (usage.grok.sessionMs / 60_000).toFixed(1)
+    return `Grok: ${minutes} мин сессии × $0,08 и ${usage.grok.textItems} текстовых item × $0,004. Токены OpenAI в эту сумму не входят.`
+  }
+  const totals = usage.totals
   return `По завершённым ответам: текст ${totals.textIn} (кэш ${totals.cachedTextIn}), аудио ${totals.audioIn} (кэш ${totals.cachedAudioIn}), выход текст ${totals.textOut}, аудио ${totals.audioOut}. Транскрипция отдельно не входит.`
 }
 
@@ -494,8 +499,8 @@ export function GameScreen(props: {
         <div className="pills">
           {conference && !conference.isMaster ? null : (
             <>
-              <span className="cost" title={usageHint(usage.totals)}>
-                {formatTokens(billedTokens(usage.totals))}
+              <span className="cost" title={usageHint(usage)}>
+                {usage.billing === 'grok' ? formatUsd(usage.usd) : formatTokens(billedTokens(usage.totals))}
               </span>
               <AirStatus link={link} />
             </>
