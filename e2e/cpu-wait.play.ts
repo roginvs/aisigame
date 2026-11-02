@@ -2,10 +2,10 @@ import { expect, test, type CDPSession, type Page } from '@playwright/test'
 
 /**
  * Горячий цикл на мастере в ожидании.
- * Замер 2 ноября 2026, 5 секунд, headless Chromium:
- * до 9eaedac (c16a628): лобби raf 301, script 104 мс, task 208 мс; пауза raf 300, script 122, task 230.
- * сразу после 9eaedac (кадр ещё крутился, работа реже): лобби raf 301, script 63, task 107; пауза raf 300, script 51, task 88.
- * после снятия requestAnimationFrame: лобби raf 1, commits 7, script 57, task 72; пауза raf 0, commits 6, script 43, task 53.
+ * Повторный замер 2 ноября 2026, тот же зонд, 5 секунд, headless Chromium:
+ * до 9eaedac (c16a628): лобби raf 301, commits 7, script 98 мс, task 203 мс; пауза raf 301, commits 6, script 119, task 230.
+ * сразу после 9eaedac (кадр ещё крутился, работа реже): лобби raf 301, commits 7, script 63, task 107; пауза raf 300, commits 6, script 47, task 83.
+ * текущий master, requestAnimationFrame снят: лобби raf 1, commits 7, script 62, task 80; пауза raf 0, commits 6, script 51, task 63.
  */
 const WINDOW_MS = 5_000
 const MAX_RAF = 20
@@ -69,6 +69,7 @@ async function expectSample(page: Page, cdp: CDPSession, label: string): Promise
   const commits = after.commits - before.commits
   const scriptMs = delta('ScriptDuration')
   const taskMs = delta('TaskDuration')
+  console.log(`cpu ${label}: raf ${raf}, commits ${commits}, script ${scriptMs.toFixed(0)} мс, task ${taskMs.toFixed(0)} мс`)
   expect(raf, `${label} requestAnimationFrame`).toBeLessThanOrEqual(MAX_RAF)
   expect(commits, `${label} React commits`).toBeGreaterThan(0)
   expect(commits, `${label} React commits`).toBeLessThanOrEqual(MAX_COMMITS)
