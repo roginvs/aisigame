@@ -27,7 +27,7 @@ import {
 import { contextFromSnapshot } from './conference/snapshotView.ts'
 import { conferenceDisplayName, deviceSpeechPlayerId, rosterSeats } from './conference/seats.ts'
 import { jitsiHostFromBase, stripInviteParams } from './conference/stripInvite.ts'
-import { focusedModelParticipantId, hearParticipantIds, hearWatchLines, nextHearBinding } from './conference/audioMix.ts'
+import { focusedModelParticipantId, hearParticipantIds, hearWatchLines, nextHearBinding, unrecognizedSpeechLine } from './conference/audioMix.ts'
 import { setFocusUnheard } from './game/focusUnheard.ts'
 import type { ConferenceHandle, ConferenceTile } from './conference/media.ts'
 import { createConferenceTransport } from './conference/transportFactory.ts'
@@ -867,13 +867,13 @@ export default function App() {
       const found = pairs.find(([jitsiId]) => jitsiId === participantId)
       const clientId = found ? found[1] : null
       if (clientId === null) {
-        // Служебные не участвуют; остальные игроки известны по парам. Если участник не опознан
-        // (привязка endpoint сдвинулась или снята), во время попытки реплика почти наверняка от
-        // активного игрока: пусть контроллер решает (дамп 15-53-44 — Машу не опознали и потеряли).
+        // Нет пары игрок↔дорожка. Не подставляем активного: чужой уровень закрывал бы его попытку.
+        // Конец эпизода — только строка в технической колонке.
         if (!snapshot) return
         if (participantId === snapshot.hostJitsiId || participantId === snapshot.soundsJitsiId) return
-        if (end) controllerActionsRef.current?.answerSilentCommit(null, end.durationMs)
-        else controllerActionsRef.current?.speechEpisode(null)
+        if (!end) return
+        const owner = handle.liveAudioOwners().find((item) => item.id === participantId)
+        pushSystemLine(unrecognizedSpeechLine(participantId, owner?.name ?? '', end.durationMs))
         return
       }
       const entry = masterSessionRef.current?.rosterList().find((item) => item.clientId === clientId)

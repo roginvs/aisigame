@@ -2531,14 +2531,14 @@ export function attachController(options: {
    * Вне попытки — прежний путь уровней: напоминание про кнопку в открытом окне.
    */
   function speechEpisode(playerId: number | null): void {
+    if (playerId === null) return
     const snapshot = actor.getSnapshot()
     const path = statePath(snapshot.value)
     if (path !== 'answering.waiting') {
-      if (playerId !== null) speechWithoutBuzzer(playerId)
+      speechWithoutBuzzer(playerId)
       return
     }
     const context = snapshot.context
-    if (playerId === null) playerId = context.activePlayerId
     if (context.activePlayerId !== playerId) return
     if (!answerAttemptLive()) return
     client.interruptSpeech('игрок заговорил на ответе')
@@ -2546,33 +2546,30 @@ export function attachController(options: {
 
   /**
    * Кто сейчас должен говорить и ключ «один commit на это окно».
-   * Неопознанный участник — тот, кого ждём. Чужой игрок, окно кнопки, финал и автоставка — нет.
+   * null — дорожка не сопоставлена: не подставляем того, кого ждём.
+   * Чужой игрок, окно кнопки, финал и автоставка — нет.
    */
   function fallbackSlot(path: string, context: GameContext, playerId: number | null): { key: string; playerId: number; attemptId: number | null; rearm: boolean } | null {
+    if (playerId === null) return null
     if (path.startsWith('answering')) {
-      const speaker = playerId ?? context.activePlayerId
-      if (speaker === null || speaker !== context.activePlayerId || !answerAttemptLive()) return null
-      return { key: `a:${context.attemptId}`, playerId: speaker, attemptId: context.attemptId, rearm: false }
+      if (playerId !== context.activePlayerId || !answerAttemptLive()) return null
+      return { key: `a:${context.attemptId}`, playerId, attemptId: context.attemptId, rearm: false }
     }
     if (path === 'choosing.listening' || path === 'choosing.clarifying') {
-      const speaker = playerId ?? context.chooserId
-      if (speaker !== context.chooserId) return null
-      return { key: `c:${choiceEpoch}`, playerId: speaker, attemptId: null, rearm: false }
+      if (playerId !== context.chooserId) return null
+      return { key: `c:${choiceEpoch}`, playerId, attemptId: null, rearm: false }
     }
     if (specialListening(path) || specialClarifying(path)) {
       const special = context.special
       if (special?.kind === 'auction' && special.autoStake && path === 'auction.announcing') return null
       const listener = specialListenerId(path, context)
-      if (listener === null) return null
-      const speaker = playerId ?? listener
-      if (speaker !== listener) return null
-      return { key: `s:${specialEpoch}`, playerId: speaker, attemptId: null, rearm: false }
+      if (listener === null || playerId !== listener) return null
+      return { key: `s:${specialEpoch}`, playerId, attemptId: null, rearm: false }
     }
     // Просьба повторить: окно ответа ещё не открыто, речь по уровню уже кончилась.
     if (isAnnounceSpeakingPath(path) && context.announceKind === 'repeat' && !context.appeal?.activePlayerId) {
-      const speaker = playerId ?? context.activePlayerId
-      if (speaker === null || speaker !== context.activePlayerId) return null
-      return { key: '', playerId: speaker, attemptId: null, rearm: true }
+      if (playerId !== context.activePlayerId) return null
+      return { key: '', playerId, attemptId: null, rearm: true }
     }
     return null
   }

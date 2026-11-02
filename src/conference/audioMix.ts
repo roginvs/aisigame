@@ -138,6 +138,13 @@ export function hearParticipantIds(input: {
 /** Смена отвечающего сбрасывает прилипшие id предыдущего. Тот же игрок их сохраняет. */
 export type HearOwner = { id: string; name: string }
 
+/** Эпизод речи без пары игрок↔дорожка. В оценку не идёт: только строка в техническую колонку. */
+export function unrecognizedSpeechLine(participantId: string, name: string, durationMs: number): string {
+  const who = name.trim() || 'без имени'
+  const ms = Math.max(0, Math.round(durationMs))
+  return `техническое: речь не сопоставлена с игроком: ${who} (${participantId}), ${ms} мс`
+}
+
 /** Строки в техническую колонку: непонятная дорожка, несколько дорожек игрока, у активного ни одной. */
 export function hearWatchLines(input: {
   activeName: string | null

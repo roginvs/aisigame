@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { brokenCloneTarget, createMicMixer, focusedModelParticipantId, hearParticipantIds, hearWatchLines, LOCAL_KEY, modelHearGains, nextHearBinding, type MixerRemote } from './audioMix.ts'
+import { brokenCloneTarget, createMicMixer, focusedModelParticipantId, hearParticipantIds, hearWatchLines, LOCAL_KEY, modelHearGains, nextHearBinding, unrecognizedSpeechLine, type MixerRemote } from './audioMix.ts'
 
 class FakeTrack {
   id: string
@@ -299,6 +299,15 @@ describe('привязка игрока к дорожкам', () => {
 })
 
 describe('строки слуха в техническую колонку', () => {
+  it('неопознанный эпизод называет id, имя и длительность', () => {
+    expect(unrecognizedSpeechLine('j-x', 'Незнакомец', 1400.4)).toBe(
+      'техническое: речь не сопоставлена с игроком: Незнакомец (j-x), 1400 мс',
+    )
+    expect(unrecognizedSpeechLine('j-x', '  ', 800)).toBe(
+      'техническое: речь не сопоставлена с игроком: без имени (j-x), 800 мс',
+    )
+  })
+
   it('непонятная дорожка, две дорожки игрока и ни одной у активного', () => {
     expect(hearWatchLines({
       activeName: 'Маша',

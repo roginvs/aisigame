@@ -574,14 +574,13 @@ describe('attachController answer listening', () => {
     expect(statePath(actor.getSnapshot().value)).toBe('answering.waiting')
     interrupt.mockClear()
 
-    // Чужой игрок — молчим; неопознанный и активный — обрываем обращение ведущей.
+    // Чужой и неопознанный молчат. Обрываем обращение только когда заговорил сам отвечающий.
     actions().speechEpisode(2)
+    expect(interrupt).not.toHaveBeenCalled()
+    actions().speechEpisode(null)
     expect(interrupt).not.toHaveBeenCalled()
     actions().speechEpisode(1)
     expect(interrupt).toHaveBeenCalledWith('игрок заговорил на ответе')
-    interrupt.mockClear()
-    actions().speechEpisode(null)
-    expect(interrupt).toHaveBeenCalledTimes(1)
     // Форма машины не меняется: реплику ждут модельная VAD или запасной commit.
     expect(statePath(actor.getSnapshot().value)).toBe('answering.waiting')
 
@@ -617,19 +616,17 @@ describe('attachController answer listening', () => {
     actor.send({ type: 'BUZZER_PRESSED', playerId: 1 })
     expect(statePath(actor.getSnapshot().value)).toBe('answering.waiting')
 
-    // Чужой игрок: молчим. Короткий шум: молчим.
+    // Чужой игрок и неопознанная дорожка, пока активный думает: commit нет. Короткий шум: молчим.
     actions().answerSilentCommit(2, 1400)
+    actions().answerSilentCommit(null, 1400)
     expect(forceInputCommit).not.toHaveBeenCalled()
     actions().answerSilentCommit(1, 300)
     expect(forceInputCommit).not.toHaveBeenCalled()
-    // Реплика неопознанного участника во время попытки — это активный игрок: commit с длительностью.
-    actions().answerSilentCommit(null, 1400)
-    expect(forceInputCommit).toHaveBeenCalledTimes(1)
-    expect(forceInputCommit).toHaveBeenCalledWith(1400)
-    // Одна попытка — один запасной commit, даже для опознанного игрока.
+    // Конец речи самого отвечающего — один commit на попытку.
     actions().answerSilentCommit(1, 1400)
     expect(forceInputCommit).toHaveBeenCalledTimes(1)
-    // Неопознанный участник при живой попытке — реплика активного игрока, но лимит уже исчерпан.
+    expect(forceInputCommit).toHaveBeenCalledWith(1400)
+    actions().answerSilentCommit(1, 1600)
     actions().answerSilentCommit(null, 1400)
     expect(forceInputCommit).toHaveBeenCalledTimes(1)
 
@@ -665,12 +662,11 @@ describe('attachController answer listening', () => {
 
     actions().answerSilentCommit(other, 1400)
     actions().answerSilentCommit(chooserId, 300)
-    expect(forceInputCommit).not.toHaveBeenCalled()
     actions().answerSilentCommit(null, 1400)
-    expect(forceInputCommit).toHaveBeenCalledTimes(1)
-    expect(forceInputCommit).toHaveBeenCalledWith(1400)
+    expect(forceInputCommit).not.toHaveBeenCalled()
     actions().answerSilentCommit(chooserId, 1400)
     expect(forceInputCommit).toHaveBeenCalledTimes(1)
+    expect(forceInputCommit).toHaveBeenCalledWith(1400)
     expect(statePath(actor.getSnapshot().value)).toBe('choosing.listening')
 
     stop()
