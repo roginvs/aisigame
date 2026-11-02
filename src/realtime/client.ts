@@ -2,7 +2,6 @@ import { diag } from '../debug/diag.ts'
 import { gameAudioContext, onAudioOutputsReopen, recreateStreamElement, reopenAudioOutputs, unlockAudio } from '../audio/beep.ts'
 import { createHostOutputReader } from './hostOutputLevel.ts'
 import { gameConfig, hostInstructions, withHostRules } from '../config.ts'
-import { voiceById } from './models.ts'
 import { noteUsageSession, recordResponseUsage, resetUsage, setUsageBilling } from './usage.ts'
 import { livePlayerChatVisible } from './liveSpeech.ts'
 import { clearLivePlayerLine, editChatLine, logTrace, pushHostLine, pushPlayerLine, pushTrace, setLivePlayerLine } from '../debug/trace.ts'
@@ -224,7 +223,7 @@ export class RealtimeClient {
   }
 
   judgmentCapabilities(): JudgmentCapabilities {
-    const supported = !this.wire && audioJudgmentCapable(this.model)
+    const supported = this.wire ? this.wire.isolatedAudioReference === true : audioJudgmentCapable(this.model)
     return { isolatedAudioReference: supported, parallelOutOfBand: supported, model: this.model }
   }
 
@@ -1112,7 +1111,7 @@ export class RealtimeClient {
     }
     if (!alive()) return
     this.wireOpen = true
-    if (voiceById(this.model).provider === 'xai') {
+    if (wire.usageBilling === 'grok') {
       setUsageBilling('grok')
       noteUsageSession('open')
     }

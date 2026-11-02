@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { freshGrokTurn, grokBillableTextItem, grokFunctionTool, grokInbound, grokOutbound, grokReleaseDraft, keyterms } from './grokWire.ts'
+import { freshGrokTurn, grokBillableTextItem, grokFunctionTool, grokInbound, grokOutbound, grokReleaseDraft, GrokWire, keyterms } from './grokWire.ts'
 import { selectQuestionTool, submitAnswerJudgmentTool } from './tools.ts'
 import { pcmToBase64 } from './pcm.ts'
 
@@ -167,6 +167,7 @@ describe('grok: финальная расшифровка и инструмен�
       item: { type: 'message', content: [{ type: 'input_audio' }] },
     })).toBe(false)
     expect(grokBillableTextItem({ type: 'response.create', response: { input: [{ type: 'message' }] } })).toBe(false)
+    expect(new GrokWire('grok-voice-latest').usageBilling).toBe('grok')
     const call = grokInbound(
       { type: 'response.function_call_arguments.done', name: 'submitAnswerJudgment', call_id: 'c1', arguments: '{"status":"correct"}' },
       freshGrokTurn(),

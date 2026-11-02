@@ -302,6 +302,8 @@ export class GrokWire implements VoiceWire {
   readonly acksForeignToolCalls = true
   /** Чтение и вердикт в дампе 25 октября открывались без звука: один повтор. */
   readonly restartsSilentSpeech = true
+  /** Цена xAI: минута сессии и текстовый item, не таблица токенов. */
+  readonly usageBilling = 'grok' as const
   private sink: VoiceSink | null = null
   private socket: WebSocket | null = null
   private mic: PcmMic | null = null

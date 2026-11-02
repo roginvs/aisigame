@@ -29,6 +29,9 @@ describe('createVoice', () => {
     expect((full as RealtimeClient).model).toBe('gpt-realtime-2.1')
     expect((grok as RealtimeClient).model).toBe('grok-voice-latest')
     expect((gemini as RealtimeClient).model).toBe('gemini-3.8-live-extended-thinking')
+    expect(mini.judgmentCapabilities().isolatedAudioReference).toBe(true)
+    expect(grok.judgmentCapabilities().isolatedAudioReference).toBe(false)
+    expect(gemini.judgmentCapabilities().isolatedAudioReference).toBe(false)
   })
 })
 

@@ -26,6 +26,16 @@ export interface VoiceWire {
    * У OpenAI длинная генерация может молчать до `started` десятки секунд — там флаг выключен.
    */
   readonly restartsSilentSpeech?: boolean
+  /**
+   * Чем считать открытую сессию. Нет поля — таблица токенов OpenAI.
+   * `grok` — минута сессии и текстовый item, клиент провайдера по имени не ищет.
+   */
+  readonly usageBilling?: 'grok'
+  /**
+   * Изолированная оценка по аудио (`item_reference`, ход вне сессии).
+   * Прямой OpenAI включает это сам, по модели. Провод — только если поле true.
+   */
+  readonly isolatedAudioReference?: boolean
   open(apiKey: string, sink: VoiceSink, options?: VoiceOpenOptions): Promise<void>
   send(event: object): boolean
   close(): void
