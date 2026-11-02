@@ -11,7 +11,8 @@
     "pretest": "npm run lint",
     "test": "vitest run",
     "look": "playwright test",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "live:hear": "AISIGAME_LIVE=1 playwright test e2e/live/hear-answer.live.play.ts"
   },
   "dependencies": {
     "@xstate/react": "^6.1.0",
