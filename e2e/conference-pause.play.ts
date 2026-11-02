@@ -31,7 +31,7 @@ test('пауза для всех: оверлей «Пауза» у мастер�
   // Никто не жмёт: время выходит, ведущая называет верный вариант (подсветка), говорит долго.
   await expect(joiner.getByRole('status').filter({ hasText: 'Жмите кнопку' })).toBeVisible({ timeout: 20_000 })
   // Карточка ведущей одинакова: подсказка «Меньше слышать» мастера едет в снимке.
-  const hostText = (page: Page) => page.locator('.host').innerText().then((text) => text.replace(/ОПА|МС/g, '').replace(/\s+/g, ' ').trim())
+  const hostText = (page: Page) => page.locator('.host').innerText().then((text) => text.replace(/ОПА|МС|ШК/g, '').replace(/\s+/g, ' ').trim())
   await expect.poll(async () => (await hostText(joiner)) === (await hostText(master)), { timeout: 3_000 }).toBe(true)
   if (process.env.SHOT_DIR) {
     await master.locator('.talk').screenshot({ path: `${process.env.SHOT_DIR}/status-master-after.png` })

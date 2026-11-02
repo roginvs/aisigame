@@ -1135,11 +1135,23 @@ button.continue-with-file .continue-file {
   align-content: stretch;
   overflow: hidden;
 }
+.play.is-paused .conference-player .video-tile {
+  height: 100%;
+  min-height: 0;
+}
 .play.is-paused .conference-player .video-frame {
   aspect-ratio: auto;
   height: 100%;
   min-height: 0;
   max-height: none;
+}
+/* Высота ячейки на паузе не 4:3: без absolute видео остаётся своей высоты и overflow режет его пополам. */
+.play.is-paused .conference-player .video-frame video {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
 }
 .play.is-paused .video-placeholder { font-size: clamp(1rem, 3dvh, 2.4rem); }
 .play.is-paused .player-game-slot { align-content: end; }
@@ -1900,6 +1912,12 @@ button.buzzer.chooser:disabled {
   .play.is-paused .conference-player .video-frame {
     aspect-ratio: 4 / 3;
     height: auto;
+  }
+  .play.is-paused .conference-player .video-frame video {
+    position: static;
+    inset: auto;
+    width: 100%;
+    height: 100%;
   }
   .conference-layout .talk .chat-column {
     flex: none;
