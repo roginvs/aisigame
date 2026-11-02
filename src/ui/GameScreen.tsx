@@ -928,19 +928,28 @@ function cellClass(current: boolean, played: boolean, flashing: boolean): string
   return 'cell'
 }
 
+/** Секунды в подписи. Сама полоска сливается CSS-анимацией, без кадра на каждый тик экрана. */
+const timerLabelMs = 1000
+
+function timerDrainStyle(startedAt: number, durationMs: number): CSSProperties {
+  const elapsed = Math.min(durationMs, Math.max(0, Date.now() - startedAt))
+  return {
+    animationDuration: `${durationMs}ms`,
+    animationDelay: elapsed > 0 ? `-${elapsed}ms` : '0ms',
+  }
+}
+
 function Countdown(props: { startedAt: number; durationMs: number }) {
+  // Окно таймера перемонтируется по ключу, поэтому сдвиг анимации считается один раз.
+  const [drain] = useState(() => timerDrainStyle(props.startedAt, props.durationMs))
   const [now, setNow] = useState(() => Date.now())
   useEffect(() => {
-    let frame = 0
-    const tick = () => {
-      setNow(Date.now())
-      frame = window.requestAnimationFrame(tick)
-    }
-    frame = window.requestAnimationFrame(tick)
-    return () => window.cancelAnimationFrame(frame)
+    const timer = window.setInterval(() => setNow(Date.now()), timerLabelMs)
+    return () => window.clearInterval(timer)
   }, [props.startedAt, props.durationMs])
   const fraction = remainingFraction(props.startedAt, props.durationMs, now)
   const secondsLeft = remainingSeconds(props.startedAt, props.durationMs, now)
+  const reduceMotion = typeof window.matchMedia === 'function' && window.matchMedia('(prefers-reduced-motion: reduce)').matches
   return (
     <div
       className="timer-bar"
@@ -950,7 +959,7 @@ function Countdown(props: { startedAt: number; durationMs: number }) {
       aria-valuemax={Math.max(0, Math.ceil(props.durationMs / 1000))}
       aria-valuenow={secondsLeft}
     >
-      <span className="timer-fill" style={{ transform: `scaleX(${fraction})` }} />
+      <span className="timer-fill is-draining" style={reduceMotion ? { transform: `scaleX(${fraction})` } : drain} />
       <span className="visually-hidden">Осталось {secondsLeft} с</span>
     </div>
   )

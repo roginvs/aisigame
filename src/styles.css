@@ -1422,6 +1422,7 @@ button.continue-with-file .continue-file {
 
 @media (prefers-reduced-motion: reduce) {
   .timer-bar { animation: none; }
+  .timer-fill.is-draining { animation: none; }
   .player.active { animation: none; }
 }
 
@@ -1431,6 +1432,17 @@ button.continue-with-file .continue-file {
   width: 100%;
   background: #e2c27a;
   transform-origin: left center;
+}
+
+.timer-fill.is-draining {
+  animation-name: timer-drain;
+  animation-timing-function: linear;
+  animation-fill-mode: forwards;
+}
+
+@keyframes timer-drain {
+  from { transform: scaleX(1); }
+  to { transform: scaleX(0); }
 }
 
 .visually-hidden {

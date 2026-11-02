@@ -6,6 +6,7 @@ import { expect, test, type CDPSession, type Page } from '@playwright/test'
  * до 9eaedac (c16a628): лобби raf 301, commits 7, script 98 мс, task 203 мс; пауза raf 301, commits 6, script 119, task 230.
  * сразу после 9eaedac (кадр ещё крутился, работа реже): лобби raf 301, commits 7, script 63, task 107; пауза raf 300, commits 6, script 47, task 83.
  * текущий master, requestAnimationFrame снят: лобби raf 1, commits 7, script 62, task 80; пауза raf 0, commits 6, script 51, task 63.
+ * окно с идущим таймером (ячейка 100, полоска CSS): raf 0, commits 5, script 4 мс, task 31 мс.
  */
 const WINDOW_MS = 5_000
 const MAX_RAF = 20
@@ -15,7 +16,7 @@ const MAX_TASK_MS = 160
 
 test.setTimeout(90_000)
 
-test('мастер в лобби и на паузе не крутит кадр и не жжёт скрипт', async ({ page }) => {
+async function installProbe(page: Page): Promise<void> {
   await page.addInitScript(() => {
     let raf = 0
     const orig = window.requestAnimationFrame.bind(window)
@@ -37,6 +38,10 @@ test('мастер в лобби и на паузе не крутит кадр �
     }
     window.__cpuProbe = () => ({ raf, commits })
   })
+}
+
+test('мастер в лобби и на паузе не крутит кадр и не жжёт скрипт', async ({ page }) => {
+  await installProbe(page)
 
   await page.goto('/?mock=1&transport=broadcast')
   await page.getByLabel('Модель').selectOption('mock')
@@ -52,6 +57,18 @@ test('мастер в лобби и на паузе не крутит кадр �
   await page.getByRole('button', { name: 'Пауза' }).click()
   await expect(page.locator('.play.is-paused')).toBeVisible()
   await expectSample(page, cdp, 'pause')
+})
+
+test('окно с идущим таймером не крутит кадр', async ({ page }) => {
+  await installProbe(page)
+  await page.goto('/?mock=1')
+  await page.getByLabel('Пакет вопросов').selectOption('demo')
+  await page.getByRole('button', { name: 'Начать игру' }).click()
+  await page.getByRole('button', { name: '100' }).first().click()
+  await page.locator('.timer-bar').waitFor({ timeout: 20_000 })
+  const cdp = await page.context().newCDPSession(page)
+  await cdp.send('Performance.enable')
+  await expectSample(page, cdp, 'timer')
 })
 
 async function expectSample(page: Page, cdp: CDPSession, label: string): Promise<void> {

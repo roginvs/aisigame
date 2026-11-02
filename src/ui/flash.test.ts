@@ -13,12 +13,13 @@ describe('вспышки', () => {
   })
   it('CSS: анимации без смены размеров и с prefers-reduced-motion', () => {
     const css = readFileSync(join(process.cwd(), 'src/styles.css'), 'utf8')
-    for (const name of ['timer-flash', 'focus-flash']) {
+    for (const name of ['timer-flash', 'focus-flash', 'timer-drain']) {
       const body = css.match(new RegExp(`@keyframes ${name} \\{[\\s\\S]*?\\n\\}`))?.[0] ?? ''
       expect(body).not.toBe('')
       expect(body).not.toMatch(/\b(width|height|margin|padding|border-width|outline-width)\s*:/)
     }
-    expect(css).toMatch(/prefers-reduced-motion: reduce\)\s*\{\s*\.timer-bar \{ animation: none; \}\s*\.player\.active \{ animation: none; \}/)
+    expect(css).toMatch(/prefers-reduced-motion: reduce\)\s*\{\s*\.timer-bar \{ animation: none; \}\s*\.timer-fill\.is-draining \{ animation: none; \}\s*\.player\.active \{ animation: none; \}/)
+    expect(css).toMatch(/@keyframes timer-drain \{/)
   })
   it('Countdown перемонтируется по ключу окна', () => {
     const src = readFileSync(join(process.cwd(), 'src/ui/GameScreen.tsx'), 'utf8')
