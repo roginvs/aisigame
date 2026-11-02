@@ -64,6 +64,50 @@ async function boot(client: MockRealtimeClient, beforeBuzz?: () => void, questio
 const notes = () => getTrace().filter((e) => e.kind === 'note').map((e) => e.title)
 
 describe('ответ из нескольких реплик', () => {
+  it('самоисправление после паузы: первый кусок не закрывает попытку, решает последний', async () => {
+    const client = new StatusClient()
+    client.statuses = [
+      { status: 'correct', heard: 'Цезарь' },
+      { status: 'correct', heard: 'Август' },
+    ]
+    const roman: QuestionPack = { ...pack, questions: [{ ...pack.questions[0]!,
+      text: 'Как звали первого римского императора?', answers: ['Октавиан Август', 'Август'] }] }
+    const { score, path } = await boot(client, undefined, roman)
+    client.hear('Цезарь', 900)
+    await vi.advanceTimersByTimeAsync(1500)
+    expect(score()).toBe(0)
+    expect(path()).toBe('answering.settling')
+    client.hear('Август', 800)
+    await vi.advanceTimersByTimeAsync(1500)
+    expect(score()).toBe(0)
+    await vi.advanceTimersByTimeAsync(answerSilenceDecideMs)
+    expect(score()).toBe(100)
+    expect(notes().some((t) => t.startsWith('ответ: берём реплику #2 из 2'))).toBe(true)
+    expect(notes().some((t) => t.startsWith('ответ: берём реплику #1 из 2'))).toBe(false)
+  })
+
+  it('ответ из нескольких кусков решается один раз, после конца всей речи', async () => {
+    const client = new StatusClient()
+    client.statuses = [
+      { status: 'correct', heard: 'Цезарь' },
+      { status: 'unintelligible', heard: 'Нет, нет, подождите' },
+      { status: 'correct', heard: 'Август' },
+    ]
+    const roman: QuestionPack = { ...pack, questions: [{ ...pack.questions[0]!,
+      text: 'Как звали первого римского императора?', answers: ['Октавиан Август', 'Август'] }] }
+    const { score } = await boot(client, undefined, roman)
+    client.hear('император — Цезарь', 900)
+    await vi.advanceTimersByTimeAsync(1200)
+    client.hear('Нет, нет, подождите', 700)
+    await vi.advanceTimersByTimeAsync(1200)
+    client.hear('Август', 600)
+    await vi.advanceTimersByTimeAsync(answerSilenceDecideMs - 400)
+    expect(score()).toBe(0)
+    await vi.advanceTimersByTimeAsync(700)
+    expect(score()).toBe(100)
+    expect(notes().some((t) => t.startsWith('ответ: берём реплику #3 из 3'))).toBe(true)
+  })
+
   it('Qwen подменила Per di manocchio на Первый диманокль и сказала correct: нет начисления или штрафа', async () => {
     const client = new StatusClient()
     client.statuses = [{ status: 'correct', heard: 'Первый диманокль.' }]
@@ -261,6 +305,8 @@ describe('ответ из нескольких реплик', () => {
     expect(text).toContain('только при почти полной уверенности')
     expect(text).toContain('Сомневаешься — false')
     expect(text).toContain('1) «хе-хе» 2) «щас»')
+    expect(text).toContain('Оценивай попытку целиком')
+    expect(text).toContain('Более поздний кусок отменяет более ранний')
     expect(text).toContain('heard — дословная копия всей реплики игрока')
     expect(text).toContain('без сокращения, перевода и исправления под эталон')
     expect(text).toContain('При пустой расшифровке — unintelligible')

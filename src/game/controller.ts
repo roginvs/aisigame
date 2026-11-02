@@ -3315,7 +3315,7 @@ function audioJudgmentLead(heard: string): string {
 export function judgmentInstructions(context: GameContext, heard: string, source: JudgmentSource = 'text', earlier: readonly string[] = [], hostLine = ''): string {
   const question = questionById(context.questions, context.activeQuestionId)
   const history = earlier.length
-    ? `\nЭто не первая реплика игрока в этой попытке. Раньше он сказал, по порядку: ${earlier.map((line, index) => `${index + 1}) «${line}»`).join(' ')}. Прежние реплики уже оценены отдельно; status ставь по ответу в этой, последней реплике.`
+    ? `\nЭто одна попытка, сказанная кусками. Все куски по порядку, вместе с текущей репликой: ${earlier.map((line, index) => `${index + 1}) «${line}»`).join(' ')}. Текущий кусок — в «Реплике игрока», он последний. Оценивай попытку целиком, не первый кусок. Более поздний кусок отменяет более ранний: назвал одно, потом другое — считается последнее, даже если первое совпадало с эталоном.`
     : ''
   const echo = hostLine.trim()
     ? `\nПоследняя реплика ведущей (её голос из динамика может попасть в микрофон игрока): «${hostLine.trim().slice(0, 300)}». Если реплика игрока — это эхо этих слов ведущей, а не его собственная речь, ставь speech=noise.`
