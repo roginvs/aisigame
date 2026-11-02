@@ -72,8 +72,10 @@ export type GameControllerActions = {
   speechWithoutBuzzer: (playerId: number) => void
   /** Начало реплики по уровню звука (дорожка Jitsi): во время попытки — заговорил отвечающий. */
   speechEpisode: (playerId: number | null) => void
-  /** Запасной commit (fa584db п. 1): реплика уровня Jitsи кончилась, а модель о речи не знает. */
+  /** Запасной commit по id игрока. null и чужой id ход не подставляют. */
   answerSilentCommit: (playerId: number | null, durationMs: number) => void
+  /** Конец речи на шине модели: commit хода того, кого ждёт фаза. Уровни Jitsi сюда не входят. */
+  commitModelStream: (durationMs: number) => void
   /** Выбор вопроса: модель сама формулирует короткую фразу, каждый раз новую. */
   /** Мастер: микрофон выбирающего стабильно выключен (true) или включился (false). */
   setChooserMicOff: (off: boolean) => void
@@ -2595,6 +2597,31 @@ export function attachController(options: {
    * Уже открытую моделью реплику не коммитим второй раз. На «повтори» сначала открываем попытку,
    * иначе синтетический конец придёт в объявление и пропадёт.
    */
+  /**
+   * Шины модели хватило на реплику, потом тишина. В шине только дорожки того, кого ждёт фаза,
+   * поэтому id участника Jitsi не нужен и чужая речь сюда не доходит.
+   */
+  function commitModelStream(durationMs: number): void {
+    const snapshot = actor.getSnapshot()
+    const path = statePath(snapshot.value)
+    const playerId = streamTurnPlayerId(path, snapshot.context)
+    if (playerId === null) return
+    answerSilentCommit(playerId, durationMs)
+  }
+
+  function streamTurnPlayerId(path: string, context: GameContext): number | null {
+    if (path.startsWith('answering')) return context.activePlayerId
+    if (path === 'choosing.listening' || path === 'choosing.clarifying') return context.chooserId
+    if (specialListening(path) || specialClarifying(path)) {
+      if (context.special?.kind === 'auction' && context.special.autoStake && path === 'auction.announcing') return null
+      return specialListenerId(path, context)
+    }
+    if (isAnnounceSpeakingPath(path) && context.announceKind === 'repeat' && !context.appeal?.activePlayerId) {
+      return context.activePlayerId
+    }
+    return null
+  }
+
   function answerSilentCommit(playerId: number | null, durationMs: number): void {
     if (durationMs < fallbackCommitMinMs) return
     // Модель уже слушает эту реплику (speech_started была) — второй commit даст пустой item.
@@ -2651,6 +2678,7 @@ export function attachController(options: {
     speechWithoutBuzzer,
     speechEpisode,
     answerSilentCommit,
+    commitModelStream,
     remindMutedAnswerer(playerName) {
       if (statePath(actor.getSnapshot().value) !== 'answering.waiting') return
       if (Date.now() - lastAnswerSpeechAt < gameConfig.mutedAnswerReminderMs) {

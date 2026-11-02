@@ -243,6 +243,7 @@ export default function App() {
   const tilesUnsubRef = useRef<(() => void) | null>(null)
   const hostSpeakingUnsubRef = useRef<(() => void) | null>(null)
   const speechActivityUnsubRef = useRef<(() => void) | null>(null)
+  const modelStreamUnsubRef = useRef<(() => void) | null>(null)
   const hearOwnersUnsubRef = useRef<(() => void) | null>(null)
   const tearingDownConferenceRef = useRef(false)
   const [conferenceTiles, setConferenceTiles] = useState<ConferenceTile[]>([])
@@ -782,6 +783,7 @@ export default function App() {
     const unsubscribeTiles = tilesUnsubRef.current
     const unsubscribeHostSpeaking = hostSpeakingUnsubRef.current
     const unsubscribeSpeechActivity = speechActivityUnsubRef.current
+    const unsubscribeModelStream = modelStreamUnsubRef.current
     const unsubscribeHearOwners = hearOwnersUnsubRef.current
     const disposeTransport = transportDisposeRef.current
     masterSessionRef.current = null
@@ -791,6 +793,7 @@ export default function App() {
     tilesUnsubRef.current = null
     hostSpeakingUnsubRef.current = null
     speechActivityUnsubRef.current = null
+    modelStreamUnsubRef.current = null
     hearOwnersUnsubRef.current = null
     transportDisposeRef.current = null
     conferenceHandleRef.current = null
@@ -803,6 +806,7 @@ export default function App() {
       unsubscribeTiles?.()
       unsubscribeHostSpeaking?.()
       unsubscribeSpeechActivity?.()
+      unsubscribeModelStream?.()
       unsubscribeHearOwners?.()
       disposeTransport?.()
       setGameSoundRoute('local')
@@ -857,11 +861,14 @@ export default function App() {
     hostSpeakingUnsubRef.current?.()
     hostSpeakingUnsubRef.current = handle.subscribeHostSpeaking(setConferenceHostSpeaking)
     speechActivityUnsubRef.current?.()
+    modelStreamUnsubRef.current?.()
     hearOwnersUnsubRef.current?.()
     hearOwnersUnsubRef.current = handle.subscribeAudioOwners(() => syncModelHearRef.current())
+    modelStreamUnsubRef.current = handle.subscribeModelStream((durationMs) => {
+      controllerActionsRef.current?.commitModelStream(durationMs)
+    })
     speechActivityUnsubRef.current = handle.subscribeSpeechActivity((participantId, end) => {
-      // Реплика ≥1 с по уровню: если это человек, ждущий кнопки, контроллер напомнит про кнопку.
-      // Конец реплики, которую модель не заметила, — запасной commit в буфер (fa584db п. 1).
+      // Уровень Jitsi: напоминание про кнопку и обрыв обращения. Запасной commit — только шина модели.
       const snapshot = masterSnapshotRef.current
       const pairs: readonly ConferenceJitsiPair[] = snapshot?.jitsiIds ?? []
       const found = pairs.find(([jitsiId]) => jitsiId === participantId)
@@ -886,9 +893,8 @@ export default function App() {
         missedIds: snapshot.missedIds,
         listenerId: specialListenerId(snapshot.phase, { special: snapshot.special } as GameContext),
       })
-      if (playerId === null) return
-      if (end) controllerActionsRef.current?.answerSilentCommit(playerId, end.durationMs)
-      else controllerActionsRef.current?.speechEpisode(playerId)
+      if (playerId === null || end) return
+      controllerActionsRef.current?.speechEpisode(playerId)
     })
   }
 

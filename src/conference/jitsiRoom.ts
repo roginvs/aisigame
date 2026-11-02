@@ -23,11 +23,11 @@ import { cameraFacing, isMobileCameraDevice, nextCameraDeviceId, shouldMirrorVid
 import { createSpeakerActivity } from './speakerActivity.ts'
 import { conferenceAudioStream, createConferenceAudioOutput } from './conferenceAudio.ts'
 import { compressMic, compressMicEligible, monitorMicLevel, playerMicConstraints, shouldCompressPlayerMic, type MicCompression, type MicLevelMonitor } from './micCompression.ts'
-import { createSpeechLevels } from './speechLevel.ts'
+import { brokenCloneHearLine, createModelStreamSpeech, createSpeechLevels, modelStreamSpeechRms, streamSilentWhileJitsiHears } from './speechLevel.ts'
 import { noteTileLevel, resetTileLevels } from './tileLevels.ts'
 import { PACK_CHANNEL_HIGH_WATER_BYTES, PACK_CHANNEL_LOW_WATER_BYTES } from './chunks.ts'
 import { jitsiVideoLive, mediaStreamTrackFromJitsi, micTrackIsDead } from './micTrack.ts'
-import { pushTrace } from '../debug/trace.ts'
+import { pushSystemLine, pushTrace } from '../debug/trace.ts'
 import { noteModelSenderStats, type ModelSenderStats } from '../realtime/senderStats.ts'
 
 type JitsiMeetJS = {
@@ -559,7 +559,7 @@ export async function connectJitsiConference(input: {
    */
   const brokenCloneSamples = 4 // 1 с подряд
   /** Столько «речь» от Jitsi (SPEAKING_LEVEL) — уже заметно громко на фоне шёпота ниже 0,02 RMS. */
-  const brokenCloneRmsCeil = 0.02
+  const brokenCloneRmsCeil = modelStreamSpeechRms
   let brokenCloneRun = 0
   let brokenCloneCooldownUntil = 0
   /** Клон фокуса пересоздан и ещё не зазвучал: это не молчание игрока. */
@@ -614,8 +614,40 @@ export async function connectJitsiConference(input: {
   }
   const tileListeners = new Set<(tiles: ConferenceTile[]) => void>()
   const hostSpeakingListeners = new Set<(speaking: boolean) => void>()
-  /** Реплика людей: дорожка ≥1 с говорила (уровень Jitsi) — напоминание «ответ без кнопки»; конец реплики с длительностью — запасной commit. */
+  /** Начало реплики по Jitsi — напоминание «ответ без кнопки». Конец для commit сюда не кладём. */
   const speechActivityListeners = new Set<(participantId: string, end?: { durationMs: number }) => void>()
+  /** Конец речи на шине модели: то, что реально ушло в модель. */
+  const modelStreamListeners = new Set<(durationMs: number) => void>()
+  const modelStream = createModelStreamSpeech((durationMs) => {
+    for (const listener of modelStreamListeners) listener(durationMs)
+  })
+  let modelStreamTimer: number | null = null
+  /** Участники фокуса, у которых Jitsi уже видел речь, а шина модели в этот момент была тихой. */
+  const streamQuietFocus = new Set<string>()
+  function startModelStreamWatch(): void {
+    if (modelStreamTimer !== null) return
+    modelStreamTimer = window.setInterval(() => {
+      if (!modelMixer) return
+      modelStream.noteBus(modelMixer.busLevel().rms)
+    }, hearWindowSampleMs)
+  }
+  function stopModelStreamWatch(): void {
+    if (modelStreamTimer !== null) window.clearInterval(modelStreamTimer)
+    modelStreamTimer = null
+    modelStream.dispose()
+  }
+  function noteFocusAgainstStream(participantId: string, jitsiLevel: number): void {
+    if (!modelMixer) return
+    const busRms = modelMixer.busLevel().rms
+    if (streamSilentWhileJitsiHears({
+      inFocus: focusIds().includes(participantId),
+      jitsiLevel,
+      busRms,
+      speakingLevel: SPEAKING_LEVEL,
+      streamFloor: modelStreamSpeechRms,
+    })) streamQuietFocus.add(participantId)
+    else if (busRms >= modelStreamSpeechRms) streamQuietFocus.delete(participantId)
+  }
   const speechLevels = createSpeechLevels(
     (participantId) => {
       for (const listener of speechActivityListeners) listener(participantId)
@@ -623,6 +655,9 @@ export async function connectJitsiConference(input: {
     Date.now,
     (participantId, durationMs) => {
       for (const listener of speechActivityListeners) listener(participantId, { durationMs })
+      if (!streamQuietFocus.has(participantId)) return
+      streamQuietFocus.delete(participantId)
+      pushSystemLine(brokenCloneHearLine(participantName(participantId), participantId, durationMs))
     },
   )
   let lastHostSpeaking = false
@@ -655,6 +690,7 @@ export async function connectJitsiConference(input: {
     noteTileLevel(id, level)
     if (raw > 0) speakerActivity.note(id, level)
     if (!ownJitsiLevelSeen) speechLevels.note(id, level)
+    noteFocusAgainstStream(id, level)
   }
   function startOwnLevelFeed(): void {
     stopOwnLevelFeed()
@@ -1106,8 +1142,8 @@ export async function connectJitsiConference(input: {
     remoteVideo.delete(userId)
     dropRemoteAudio(userId)
     speakerActivity.clear(userId)
-    // Нулевого кадра от ушедшего не будет: реплика по уровню закрывается здесь, иначе
-    // запасной commit (answerSilentCommit) не придёт и попытка тянет все answerMs.
+    // Нулевого кадра от ушедшего не будет: реплика по уровню Jitsi закрывается здесь.
+    // Запасной commit этим событием не кормится — его даёт шина модели.
     speechLevels.clear(userId)
     emitTiles()
   })
@@ -1157,6 +1193,7 @@ export async function connectJitsiConference(input: {
     noteTileLevel(id, level)
     speakerActivity.note(id, level)
     speechLevels.note(id, level)
+    noteFocusAgainstStream(id, level)
   })
 
   conference.on(confEvents.trackMute, (track: unknown) => {
@@ -1329,6 +1366,7 @@ export async function connectJitsiConference(input: {
           })
         })
         syncModelMixer()
+        startModelStreamWatch()
       }
       return modelMixer.outputStream()
     },
@@ -1487,6 +1525,10 @@ export async function connectJitsiConference(input: {
       speechActivityListeners.add(handler)
       return () => speechActivityListeners.delete(handler)
     },
+    subscribeModelStream(handler) {
+      modelStreamListeners.add(handler)
+      return () => modelStreamListeners.delete(handler)
+    },
     bindVideo(participantId, element) {
       const previous = videoBindings.get(participantId)
       const track = participantId === localId() ? localVideo : remoteVideo.get(participantId)
@@ -1512,6 +1554,7 @@ export async function connectJitsiConference(input: {
       soundsHandle = null
       transport.close()
       closeHearWindow()
+      stopModelStreamWatch()
       stopOwnLevelFeed()
       ownLevelMonitor?.stop()
       ownLevelMonitor = null

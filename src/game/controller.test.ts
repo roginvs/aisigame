@@ -622,8 +622,9 @@ describe('attachController answer listening', () => {
     expect(forceInputCommit).not.toHaveBeenCalled()
     actions().answerSilentCommit(1, 300)
     expect(forceInputCommit).not.toHaveBeenCalled()
-    // Конец речи самого отвечающего — один commit на попытку.
-    actions().answerSilentCommit(1, 1400)
+    // Чужой id и null не коммитят. Речь в потоке модели и тишина — commit хода.
+    expect(forceInputCommit).not.toHaveBeenCalled()
+    actions().commitModelStream(1400)
     expect(forceInputCommit).toHaveBeenCalledTimes(1)
     expect(forceInputCommit).toHaveBeenCalledWith(1400)
     actions().answerSilentCommit(1, 1600)
@@ -664,7 +665,7 @@ describe('attachController answer listening', () => {
     actions().answerSilentCommit(chooserId, 300)
     actions().answerSilentCommit(null, 1400)
     expect(forceInputCommit).not.toHaveBeenCalled()
-    actions().answerSilentCommit(chooserId, 1400)
+    actions().commitModelStream(1400)
     expect(forceInputCommit).toHaveBeenCalledTimes(1)
     expect(forceInputCommit).toHaveBeenCalledWith(1400)
     expect(statePath(actor.getSnapshot().value)).toBe('choosing.listening')

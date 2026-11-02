@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest'
-import { createSpeechLevels } from './speechLevel.ts'
+import { brokenCloneHearLine, createModelStreamSpeech, createSpeechLevels, streamSilentWhileJitsiHears } from './speechLevel.ts'
 
 function timed() {
   let now = 0
@@ -128,5 +128,55 @@ describe('createSpeechLevels — устойчивая речь по уровня
     }
     expect(onEpisode).not.toHaveBeenCalled()
     levels.dispose()
+  })
+})
+
+describe('поток модели', () => {
+  it('чужая речь не в шине — commit нет; речь в шине и тишина — один конец', () => {
+    const clock = timed()
+    const ends: number[] = []
+    const stream = createModelStreamSpeech((durationMs) => { ends.push(durationMs) }, clock.now)
+    // Чужой микрофон в шину не входит: уровень шины остаётся нулём.
+    for (let i = 0; i < 10; i += 1) {
+      clock.tick()
+      stream.noteBus(0)
+    }
+    expect(ends).toEqual([])
+    for (let i = 0; i < 6; i += 1) {
+      clock.tick()
+      stream.noteBus(0.2)
+    }
+    clock.tick(700)
+    stream.noteBus(0)
+    expect(ends).toHaveLength(1)
+    expect(ends[0]).toBeGreaterThanOrEqual(1000)
+    stream.dispose()
+  })
+
+  it('Jitsi слышит фокус, а шина тихая — это битый клон', () => {
+    expect(streamSilentWhileJitsiHears({
+      inFocus: true,
+      jitsiLevel: 0.9,
+      busRms: 0.01,
+      speakingLevel: 0.025,
+      streamFloor: 0.02,
+    })).toBe(true)
+    expect(streamSilentWhileJitsiHears({
+      inFocus: false,
+      jitsiLevel: 0.9,
+      busRms: 0,
+      speakingLevel: 0.025,
+      streamFloor: 0.02,
+    })).toBe(false)
+    expect(streamSilentWhileJitsiHears({
+      inFocus: true,
+      jitsiLevel: 0.9,
+      busRms: 0.2,
+      speakingLevel: 0.025,
+      streamFloor: 0.02,
+    })).toBe(false)
+    expect(brokenCloneHearLine('Маша', 'j-m', 1400)).toBe(
+      'техническое: Jitsi слышит речь Маша (j-m), 1400 мс, а в потоке модели тишина — битый клон',
+    )
   })
 })

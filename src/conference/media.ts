@@ -95,8 +95,10 @@ export type ConferenceMedia = {
   subscribeTiles: (handler: (tiles: ConferenceTile[]) => void) => () => void
   /** Уровень речи бота «Ведущая» в Jitsi — для пульсации портрета, не плитки. */
   subscribeHostSpeaking: (handler: (speaking: boolean) => void) => () => void
-  /** Реплика участника по уровню: начало (≥1 с речи, напоминание без кнопки) и конец с длительностью (запасной commit). */
+  /** Реплика участника по уровню Jitsi: начало (≥1 с) — напоминание без кнопки. Конец commit не делает. */
   subscribeSpeechActivity: (handler: (participantId: string, end?: { durationMs: number }) => void) => () => void
+  /** Конец речи на шине, которая уходит в модель. Чужой звук в эту шину не входит. */
+  subscribeModelStream: (handler: (durationMs: number) => void) => () => void
   bindVideo: (participantId: string, element: HTMLVideoElement | null) => void
 }
 
@@ -197,6 +199,9 @@ export function createBroadcastMedia(displayName: string): ConferenceMedia & { d
       return () => hostSpeakingListeners.delete(handler)
     },
     subscribeSpeechActivity() {
+      return () => {}
+    },
+    subscribeModelStream() {
       return () => {}
     },
     bindVideo() {},
