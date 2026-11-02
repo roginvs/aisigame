@@ -18,7 +18,7 @@ import type { ConferenceTransport } from './transport.ts'
 import { createHearWindow } from './hearWindow.ts'
 import { hearWindowSampleMs, tileLevelSampleMs } from '../options.ts'
 import { SPEAKING_LEVEL } from './speakerActivity.ts'
-import { createMicMixer, type MicMixer, type MixerRemote, type ModelHearFocus } from './audioMix.ts'
+import { brokenCloneTarget, createMicMixer, type MicMixer, type MixerRemote, type ModelHearFocus } from './audioMix.ts'
 import { cameraFacing, isMobileCameraDevice, nextCameraDeviceId, shouldMirrorVideo, switchFacingCamera, type CameraFacing } from './camera.ts'
 import { createSpeakerActivity } from './speakerActivity.ts'
 import { conferenceAudioStream, createConferenceAudioOutput } from './conferenceAudio.ts'
@@ -583,10 +583,9 @@ export async function connectJitsiConference(input: {
     if (ids.length === 0) return
     const owned = samples.filter((item) => ids.includes(item.participantId))
     if (owned.some((item) => item.rms >= brokenCloneRmsCeil)) focusCloneBroken = false
-    const current = owned.find((item) => item.jitsi !== null && item.jitsi >= SPEAKING_LEVEL && item.rms < brokenCloneRmsCeil) ?? null
+    const current = brokenCloneTarget(samples, ids, SPEAKING_LEVEL, brokenCloneRmsCeil)
     if (Date.now() < brokenCloneCooldownUntil) return
-    const broken = current !== null && current.jitsi !== null && current.jitsi >= SPEAKING_LEVEL && current.rms < brokenCloneRmsCeil
-    if (!broken) {
+    if (!current) {
       brokenCloneRun = 0
       return
     }
@@ -1292,14 +1291,22 @@ export async function connectJitsiConference(input: {
       return hearFallback || focusCloneBroken
     },
     liveAudioOwnerIds() {
-      const ids: string[] = []
+      return this.liveAudioOwners().map((owner) => owner.id)
+    },
+    liveAudioOwners() {
+      const owners: { id: string; name: string }[] = []
+      const seen = new Set<string>()
+      const add = (id: string, name: string) => {
+        if (!id || seen.has(id)) return
+        seen.add(id)
+        owners.push({ id, name })
+      }
       for (const track of remoteAudioTracks.keys()) {
         const owner = trackOwner(track)
-        if (owner) ids.push(owner)
+        if (owner) add(owner, participantName(owner))
       }
-      const self = localId()
-      if (self) ids.push(self)
-      return ids
+      add(localId(), '')
+      return owners
     },
     subscribeAudioOwners(handler: () => void) {
       hearTrackListeners.add(handler)

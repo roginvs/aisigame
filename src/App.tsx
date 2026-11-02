@@ -27,7 +27,7 @@ import {
 import { contextFromSnapshot } from './conference/snapshotView.ts'
 import { conferenceDisplayName, deviceSpeechPlayerId, rosterSeats } from './conference/seats.ts'
 import { jitsiHostFromBase, stripInviteParams } from './conference/stripInvite.ts'
-import { focusedModelParticipantId, hearParticipantIds, nextHearBinding } from './conference/audioMix.ts'
+import { focusedModelParticipantId, hearParticipantIds, hearWatchLines, nextHearBinding } from './conference/audioMix.ts'
 import { setFocusUnheard } from './game/focusUnheard.ts'
 import type { ConferenceHandle, ConferenceTile } from './conference/media.ts'
 import { createConferenceTransport } from './conference/transportFactory.ts'
@@ -333,6 +333,7 @@ export default function App() {
 
   const syncModelHearRef = useRef<() => void>(() => {})
   const hearStickyRef = useRef<{ clientId: string | null; ids: readonly string[] }>({ clientId: null, ids: [] })
+  const hearLinesRef = useRef<ReadonlySet<string>>(new Set())
 
   useEffect(() => {
     syncModelHearRef.current = () => {
@@ -360,9 +361,11 @@ export default function App() {
       if (turnClient === null || turnClient === false) {
         hearStickyRef.current = { clientId: null, ids: [] }
         handle.setModelHearOnly(turnClient)
+        reportHearLines(handle, ctx.players, pairs, null, null)
         return
       }
       const clientId = turnClient
+      const serviceIds = [handle.serviceIds().host, handle.serviceIds().sounds].filter((id): id is string => Boolean(id))
       const binding = nextHearBinding(hearStickyRef.current, clientId, (previousBoundIds) => hearParticipantIds({
         clientId,
         liveEndpointIds: masterSessionRef.current?.endpointIdsForClient(clientId) ?? [],
@@ -370,9 +373,38 @@ export default function App() {
         selfParticipantId: clientId === masterClientId ? handle.localParticipantId() : null,
         liveOwnerIds: handle.liveAudioOwnerIds(),
         previousBoundIds,
+        ignoreIds: serviceIds,
       }))
       hearStickyRef.current = binding
       handle.setModelHearOnly(binding.ids)
+      const active = ctx.players.find((player) => player.clientId === clientId)
+      reportHearLines(handle, ctx.players, pairs, binding.ids, active?.name ?? clientId)
+    }
+    const reportHearLines = (
+      handle: NonNullable<typeof conferenceHandleRef.current>,
+      players: readonly { clientId?: string; name: string }[],
+      pairs: readonly (readonly [string, string])[],
+      activeIds: readonly string[] | null,
+      activeName: string | null,
+    ) => {
+      const known: { id: string; name: string }[] = []
+      for (const player of players) {
+        if (!player.clientId) continue
+        const ids = new Set(masterSessionRef.current?.endpointIdsForClient(player.clientId) ?? [])
+        for (const [jitsiId, owner] of pairs) if (owner === player.clientId) ids.add(jitsiId)
+        if (player.clientId === masterClientId) ids.add(handle.localParticipantId())
+        for (const id of ids) known.push({ id, name: player.name })
+      }
+      const lines = hearWatchLines({
+        activeName,
+        activeIds,
+        owners: handle.liveAudioOwners(),
+        known,
+        serviceIds: [handle.serviceIds().host, handle.serviceIds().sounds].filter((id): id is string => Boolean(id)),
+      })
+      const next = new Set(lines)
+      for (const line of lines) if (!hearLinesRef.current.has(line)) pushSystemLine(line)
+      hearLinesRef.current = next
     }
     const hearSub = actor.subscribe(() => {
       syncModelHearRef.current()

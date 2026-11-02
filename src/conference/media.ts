@@ -68,6 +68,7 @@ export type ConferenceMedia = {
   setModelHearOnly: (participantId: import('./audioMix.ts').ModelHearFocus) => void
   /** Текущие владельцы живых аудиодорожек, включая локальный id. */
   liveAudioOwnerIds: () => readonly string[]
+  liveAudioOwners: () => readonly { id: string; name: string }[]
   /** Дорожка сменила владельца или появилась — фокус надо пересчитать сразу. */
   subscribeAudioOwners: (handler: () => void) => () => void
   /**
@@ -164,6 +165,7 @@ export function createBroadcastMedia(displayName: string): ConferenceMedia & { d
     },
     setModelHearOnly() {},
     liveAudioOwnerIds: () => [],
+    liveAudioOwners: () => [],
     subscribeAudioOwners: () => () => {},
     focusedTrackMissing: () => false,
     async setPlayerMicProcess(on) {

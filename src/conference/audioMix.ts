@@ -116,12 +116,15 @@ export function hearParticipantIds(input: {
   selfParticipantId: string | null
   liveOwnerIds: readonly string[]
   previousBoundIds: readonly string[]
+  /** Ведущая и звуки игры: их id никогда не дорожка игрока. */
+  ignoreIds?: readonly string[]
 }): string[] {
   const foreign = new Set<string>()
   for (const [id, owner] of input.pairs) if (owner !== input.clientId) foreign.add(id)
   const mine = new Set<string>()
+  const skip = new Set(input.ignoreIds ?? [])
   const take = (id: string | null) => {
-    if (!id || foreign.has(id)) return
+    if (!id || foreign.has(id) || skip.has(id)) return
     mine.add(id)
   }
   for (const id of input.liveEndpointIds) take(id)
@@ -133,6 +136,58 @@ export function hearParticipantIds(input: {
 }
 
 /** Смена отвечающего сбрасывает прилипшие id предыдущего. Тот же игрок их сохраняет. */
+export type HearOwner = { id: string; name: string }
+
+/** Строки в техническую колонку: непонятная дорожка, несколько дорожек игрока, у активного ни одной. */
+export function hearWatchLines(input: {
+  activeName: string | null
+  activeIds: readonly string[] | null
+  owners: readonly HearOwner[]
+  known: readonly { id: string; name: string }[]
+  serviceIds: readonly string[]
+}): string[] {
+  const live = new Set(input.owners.map((owner) => owner.id))
+  const service = new Set(input.serviceIds)
+  const knownIds = new Set(input.known.map((row) => row.id))
+  const lines: string[] = []
+  for (const owner of input.owners) {
+    if (service.has(owner.id) || knownIds.has(owner.id)) continue
+    const label = owner.name ? `${owner.name} (${owner.id})` : owner.id
+    lines.push(`техническое: непонятная дорожка ${label}, не сопоставлена с игроком`)
+  }
+  const byPlayer = new Map<string, string[]>()
+  for (const row of input.known) {
+    if (!live.has(row.id)) continue
+    const list = byPlayer.get(row.name) ?? []
+    if (!list.includes(row.id)) list.push(row.id)
+    byPlayer.set(row.name, list)
+  }
+  for (const [name, ids] of byPlayer) {
+    if (ids.length > 1) lines.push(`техническое: у ${name} ${ids.length} живых дорожек: ${ids.join(', ')}`)
+  }
+  if (input.activeName && input.activeIds && !input.activeIds.some((id) => live.has(id))) {
+    lines.push(`техническое: у ${input.activeName} нет ни одной живой дорожки`)
+  }
+  return lines
+}
+
+/** Какую дорожку фокуса пересоздать: Jitsi слышит этого игрока, клон в миксе шепчет. Чужой клон не трогаем. */
+export function brokenCloneTarget(
+  samples: readonly { key: string; participantId: string; rms: number; jitsi: number | null }[],
+  focusIds: readonly string[],
+  speakingLevel: number,
+  rmsCeil: number,
+): { key: string; participantId: string; jitsi: number | null; rms: number } | null {
+  const hit = samples.find((sample) =>
+    focusIds.includes(sample.participantId)
+    && sample.key !== 'bus'
+    && sample.key !== 'local'
+    && sample.jitsi !== null
+    && sample.jitsi >= speakingLevel
+    && sample.rms < rmsCeil)
+  return hit ? { key: hit.key, participantId: hit.participantId, jitsi: hit.jitsi, rms: hit.rms } : null
+}
+
 export function nextHearBinding(
   previous: { clientId: string | null; ids: readonly string[] },
   clientId: string | null,

@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { createMicMixer, focusedModelParticipantId, hearParticipantIds, LOCAL_KEY, modelHearGains, nextHearBinding, type MixerRemote } from './audioMix.ts'
+import { brokenCloneTarget, createMicMixer, focusedModelParticipantId, hearParticipantIds, hearWatchLines, LOCAL_KEY, modelHearGains, nextHearBinding, type MixerRemote } from './audioMix.ts'
 
 class FakeTrack {
   id: string
@@ -192,6 +192,53 @@ describe('привязка игрока к дорожкам', () => {
     expect(gains.get('other')).toBe(0)
   })
 
+  it('апелляция слышит дорожку отвечающего, не выбирающего', () => {
+    expect(focusedModelParticipantId('appealCue', 'c-choose', 'c-answer')).toBe('c-answer')
+    const ids = hearParticipantIds({
+      clientId: 'c-answer',
+      liveEndpointIds: ['j-answer'],
+      pairs: [['j-choose', 'c-choose'], ['j-answer', 'c-answer']],
+      selfParticipantId: null,
+      liveOwnerIds: ['j-choose', 'j-answer'],
+      previousBoundIds: ['j-choose'],
+    })
+    expect(ids).toEqual(['j-answer'])
+  })
+
+  it('смена id ведущей не попадает в слух игрока', () => {
+    const ids = hearParticipantIds({
+      clientId: 'c1',
+      liveEndpointIds: ['j1'],
+      pairs: [['j1', 'c1']],
+      selfParticipantId: null,
+      liveOwnerIds: ['j1', 'host-old', 'host-new'],
+      previousBoundIds: ['host-old'],
+      ignoreIds: ['host-old', 'host-new'],
+    })
+    expect(ids).toEqual(['j1'])
+    const { gains } = modelHearGains({
+      remotes: [
+        { key: 'p', participantId: 'j1', audible: true },
+        { key: 'h', participantId: 'host-new', audible: true },
+      ],
+      local: { participantId: 'master', audible: false },
+      focus: ids,
+    })
+    expect(gains.get('p')).toBe(1)
+    expect(gains.get('h')).toBe(0)
+  })
+
+  it('битый клон пересоздаётся только у дорожки фокуса', () => {
+    const hit = brokenCloneTarget([
+      { key: 'other', participantId: 'j2', rms: 0.001, jitsi: 0.9 },
+      { key: 'mine', participantId: 'j1', rms: 0.01, jitsi: 0.8 },
+    ], ['j1'], 0.025, 0.02)
+    expect(hit).toEqual({ key: 'mine', participantId: 'j1', jitsi: 0.8, rms: 0.01 })
+    expect(brokenCloneTarget([
+      { key: 'other', participantId: 'j2', rms: 0.001, jitsi: 0.9 },
+    ], ['j1'], 0.025, 0.02)).toBeNull()
+  })
+
   it('быстрая смена отвечающего после кнопки оставляет только нового', () => {
     let binding: { clientId: string | null; ids: readonly string[] } = { clientId: null, ids: [] }
     const step = (clientId: string, endpoint: string) => {
@@ -207,6 +254,30 @@ describe('привязка игрока к дорожкам', () => {
     }
     expect(step('a', 'ja')).toEqual(['ja'])
     expect(step('b', 'jb')).toEqual(['jb'])
+  })
+})
+
+describe('строки слуха в техническую колонку', () => {
+  it('непонятная дорожка, две дорожки игрока и ни одной у активного', () => {
+    expect(hearWatchLines({
+      activeName: 'Маша',
+      activeIds: ['gone'],
+      owners: [
+        { id: 'j-a', name: '' },
+        { id: 'j-b', name: '' },
+        { id: 'j-x', name: 'Незнакомец' },
+        { id: 'host', name: 'Ведущая' },
+      ],
+      known: [
+        { id: 'j-a', name: 'Маша' },
+        { id: 'j-b', name: 'Маша' },
+      ],
+      serviceIds: ['host'],
+    })).toEqual([
+      'техническое: непонятная дорожка Незнакомец (j-x), не сопоставлена с игроком',
+      'техническое: у Маша 2 живых дорожек: j-a, j-b',
+      'техническое: у Маша нет ни одной живой дорожки',
+    ])
   })
 })
 
