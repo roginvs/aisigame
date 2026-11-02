@@ -58,15 +58,18 @@ export function focusedModelParticipantId(
   return false
 }
 
-/** Ключ источника → 0/1 и признак fallback (фокус без живой дорожки → слышим всех). */
+/**
+ * Ключ источника → 0/1.
+ * `fallback` — фокус назвал участника, но живой незаглушённой дорожки с этим id нет.
+ * Чужие при этом остаются на 0: открывать всех значило слышать не того игрока.
+ */
 export type ModelHearGains = { gains: Map<string, 0 | 1>; fallback: boolean }
 
 /**
  * Какие источники модель слышит. Чистая функция: фокус — участник, «никто» (false)
- * или все (null). Заглушённые (muted/не live) всегда 0. Если фокус указывает на
- * участника без живой незаглушённой дорожки (устаревший id, другая вкладка,
- * дорожка ушла к другому владельцу) — открываем всех живых: лучше лишний шум,
- * чем модель, которая не слышит отвечающего.
+ * или все (null). Заглушённые (muted/не live) всегда 0. Конкретный id — только он,
+ * даже если его дорожки нет (устаревший id, mute, смена владельца): чужой микрофон
+ * не подменяет отвечающего. Нет id (`null`) — по-прежнему все живые.
  */
 export function modelHearGains(input: {
   remotes: Array<{ key: string; participantId: string; audible: boolean }>
@@ -86,7 +89,7 @@ export function modelHearGains(input: {
   else if (all.some((item) => item.audible && item.participantId === focus)) pick = (item) => item.participantId === focus
   else {
     fallback = true
-    pick = () => true
+    pick = () => false
   }
   for (const item of all) gains.set(item.key, item.audible && pick(item) ? 1 : 0)
   return { gains, fallback }

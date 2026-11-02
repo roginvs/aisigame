@@ -117,12 +117,44 @@ describe('modelHearGains', () => {
     expect(levels(false)).toEqual({ r1: 0, r2: 0, r3: 0, [LOCAL_KEY]: 0 })
   })
 
-  it('фокус без живой незаглушённой дорожки — fallback на всех', () => {
+  it('фокус без живой дорожки не открывает остальных: отвечает не тот, кого слышно', () => {
     const muted = modelHearGains({ remotes, local, focus: 'c' })
     expect(muted.fallback).toBe(true)
-    expect(Object.fromEntries(muted.gains)).toEqual({ r1: 1, r2: 1, r3: 0, [LOCAL_KEY]: 1 })
-    expect(modelHearGains({ remotes, local, focus: 'gone' }).fallback).toBe(true)
+    expect(Object.fromEntries(muted.gains)).toEqual({ r1: 0, r2: 0, r3: 0, [LOCAL_KEY]: 0 })
+    const gone = modelHearGains({ remotes, local, focus: 'gone' })
+    expect(gone.fallback).toBe(true)
+    expect(Object.fromEntries(gone.gains)).toEqual({ r1: 0, r2: 0, r3: 0, [LOCAL_KEY]: 0 })
     expect(modelHearGains({ remotes, local, focus: 'a' }).fallback).toBe(false)
+  })
+
+  it('два игрока говорят, отвечает А — в модель идёт только А, даже если дорожка А пропала', () => {
+    const onlyB = [
+      { key: 'rB', participantId: 'b', audible: true },
+      { key: 'rA', participantId: 'a', audible: false },
+    ]
+    const focus = focusedModelParticipantId('answering.waiting', 'b', 'a', true)
+    const { gains, fallback } = modelHearGains({
+      remotes: onlyB,
+      local: { participantId: 'master', audible: true },
+      focus,
+    })
+    expect(focus).toBe('a')
+    expect(fallback).toBe(true)
+    expect(gains.get('rA')).toBe(0)
+    expect(gains.get('rB')).toBe(0)
+    expect(gains.get(LOCAL_KEY)).toBe(0)
+    const both = modelHearGains({
+      remotes: [
+        { key: 'rB', participantId: 'b', audible: true },
+        { key: 'rA', participantId: 'a', audible: true },
+      ],
+      local: { participantId: 'master', audible: true },
+      focus,
+    })
+    expect(both.fallback).toBe(false)
+    expect(both.gains.get('rA')).toBe(1)
+    expect(both.gains.get('rB')).toBe(0)
+    expect(both.gains.get(LOCAL_KEY)).toBe(0)
   })
 
   it('фазы: ответ слышит только отвечающего, «Меньше слышать» глушит вне хода', () => {
@@ -201,13 +233,13 @@ describe('createMicMixer', () => {
     mixer.dispose()
   })
 
-  it('muted — гейн 0 без пересборки; фокус на заглушённом — fallback', () => {
+  it('muted — гейн 0 без пересборки; фокус на заглушённом не открывает другого', () => {
     const mixer = createMicMixer()
     const a = new FakeTrack('audio', true, 'live', 'a')
     const b = new FakeTrack('audio', true, 'live', 'b')
     const result = mixer.update({ remotes: [remote('t1', 'pa', a), remote('t2', 'pb', b, true)], local: noLocal, focus: 'pb' })
     expect(result.fallback).toBe(true)
-    expect(sourceGains().map((g) => g.gain.value)).toEqual([1, 0])
+    expect(sourceGains().map((g) => g.gain.value)).toEqual([0, 0])
     mixer.update({ remotes: [remote('t1', 'pa', a), remote('t2', 'pb', b)], local: noLocal, focus: 'pb' })
     expect(sourceGains().map((g) => g.gain.value)).toEqual([0, 1])
     expect(ctx.createMediaStreamSource).toHaveBeenCalledTimes(2)

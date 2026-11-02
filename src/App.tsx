@@ -155,6 +155,7 @@ export default function App() {
     inviteParams ? 'pending' : 'declined',
   )
   const [conferenceRole, setConferenceRole] = useState<'master' | 'joiner' | null>(null)
+  const conferenceRoleRef = useRef(conferenceRole)
   const [conferenceRoomId, setConferenceRoomId] = useState<string | null>(null)
   const [conferenceLobby, setConferenceLobby] = useState(false)
   /** Мастер: вне выбора/ответа модель глуха; на ходе — только этот игрок. В снимке партии. */
@@ -180,6 +181,9 @@ export default function App() {
     hearTurnOnlyRef.current = hearTurnOnly
     masterSessionRef.current?.setHearTurnOnly(hearTurnOnly)
   }, [hearTurnOnly])
+  useEffect(() => {
+    conferenceRoleRef.current = conferenceRole
+  }, [conferenceRole])
   const [masterRoster, setMasterRoster] = useState<RosterEntry[]>([])
   const [masterRosterAll, setMasterRosterAll] = useState<RosterEntry[]>([])
   const [masterHistory, setMasterHistory] = useState<ConferenceMessageRing>(() => readMessageRing(readSavedGame()) ?? emptyMessageRing())
@@ -309,7 +313,35 @@ export default function App() {
     }
   }, [packId])
 
+  const syncModelHearRef = useRef<() => void>(() => {})
+
   useEffect(() => {
+    syncModelHearRef.current = () => {
+      if (conferenceRoleRef.current !== 'master') return
+      const handle = conferenceHandleRef.current
+      if (!handle) return
+      const live = actor.getSnapshot()
+      const livePath = statePath(live.value)
+      const ctx = live.context
+      const pairs = masterSnapshotRef.current?.jitsiIds
+      const jitsiOf = (clientId: string | null | undefined) => (clientId ? jitsiIdOfClient(pairs, clientId) : null)
+      const answererNow = ctx.players.find((player) => player.id === ctx.activePlayerId)
+      const chooserNow = ctx.players.find((player) => player.id === ctx.chooserId)
+      const listener = specialListenerId(livePath, ctx)
+      const bettorSeat = listener ?? ctx.finalists[ctx.finalCursor]
+      const bettorNow = ctx.players.find((player) => player.id === bettorSeat)
+      // До setMicEnabled контроллера: иначе на время кадра модель ещё слышит прошлый ход.
+      handle.setModelHearOnly(focusedModelParticipantId(
+        livePath,
+        jitsiOf(chooserNow?.clientId),
+        jitsiOf(answererNow?.clientId),
+        hearTurnOnlyRef.current,
+        jitsiOf(bettorNow?.clientId),
+      ))
+    }
+    const hearSub = actor.subscribe(() => {
+      syncModelHearRef.current()
+    })
     const client = createVoice(modelId)
     voiceClientRef.current = client
     if (client instanceof MockRealtimeClient) {
@@ -346,6 +378,7 @@ export default function App() {
       },
     })
     return () => {
+      hearSub.unsubscribe()
       delete window.__aisigame
       stop()
     }
@@ -402,12 +435,8 @@ export default function App() {
   }, [conferenceTiles])
 
   useEffect(() => {
-    if (conferenceRole !== 'master') return
-    const handle = conferenceHandleRef.current
-    if (!handle) return
-    handle.setModelHearOnly(
-      focusedModelParticipantId(path, chooserParticipantId, answererParticipantId, hearTurnOnly, bettorParticipantId),
-    )
+    // Пары Jitsi и галка приходят без события машины — подписка на актор их не видит.
+    syncModelHearRef.current()
   }, [answererParticipantId, bettorParticipantId, chooserParticipantId, conferenceRole, hearTurnOnly, path])
 
   useEffect(() => {

@@ -102,12 +102,13 @@ describe('фокус модели на отвечающем по id — два �
     expect(focusedModelParticipantId('auction.bidding', null, null, false, jitsiIdOfClient(pairs, 'c1'))).toBe('j-vasya-1')
   })
 
-  it('устаревший id отвечающего (переподключился, снимок ещё старый) — fallback: слышим всех, а не никого', () => {
+  it('устаревший id отвечающего не открывает второго игрока', () => {
     const focus = focusedModelParticipantId('answering.waiting', null, 'j-vasya-1-old')
-    const { gains, fallback } = modelHearGains({ remotes, local: { participantId: 'jm', audible: false }, focus })
+    const { gains, fallback } = modelHearGains({ remotes, local: { participantId: 'jm', audible: true }, focus })
     expect(fallback).toBe(true)
-    expect(gains.get('t1')).toBe(1)
-    expect(gains.get('t2')).toBe(1)
+    expect(gains.get('t1')).toBe(0)
+    expect(gains.get('t2')).toBe(0)
+    expect(gains.get('local')).toBe(0)
   })
 
   it('игрок по имени «Ведущая» попадает в микс и в фокус: его id не служебный', () => {
