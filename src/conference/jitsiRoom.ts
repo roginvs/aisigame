@@ -22,7 +22,7 @@ import { createMicMixer, type MicMixer, type MixerRemote } from './audioMix.ts'
 import { cameraFacing, isMobileCameraDevice, nextCameraDeviceId, shouldMirrorVideo, switchFacingCamera, type CameraFacing } from './camera.ts'
 import { createSpeakerActivity } from './speakerActivity.ts'
 import { conferenceAudioStream, createConferenceAudioOutput } from './conferenceAudio.ts'
-import { compressMic, compressMicEligible, monitorMicLevel, type MicCompression, type MicLevelMonitor } from './micCompression.ts'
+import { compressMic, compressMicEligible, monitorMicLevel, playerMicConstraints, shouldCompressPlayerMic, type MicCompression, type MicLevelMonitor } from './micCompression.ts'
 import { createSpeechLevels } from './speechLevel.ts'
 import { noteTileLevel, resetTileLevels } from './tileLevels.ts'
 import { PACK_CHANNEL_HIGH_WATER_BYTES, PACK_CHANNEL_LOW_WATER_BYTES } from './chunks.ts'
@@ -58,7 +58,12 @@ type JitsiMeetJS = {
     }
   }
   JitsiConnection: new (appId: string | null, token: string | null, options: unknown) => JitsiConnection
-  createLocalTracks: (options: { devices: string[]; cameraDeviceId?: string; facingMode?: 'user' | 'environment' }) => Promise<JitsiTrack[]>
+  createLocalTracks: (options: {
+    devices: string[]
+    cameraDeviceId?: string
+    facingMode?: 'user' | 'environment'
+    constraints?: { audio?: MediaTrackConstraints }
+  }) => Promise<JitsiTrack[]>
   createLocalTracksFromMediaStreams: (streams: { stream: MediaStream; videoType?: string; mediaType?: string }[]) => Promise<JitsiTrack[]>
 }
 
@@ -458,6 +463,8 @@ export async function connectJitsiConference(input: {
   let ownLevelMonitor: MicLevelMonitor | null = null
   /** Пользователь хочет микрофон включённым — даже если дорожка оборвалась на телефоне. */
   let wantMicLive = false
+  /** «ШК». Пока выкл — сырой микрофон без шумодава и компрессора. */
+  let playerMicProcess = false
   let recoveringMic = false
   let localMicEndedUnsub: (() => void) | null = null
   let cameraOn = false
@@ -922,7 +929,10 @@ export async function connectJitsiConference(input: {
   }
 
   async function publishFreshLocalMic(): Promise<void> {
-    const tracks = await JitsiMeetJS.createLocalTracks({ devices: ['audio'] })
+    const tracks = await JitsiMeetJS.createLocalTracks({
+      devices: ['audio'],
+      constraints: { audio: playerMicConstraints(playerMicProcess) },
+    })
     const next = tracks[0] ?? null
     if (!next) throw new Error('Микрофон недоступен')
     for (const extra of tracks.slice(1)) extra.dispose()
@@ -950,11 +960,13 @@ export async function connectJitsiConference(input: {
    * Компрессор опубликованного микрофона: сырую дорожку оставляем без обработки
    * (микс модели, уровни), в комнату уходит сжатая копия. Не получилось — сырая, как раньше.
    */
-  async function publishProcessedMic(raw: JitsiTrack): Promise<JitsiTrack> {
-    micCompress?.stop()
-    micCompressTrack = null
+  async function publishProcessedMic(raw: JitsiTrack, keepPrevious = false): Promise<JitsiTrack> {
+    if (!keepPrevious) {
+      micCompress?.stop()
+      micCompressTrack = null
+    }
     const browserTrack = mediaStreamTrackFromJitsi(raw)
-    if (!browserTrack || micTrackIsDead(browserTrack) || !compressMicEligible()) return raw
+    if (!browserTrack || micTrackIsDead(browserTrack) || !shouldCompressPlayerMic(playerMicProcess, compressMicEligible())) return raw
     const handled = compressMic(browserTrack)
     if (!handled) return raw
     browserTrack.addEventListener?.('ended', () => {
@@ -983,6 +995,63 @@ export async function connectJitsiConference(input: {
       pushTrace('note', `Компрессор микрофона не подключён: ${error instanceof Error ? error.message : String(error)}`)
       return raw
     }
+  }
+
+  /** Смена «ШК» на лету: новая цепочка микрофона через replaceTrack, комната остаётся. */
+  async function retargetMicChain(): Promise<void> {
+    const previousPublished = micCompressTrack ?? localAudio
+    const previousRaw = localAudio
+    const previousCompress = micCompress
+    if (!previousRaw) return
+    const tracks = await JitsiMeetJS.createLocalTracks({
+      devices: ['audio'],
+      constraints: { audio: playerMicConstraints(playerMicProcess) },
+    })
+    const next = tracks[0] ?? null
+    if (!next) return
+    for (const extra of tracks.slice(1)) extra.dispose()
+    const published = await publishProcessedMic(next, true)
+    try {
+      if (previousPublished && previousPublished !== published) await conference.replaceTrack(previousPublished, published)
+    } catch (error) {
+      if (micCompress !== previousCompress) {
+        micCompress?.stop()
+        micCompress = previousCompress
+        micCompressTrack = previousPublished !== previousRaw ? previousPublished : null
+      }
+      if (published !== next) published.dispose()
+      next.dispose()
+      pushTrace('note', 'Не удалось сменить обработку микрофона', {
+        error: error instanceof Error ? error.message : String(error),
+      })
+      return
+    }
+    if (previousCompress && previousCompress !== micCompress) previousCompress.stop()
+    if (!playerMicProcess) {
+      micCompress?.stop()
+      micCompress = null
+      micCompressTrack = null
+    }
+    if (previousPublished && previousPublished !== published) {
+      try { previousPublished.dispose() } catch { /* дорожка уже снята */ }
+    }
+    if (previousRaw !== next && previousRaw !== published && previousRaw !== previousPublished) {
+      try { previousRaw.dispose() } catch { /* сырой захват уже закрыт */ }
+    }
+    localAudio = next
+    localMicMedia = conferenceAudioStream(published)
+    watchLocalMic(localAudio)
+    attachOwnLevelSource(published === next ? next : null)
+    if (micLive) {
+      await Promise.resolve(published.unmute()).catch(() => undefined)
+      startOwnLevelFeed()
+    } else {
+      await Promise.resolve(localAudio.mute()).catch(() => undefined)
+      if (micCompressTrack && micCompressTrack !== localAudio) await Promise.resolve(micCompressTrack.mute()).catch(() => undefined)
+    }
+    syncModelMixer()
+    emitTiles()
+    pushTrace('note', playerMicProcess ? 'Шумодав и компрессор включены' : 'Шумодав и компрессор выключены')
   }
 
   async function recoverLocalMic(): Promise<void> {
@@ -1202,6 +1271,13 @@ export async function connectJitsiConference(input: {
       syncModelMixer()
       conferenceAudio.resume()
       emitTiles()
+    },
+    async setPlayerMicProcess(on) {
+      if (on === playerMicProcess) return
+      playerMicProcess = on
+      // Микрофон ещё не публиковали — следующий setMicLive возьмёт новый флаг.
+      if (!localAudio) return
+      await retargetMicChain()
     },
     localMicStream: () => localMicMedia,
     modelInputStream: () => {

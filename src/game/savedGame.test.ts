@@ -20,6 +20,7 @@ import {
   sha256Hex,
   type SavedGame,
   hearTurnOnlyOf,
+  micProcessOf,
 } from './savedGame.ts'
 import { demoPack } from './questions.ts'
 
@@ -729,6 +730,39 @@ describe('saved game', () => {
       storage,
     )
     expect(readSavedGame(storage)?.hearTurnOnly).toBe(false)
+  })
+
+  it('«ШК» по умолчанию выкл, явное включение сохраняется и рассылается как поле снимка', () => {
+    expect(micProcessOf(null)).toBe(false)
+    expect(micProcessOf({})).toBe(false)
+    expect(micProcessOf({ micProcess: true })).toBe(true)
+    const storage = memory()
+    persistMatch(
+      {
+        packId: 'demo',
+        packFile: 'demo.siq',
+        path: 'choosing.listening',
+        context: context(),
+        micProcess: true,
+        conference: { mode: 'conference', roomId: 'r1', jitsiUrl: 'https://meet.example/jitsi' },
+      },
+      storage,
+    )
+    expect(readSavedGame(storage)?.micProcess).toBe(true)
+    expect(micProcessOf(readSavedGame(storage))).toBe(true)
+    persistMatch(
+      {
+        packId: 'demo',
+        packFile: 'demo.siq',
+        path: 'choosing.listening',
+        context: context(),
+        micProcess: false,
+        conference: { mode: 'conference', roomId: 'r1', jitsiUrl: 'https://meet.example/jitsi' },
+      },
+      storage,
+    )
+    expect(readSavedGame(storage)?.micProcess).toBe(false)
+    expect(micProcessOf(readSavedGame(storage))).toBe(false)
   })
 
   it('финал: снимок пишется в каждой новой фазе финала и несёт скрытые данные разбора', () => {

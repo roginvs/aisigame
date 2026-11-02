@@ -1,4 +1,5 @@
 import { reopenAudioOutputs } from '../audio/beep.ts'
+import { playerMicConstraints } from './micCompression.ts'
 /** Display name of the model bot in Jitsi; never shown as a video tile. */
 export const HOST_JITSI_NAME = 'Ведущая'
 
@@ -65,6 +66,11 @@ export type ConferenceMedia = {
    * HTML/Jitsi playback для людей не трогает.
    */
   setModelHearOnly: (participantId: string | null | false) => void
+  /**
+   * «ШК»: шумодав захвата и компрессор. Пересобирает только цепочку микрофона,
+   * комнату не переподключает. Пока микрофон не опубликован — запоминает флаг.
+   */
+  setPlayerMicProcess: (on: boolean) => Promise<void>
   /** Отвод выхода микшера модели для индикатора (только Jitsi-мастер). */
   modelMeter?: () => AnalyserNode | null
   /** Есть ли речь людей в комнате (без дорожки «Ведущей»). */
@@ -95,6 +101,7 @@ export type ConferenceHandle = ConferenceMedia & {
 export function createBroadcastMedia(displayName: string): ConferenceMedia & { dispose: () => void } {
   let mic = false
   let camera = false
+  let micProcess = false
   let micStream: MediaStream | null = null
   // Индикатор «что слышит модель» в тестовом режиме: модель берёт сам micStream.
   let meterContext: AudioContext | null = null
@@ -117,7 +124,7 @@ export function createBroadcastMedia(displayName: string): ConferenceMedia & { d
     async setMicLive(live) {
       if (live && !micStream) {
         micStream = await navigator.mediaDevices.getUserMedia({
-          audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true },
+          audio: playerMicConstraints(micProcess),
         })
         reopenAudioOutputs()
       }
@@ -150,6 +157,17 @@ export function createBroadcastMedia(displayName: string): ConferenceMedia & { d
       return meterNode
     },
     setModelHearOnly() {},
+    async setPlayerMicProcess(on) {
+      if (on === micProcess) return
+      micProcess = on
+      if (!mic) return
+      const next = await navigator.mediaDevices.getUserMedia({ audio: playerMicConstraints(on) })
+      const previous = micStream
+      micStream = next
+      previous?.getTracks().forEach((track) => track.stop())
+      reopenAudioOutputs()
+      emit()
+    },
     anyoneSpeaking: () => false,
     localParticipantId: () => 'local',
     serviceIds: () => ({ host: null, sounds: null }),

@@ -184,6 +184,9 @@ export function GameScreen(props: {
     /** Только мастер: галка «Меньше слышать» (вне хода — глухо). */
     hearTurnOnly?: boolean
     onHearTurnOnlyChange?: (value: boolean) => void
+    /** «ШК»: шумодав и компрессор. Мастер переключает, значение уходит всем. */
+    micProcess?: boolean
+    onMicProcessChange?: (value: boolean) => void
     /** Пауза в лобби: у машины контроллера в снимке фаза «lobby», флаг идёт отдельным полем. */
     lobbyPaused?: boolean
   }
@@ -862,6 +865,8 @@ export function GameScreen(props: {
             onAudioJudgmentChange={props.onAudioJudgmentChange}
             hearTurnOnly={conference?.hearTurnOnly}
             onHearTurnOnlyChange={conference?.isMaster ? conference.onHearTurnOnlyChange : undefined}
+            micProcess={conference?.micProcess}
+            onMicProcessChange={conference?.isMaster ? conference.onMicProcessChange : undefined}
           />
           <ConversationChat
             messageRing={conference?.messageRing ?? conference?.remoteSnapshot ?? undefined}

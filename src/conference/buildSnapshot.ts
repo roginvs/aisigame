@@ -50,6 +50,8 @@ export function buildConferenceSnapshot(input: {
   hostEar?: HostEar
   hostLink?: ConferenceSnapshot['hostLink']
   hearTurnOnly?: boolean
+  /** Шумодав и компрессор у игроков. Нет поля — не пишем (у клиента это выкл). */
+  micProcess?: boolean
   /** Пауза в лобби (машина контроллера стоит на паузе до старта партии). */
   lobbyPaused?: boolean
   /** Кто есть кто в Jitsi (ведёт мастер, см. `masterSession.conferenceIds`). */
@@ -156,6 +158,7 @@ export function buildConferenceSnapshot(input: {
     error: input.context.error,
     ...(input.hostLink ? { hostLink: input.hostLink } : {}),
     ...(input.hearTurnOnly !== undefined ? { hearTurnOnly: input.hearTurnOnly } : {}),
+    ...(input.micProcess !== undefined ? { micProcess: input.micProcess } : {}),
     lobbyPaused: input.lobbyPaused === true,
     ...(input.messageRing ?? emptyMessageRing()),
   }

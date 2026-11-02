@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { compressMic, compressMicEligible } from './micCompression.ts'
+import { compressMic, compressMicEligible, playerMicConstraints, shouldCompressPlayerMic } from './micCompression.ts'
 
 afterEach(() => {
   vi.unstubAllGlobals()
@@ -15,6 +15,16 @@ function stubWindow(withNodes: boolean): void {
       }
     : {})
 }
+
+describe('ШК — шумодав и компрессор', () => {
+  it('выкл: без шумодава и без компрессора; вкл: оба', () => {
+    expect(playerMicConstraints(false).noiseSuppression).toBe(false)
+    expect(playerMicConstraints(true).noiseSuppression).toBe(true)
+    expect(shouldCompressPlayerMic(false, true)).toBe(false)
+    expect(shouldCompressPlayerMic(true, false)).toBe(false)
+    expect(shouldCompressPlayerMic(true, true)).toBe(true)
+  })
+})
 
 describe('compressMicEligible — iOS и старые браузеры без обработки', () => {
   it('в обычном браузере с Web Audio — да', () => {

@@ -25,6 +25,24 @@ export type MicLevelMonitor = {
   stop: () => void
 }
 
+/**
+ * Ограничения захвата микрофона игрока.
+ * «ШК» выкл (по умолчанию) — без шумодава браузера. Вкл — шумодав включён; компрессор
+ * собирается отдельно (`compressMic`), только если браузер его тянет.
+ */
+export function playerMicConstraints(process: boolean): MediaTrackConstraints {
+  return {
+    echoCancellation: true,
+    noiseSuppression: process,
+    autoGainControl: true,
+  }
+}
+
+/** Компрессор публикуем только вместе с галкой «ШК» и только где граф живой. */
+export function shouldCompressPlayerMic(process: boolean, eligible: boolean): boolean {
+  return process && eligible
+}
+
 /** iOS/iPadOS нестабильно держит живой вход Web Audio при активной телефонии — там без компрессора. */
 export function compressMicEligible(): boolean {
   if (typeof window === 'undefined') return false

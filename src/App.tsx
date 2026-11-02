@@ -52,6 +52,7 @@ import {
   sha256Hex,
   type SavedGame,
   hearTurnOnlyOf,
+  micProcessOf,
 } from './game/savedGame.ts'
 import { loadSiq, revokePackMedia } from './game/siq.ts'
 import { preferredPackId, readStartPrefs, writeStartPrefs } from './game/startPrefs.ts'
@@ -161,6 +162,8 @@ export default function App() {
   /** Мастер: вне выбора/ответа модель глуха; на ходе — только этот игрок. В снимке партии. */
   const [hearTurnOnly, setHearTurnOnly] = useState(() => hearTurnOnlyOf(readSavedGame()))
   const hearTurnOnlyRef = useRef(hearTurnOnly)
+  const [micProcess, setMicProcess] = useState(() => micProcessOf(readSavedGame()))
+  const micProcessRef = useRef(micProcess)
   /** Последний разосланный мастером снимок: экран мастера рисуется из него, как у гостей. */
   const [masterSnapshot, setMasterSnapshot] = useState<ConferenceSnapshot | null>(null)
   const masterSnapshotRef = useRef<ConferenceSnapshot | null>(null)
@@ -181,6 +184,11 @@ export default function App() {
     hearTurnOnlyRef.current = hearTurnOnly
     masterSessionRef.current?.setHearTurnOnly(hearTurnOnly)
   }, [hearTurnOnly])
+  useEffect(() => {
+    micProcessRef.current = micProcess
+    if (conferenceRole !== 'master') return
+    masterSessionRef.current?.setMicProcess(micProcess)
+  }, [conferenceRole, micProcess])
   useEffect(() => {
     conferenceRoleRef.current = conferenceRole
   }, [conferenceRole])
@@ -223,6 +231,11 @@ export default function App() {
   const conferenceLobbyRef = useRef(false)
   const transportDisposeRef = useRef<(() => void) | null>(null)
   const conferenceHandleRef = useRef<ConferenceHandle | null>(null)
+  useEffect(() => {
+    const on = conferenceRole === 'master' ? micProcess : joinerSnapshot?.micProcess === true
+    if (conferenceRole === null) return
+    void conferenceHandleRef.current?.setPlayerMicProcess(on)
+  }, [conferenceRole, joinerSnapshot?.micProcess, micProcess])
   const tilesUnsubRef = useRef<(() => void) | null>(null)
   const hostSpeakingUnsubRef = useRef<(() => void) | null>(null)
   const speechActivityUnsubRef = useRef<(() => void) | null>(null)
@@ -514,6 +527,7 @@ export default function App() {
         path,
         context: snapshot.context,
         hearTurnOnly,
+        micProcess,
         conference:
           conferenceRole === 'master' && conferenceRoomId
             ? {
@@ -540,6 +554,7 @@ export default function App() {
     jitsiUrl,
     masterHistory,
     hearTurnOnly,
+    micProcess,
   ])
 
   useEffect(() => {
@@ -997,6 +1012,7 @@ export default function App() {
       handle.subscribeServiceIds(() => masterSessionRef.current?.refreshConferenceIds())
       masterSessionRef.current = session
       session.setHearTurnOnly(hearTurnOnlyRef.current)
+      session.setMicProcess(micProcessRef.current)
       const initialRoster = session.rosterList()
       setMasterRoster(initialRoster)
       setMasterRosterAll(session.rosterAll())
@@ -1014,6 +1030,7 @@ export default function App() {
             roomId,
             messageRing: masterHistoryRef.current,
             hearTurnOnly,
+            micProcess: micProcessRef.current,
           }),
         )
       }
@@ -1140,6 +1157,7 @@ export default function App() {
   ): Promise<void> {
     resumeConferenceOptions.current = conference ?? null
     setHearTurnOnly(hearTurnOnlyOf(saved))
+    setMicProcess(micProcessOf(saved))
     if (readMatchMode(saved) === 'conference' && saved.packHash) {
       const cached = await getPack(saved.packHash)
       if (cached) {
@@ -1592,6 +1610,8 @@ export default function App() {
               // Переключатель мастера — его собственный; гостю то же значение приходит снимком.
               hearTurnOnly: conferenceRole === 'master' ? hearTurnOnly : joinerSnapshot?.hearTurnOnly,
               onHearTurnOnlyChange: conferenceRole === 'master' ? setHearTurnOnly : undefined,
+              micProcess: conferenceRole === 'master' ? micProcess : joinerSnapshot?.micProcess === true,
+              onMicProcessChange: conferenceRole === 'master' ? setMicProcess : undefined,
               // Пауза в лобби: у мастера — состояние его машины, у гостя — флаг из снимка.
               lobbyPaused:
                 conferenceRole === 'master'

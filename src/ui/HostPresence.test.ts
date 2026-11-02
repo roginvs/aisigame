@@ -183,3 +183,16 @@ it('подписи переключателей — ОПА и МС, полные
   expect(html).toContain('title="ОПА — оценивать по аудио: ')
   expect(html).toContain('title="МС — меньше слышать: ')
 })
+
+it('ШК — шумодав и компрессор, подпись рядом с остальными', () => {
+  const html = renderToStaticMarkup(createElement(HostPresence, {
+    path: 'listening',
+    link: { host: 'connected', mic: 'live' } as never,
+    status: 'Слушаю',
+    micProcess: false,
+    onMicProcessChange: () => {},
+  }))
+  expect(html).toContain('>ШК</span>')
+  expect(html).toContain('aria-label="Шумодав и компрессор у игроков"')
+  expect(html).toContain('шумодав и компрессор у игроков')
+})

@@ -98,6 +98,8 @@ export class MasterSession {
   private verified = new Set<string>()
   private gameStarted = false
   private hearTurnOnly = false
+  /** «ШК»: по умолчанию выкл, пока мастер не пришлёт явное значение. */
+  private micProcess = false
   private onSnapshotCb?: (snapshot: ConferenceSnapshot) => void
   private conferenceIdsOf: () => MasterJitsiIds
   private loopback: LoopbackStateReceiver | null = null
@@ -702,6 +704,7 @@ export class MasterSession {
       hostEar: this.publicEar(phase),
       hostLink: this.gameStarted ? this.publicLink() : undefined,
       hearTurnOnly: this.hearTurnOnly,
+      micProcess: this.micProcess,
       lobbyPaused: !this.gameStarted && machinePath === 'paused',
       timerRemainingMs: this.gameStarted ? timerRemainingMs(context, now) : null,
       falseStartIds: this.gameStarted
@@ -716,6 +719,13 @@ export class MasterSession {
   setHearTurnOnly(value: boolean): void {
     if (this.hearTurnOnly === value) return
     this.hearTurnOnly = value
+    if (this.statePublisher) this.broadcastCurrentSnapshot()
+  }
+
+  /** «ШК» мастера: сразу в снимок, каждый клиент пересобирает свой микрофон. */
+  setMicProcess(value: boolean): void {
+    if (this.micProcess === value) return
+    this.micProcess = value
     if (this.statePublisher) this.broadcastCurrentSnapshot()
   }
 

@@ -41,6 +41,8 @@ export type SavedGame = SavedMatch & {
   chat?: { name: string; text: string; at?: string }[]
   /** Мастер: галка «Меньше слышать». Хранится явно true/false; без поля — по умолчанию вкл. (`hearTurnOnlyOf`). */
   hearTurnOnly?: boolean
+  /** Галка «ШК». Хранится явно true/false; без поля — выкл (`micProcessOf`). */
+  micProcess?: boolean
 } & Partial<ConferenceMessageRing>
 
 export type PersistMatchConference = {
@@ -51,6 +53,7 @@ export type PersistMatchConference = {
   roomId?: string
   chat?: { name: string; text: string; at?: string }[]
   hearTurnOnly?: boolean
+  micProcess?: boolean
 }
 
 export function persistConferenceLobby(
@@ -65,6 +68,7 @@ export function persistConferenceLobby(
     roomId: string
     chat?: { name: string; text: string; at?: string }[]
     hearTurnOnly?: boolean
+    micProcess?: boolean
   },
   storage: Storage = localStorage,
 ): SavedGame | null {
@@ -81,6 +85,7 @@ export function persistConferenceLobby(
     ...input.messageRing,
     chat: input.chat,
     ...(typeof input.hearTurnOnly === 'boolean' ? { hearTurnOnly: input.hearTurnOnly } : {}),
+    ...(typeof input.micProcess === 'boolean' ? { micProcess: input.micProcess } : {}),
     players: [input.master],
     roundIndex: input.pack.rounds[0]?.index ?? 0,
     playedIds: [],
@@ -322,12 +327,14 @@ export function persistMatch(
     context: GameContext
     conference?: PersistMatchConference
     hearTurnOnly?: boolean
+    micProcess?: boolean
   },
   storage: Storage = localStorage,
 ): SavedGame | null {
   if (input.path === 'startMenu') {
     // Лобби конференции: фаза машины ещё startMenu, но снимок уже есть — обновить галку.
-    return patchHearTurnOnly(input.hearTurnOnly ?? input.conference?.hearTurnOnly, storage)
+    patchHearTurnOnly(input.hearTurnOnly ?? input.conference?.hearTurnOnly, storage)
+    return patchMicProcess(input.micProcess ?? input.conference?.micProcess, storage)
   }
   const phase = phaseForSave(input.path, input.context.resumePath)
   if (!phase) return readSavedGame(storage)
@@ -340,6 +347,7 @@ export function persistMatch(
       : '')
   const conference = conferenceForSave(input.conference, previous)
   const hearTurnOnly = resolveHearTurnOnly(input.hearTurnOnly ?? input.conference?.hearTurnOnly, previous?.hearTurnOnly)
+  const micProcess = resolveHearTurnOnly(input.micProcess ?? input.conference?.micProcess, previous?.micProcess)
   const game = sanitize({
     version: savedGameVersion,
     packId: input.packId,
@@ -349,6 +357,7 @@ export function persistMatch(
     ...matchFromContext(input.context, phase),
     ...conference,
     ...(typeof hearTurnOnly === 'boolean' ? { hearTurnOnly } : {}),
+    ...(typeof micProcess === 'boolean' ? { micProcess } : {}),
   })
   if (!game) return readSavedGame(storage)
   safeSetGame(storage, game)
@@ -498,11 +507,24 @@ export function hearTurnOnlyOf(saved: Pick<SavedGame, 'hearTurnOnly'> | null | u
   return saved?.hearTurnOnly ?? true
 }
 
+/** «ШК» по умолчанию выключено; явное сохранённое включение уважаем. */
+export function micProcessOf(saved: Pick<SavedGame, 'micProcess'> | null | undefined): boolean {
+  return saved?.micProcess === true
+}
+
 function patchHearTurnOnly(input: boolean | undefined, storage: Storage): SavedGame | null {
+  return patchSavedFlag('hearTurnOnly', input, storage)
+}
+
+function patchMicProcess(input: boolean | undefined, storage: Storage): SavedGame | null {
+  return patchSavedFlag('micProcess', input, storage)
+}
+
+function patchSavedFlag(key: 'hearTurnOnly' | 'micProcess', input: boolean | undefined, storage: Storage): SavedGame | null {
   const previous = readSavedGame(storage)
   if (!previous || input === undefined) return previous
-  if (previous.hearTurnOnly === input) return previous
-  const raw = { ...previous, hearTurnOnly: input } as SavedGame
+  if (previous[key] === input) return previous
+  const raw = { ...previous, [key]: input } as SavedGame
   const game = sanitize(raw)
   if (!game) return previous
   safeSetGame(storage, game)
@@ -710,8 +732,8 @@ function normalizePlayers(value: unknown): Player[] | null {
 
 function normalizeConference(
   record: Record<string, unknown>,
-): Pick<SavedGame, 'mode' | 'conferenceLobby' | 'jitsiUrl' | 'roomId' | 'hearTurnOnly'> & Partial<ConferenceMessageRing> {
-  const out: Pick<SavedGame, 'mode' | 'conferenceLobby' | 'jitsiUrl' | 'roomId' | 'hearTurnOnly'> & Partial<ConferenceMessageRing> = {}
+): Pick<SavedGame, 'mode' | 'conferenceLobby' | 'jitsiUrl' | 'roomId' | 'hearTurnOnly' | 'micProcess'> & Partial<ConferenceMessageRing> {
+  const out: Pick<SavedGame, 'mode' | 'conferenceLobby' | 'jitsiUrl' | 'roomId' | 'hearTurnOnly' | 'micProcess'> & Partial<ConferenceMessageRing> = {}
   if (record.mode === 'conference') out.mode = 'conference'
   else if (record.mode === 'table') out.mode = 'table'
   if (record.conferenceLobby === true) out.conferenceLobby = true
@@ -720,6 +742,7 @@ function normalizeConference(
   const chat = normalizeChat(record.chat)
   if (out.mode === 'conference') Object.assign(out, readMessageRing(record) ?? messageRingFromLegacyChat(chat ?? []))
   if (typeof record.hearTurnOnly === 'boolean') out.hearTurnOnly = record.hearTurnOnly
+  if (typeof record.micProcess === 'boolean') out.micProcess = record.micProcess
   return out
 }
 

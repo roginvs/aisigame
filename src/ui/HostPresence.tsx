@@ -34,6 +34,9 @@ export function HostPresence(props: {
   onAudioJudgmentChange?: (value: boolean) => void
   hearTurnOnly?: boolean
   onHearTurnOnlyChange?: (value: boolean) => void
+  /** «ШК»: шумодав и компрессор у игроков. По умолчанию выкл. */
+  micProcess?: boolean
+  onMicProcessChange?: (value: boolean) => void
 }) {
   const paused = props.path === 'paused'
   const stopped = props.path === 'stopped'
@@ -62,7 +65,7 @@ export function HostPresence(props: {
     `host-${mood}`,
     stopped ? 'host-stopped' : '',
     props.conferenceSpeaking ? 'speaking' : '',
-    props.onHearTurnOnlyChange || props.onAudioJudgmentChange ? 'host-with-hear-less' : '',
+    props.onHearTurnOnlyChange || props.onAudioJudgmentChange || props.onMicProcessChange ? 'host-with-hear-less' : '',
     props.onHearTurnOnlyChange && props.onAudioJudgmentChange ? 'host-with-two-switches' : '',
   ]
     .filter(Boolean)
@@ -94,7 +97,7 @@ export function HostPresence(props: {
         ))}
         {props.error ? <span className="host-line host-error">{props.error}</span> : null}
       </figcaption>
-      {props.onHearTurnOnlyChange || props.onAudioJudgmentChange ? (
+      {props.onHearTurnOnlyChange || props.onAudioJudgmentChange || props.onMicProcessChange ? (
         <div className="host-switches">
           {props.onAudioJudgmentChange ? (
             <label
@@ -125,6 +128,25 @@ export function HostPresence(props: {
                 aria-checked={Boolean(props.hearTurnOnly)}
                 checked={Boolean(props.hearTurnOnly)}
                 onChange={(event) => props.onHearTurnOnlyChange?.(event.target.checked)}
+              />
+              <span className="host-hear-less-track" aria-hidden="true">
+                <span className="host-hear-less-thumb" />
+              </span>
+            </label>
+          ) : null}
+          {props.onMicProcessChange ? (
+            <label
+              className={['host-hear-less', props.micProcess ? 'is-on' : ''].filter(Boolean).join(' ')}
+              title="ШК — шумодав и компрессор у игроков: Включено — шумодав микрофона и компрессор. Выключено — сырой микрофон"
+            >
+              <span className="host-hear-less-label host-abbr" aria-label="Шумодав и компрессор у игроков">ШК</span>
+              <input
+                type="checkbox"
+                className="host-switch-input"
+                role="switch"
+                aria-checked={Boolean(props.micProcess)}
+                checked={Boolean(props.micProcess)}
+                onChange={(event) => props.onMicProcessChange?.(event.target.checked)}
               />
               <span className="host-hear-less-track" aria-hidden="true">
                 <span className="host-hear-less-thumb" />

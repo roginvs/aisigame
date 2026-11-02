@@ -30,6 +30,7 @@ export async function createConferenceTransport(input: {
       localMicStream: media.localMicStream,
       modelInputStream: media.modelInputStream,
       setModelHearOnly: media.setModelHearOnly,
+      setPlayerMicProcess: media.setPlayerMicProcess,
       modelMeter: media.modelMeter,
       anyoneSpeaking: media.anyoneSpeaking,
       localParticipantId: media.localParticipantId,
