@@ -255,6 +255,47 @@ describe('привязка игрока к дорожкам', () => {
     expect(step('a', 'ja')).toEqual(['ja'])
     expect(step('b', 'jb')).toEqual(['jb'])
   })
+
+  it('переответ того же игрока сохраняет его живые дорожки и не открывает чужую', () => {
+    let binding: { clientId: string | null; ids: readonly string[] } = { clientId: null, ids: [] }
+    const step = (endpoints: readonly string[], stillLive: readonly string[]) => {
+      binding = nextHearBinding(binding, 'c1', (previousBoundIds) => hearParticipantIds({
+        clientId: 'c1',
+        liveEndpointIds: endpoints,
+        pairs: [...endpoints.map((id) => [id, 'c1'] as const), ['j-other', 'c2'] as const],
+        selfParticipantId: null,
+        liveOwnerIds: [...endpoints, ...stillLive, 'j-other'],
+        previousBoundIds,
+      }))
+      return [...binding.ids].sort()
+    }
+    expect(step(['j-old'], [])).toEqual(['j-old'])
+    expect(step(['j-new'], ['j-old'])).toEqual(['j-new', 'j-old'])
+  })
+
+  it('смена id мастера-отвечающего: новый локальный слышен, ставший ведущей — нет', () => {
+    const ids = hearParticipantIds({
+      clientId: 'master',
+      liveEndpointIds: [],
+      pairs: [['j-other', 'c2']],
+      selfParticipantId: 'local-new',
+      liveOwnerIds: ['local-new', 'local-old', 'j-other'],
+      previousBoundIds: ['local-old'],
+      ignoreIds: ['local-old'],
+    })
+    expect(ids).toEqual(['local-new'])
+    const { gains } = modelHearGains({
+      remotes: [
+        { key: 'host', participantId: 'local-old', audible: true },
+        { key: 'other', participantId: 'j-other', audible: true },
+      ],
+      local: { participantId: 'local-new', audible: true },
+      focus: ids,
+    })
+    expect(gains.get(LOCAL_KEY)).toBe(1)
+    expect(gains.get('host')).toBe(0)
+    expect(gains.get('other')).toBe(0)
+  })
 })
 
 describe('строки слуха в техническую колонку', () => {
