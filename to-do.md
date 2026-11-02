@@ -121,3 +121,9 @@
 - Источник: `Countdown` в `src/ui/GameScreen.tsx:930` — setState на каждом requestAnimationFrame, это перерисовка всего таймера 60 раз в секунду. Предложение: полоску вести CSS-анимацией (transform: scaleX, длительность = остаток), а секунды обновлять setInterval раз в 250 мс. Файл у облачного агента, сам не трогал. После фикса добавить пороги в cpu-round (raf ≤ 20, commits ≤ 40).
 - audioIn = 0: сырой usage из response.done (живой прогон) — input_token_details.audio_tokens = 0, text_tokens 637. usage.ts разбирает верно, это ответ API. Значит, оценка по item_reference в OpenAI учитывается как текст (или звук не попадает в оценку — проверить отдельно, что модель судит звук, а не расшифровку).
 - Не учитывается: расход транскрипции (`usage` в conversation.item.input_audio_transcription.completed), client.ts:1291 его не передаёт в usage.ts. Нужны ставки модели транскрипции в config.ts.
+
+## live:turn — полный ход через контроллер и Jitsi (2 ноября 2026)
+- Стенд `e2e/live/turn.live.play.ts` (`npm run live:turn`, LIVE_SCENARIO=answer|silent, LIVE_MODEL=mock для отладки, LIVE_JITSI=адрес). Мастер + Анна + Борис в своих контекстах, микрофоны подменены управляемым WebAudio (`window.__say`), фикстуры turn-a.wav («Цезарь. Нет… Август»), turn-b.wav («Нерон!»). Пишет лог trace мастера, чат, счёт и usage.
+- Не прогнан: с бокса Jitsi недоступен. fallout-nevada.ru резолвится в 198.18.0.1 (прокси бокса), HTTP 500, «Не удалось загрузить lib-jitsi-meet». meet.jit.si: lib грузится, но «Соединение Jitsi не удалось» (нужна авторизация). Docker на боксе нет — свой Jitsi не поднять.
+- Варианты: открыть боксу доступ к fallout-nevada.ru; или транспорт broadcast + подмена handle конференции с настоящим createMicMixer (тест без Jitsi); или прогон с машины пользователя.
+- Шаги после «Начать игру» (выбор ячейки, «Жмите», проверки) ещё не отлажены.

@@ -12,7 +12,8 @@
     "test": "vitest run",
     "look": "playwright test",
     "preview": "vite preview",
-    "live:hear": "AISIGAME_LIVE=1 playwright test e2e/live/hear-answer.live.play.ts"
+    "live:hear": "AISIGAME_LIVE=1 playwright test e2e/live/hear-answer.live.play.ts",
+    "live:turn": "AISIGAME_LIVE=1 playwright test e2e/live/turn.live.play.ts"
   },
   "dependencies": {
     "@xstate/react": "^6.1.0",
