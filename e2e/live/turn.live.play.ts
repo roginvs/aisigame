@@ -38,9 +38,11 @@ const fakeMic = () => {
   }
 }
 
+let shared: import('@playwright/test').BrowserContext | null = null
 async function open(browser: Browser): Promise<Page> {
-  const context = await browser.newContext({ permissions: ['microphone', 'camera'] })
-  const page = await context.newPage()
+  // BroadcastChannel живёт в одном контексте: все вкладки в нём.
+  shared ??= await browser.newContext({ permissions: ['microphone', 'camera'] })
+  const page = await shared.newPage()
   await page.addInitScript(fakeMic)
   return page
 }
@@ -53,7 +55,7 @@ test(`живой ход: ${scenario}`, async ({ browser }) => {
   const log: Array<{ t: number; text: string }> = []
   const t0 = Date.now()
   master.on('console', (m) => { if (m.text().startsWith('[aisigame')) log.push({ t: Date.now() - t0, text: m.text().replace(/sk-[\w-]+/g, 'sk-***') }) })
-  await master.goto('/')
+  await master.goto('/?transport=broadcast&fakeConference=1')
   await master.getByLabel('Модель').selectOption(model)
   if (model !== 'mock') await master.getByLabel('Ключ OpenAI').fill(key)
   await master.getByRole('radio', { name: 'Конференция' }).check()
@@ -65,6 +67,8 @@ test(`живой ход: ${scenario}`, async ({ browser }) => {
   const invite = new URL(await master.getByLabel('Ссылка для игроков').inputValue())
   await master.getByRole('button', { name: 'Закрыть' }).click()
   invite.protocol = 'http:'
+  invite.searchParams.set('transport', 'broadcast')
+  invite.searchParams.set('fakeConference', '1')
   invite.host = new URL(master.url()).host
   const players: Record<'A' | 'B', Page> = { A: await open(browser), B: await open(browser) }
   for (const [name, page] of Object.entries(players)) {
@@ -74,6 +78,7 @@ test(`живой ход: ${scenario}`, async ({ browser }) => {
     await expect(page.getByRole('button', { name: 'Я в игре' })).toBeEnabled({ timeout: 60_000 })
     await page.getByRole('button', { name: 'Я в игре' }).click()
   }
+  await master.evaluate(() => { const f = (window as unknown as { __fakeConf: { addRemote: (n: string) => string } }).__fakeConf; f.addRemote('Анна'); f.addRemote('Борис') })
   await master.getByRole('button', { name: 'Начать игру' }).click()
   const mark = (s: string) => log.push({ t: Date.now() - t0, text: `### ${s}` })
   mark('старт')
@@ -89,12 +94,12 @@ test(`живой ход: ${scenario}`, async ({ browser }) => {
   await buzzA.click()
   mark('кнопка A')
   await master.waitForTimeout(600)
-  const sayB = players.B.evaluate((w) => (window as unknown as { __say: (x: string) => Promise<void> }).__say(w), b)
+  const sayB = master.evaluate(([n, w]) => (window as unknown as { __fakeConf: { say: (n: string, w: string) => Promise<void> } }).__fakeConf.say(n, w), ['Борис', b] as const)
   mark('B говорит')
   if (scenario === 'answer') {
     await master.waitForTimeout(400)
     mark('A говорит')
-    await players.A.evaluate((w) => (window as unknown as { __say: (x: string) => Promise<void> }).__say(w), a)
+    await master.evaluate(([n, w]) => (window as unknown as { __fakeConf: { say: (n: string, w: string) => Promise<void> } }).__fakeConf.say(n, w), ['Анна', a] as const)
     mark('A закончил')
   }
   await sayB
@@ -114,5 +119,6 @@ test(`живой ход: ${scenario}`, async ({ browser }) => {
   console.log('SCORE', scoreBefore, '→', scoreAfter, '| B', scoreB)
   console.log('USAGE', JSON.stringify(usage.totals), 'usd', usage.usd.toFixed(4))
   console.log('LOG', out)
-  for (const p of [master, ...Object.values(players)]) await p.context().close()
+  await shared?.close()
+  shared = null
 })
