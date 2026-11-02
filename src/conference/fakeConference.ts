@@ -24,6 +24,7 @@ export function createFakeConference(roomId: string, displayName: string): Confe
   const transport = new BroadcastChannelTransport(roomId)
   ;(transport as unknown as { senderId: string }).senderId = fakeSenderId(displayName)
   const base = createBroadcastMedia(displayName)
+  const selfId = fakeSenderId(displayName)
   const ctx = new AudioContext()
   const remotes = new Map<string, Remote>()
   const owners = new Set<() => void>()
@@ -37,12 +38,12 @@ export function createFakeConference(roomId: string, displayName: string): Confe
   const bus = createModelStreamSpeech(() => { for (const l of streamStart) l() }, (ms) => { for (const l of streamEnd) l(ms) })
   const sync = () => mixer.update({
     remotes: [...remotes.values()].map((r) => ({ key: r.id, participantId: r.id, stream: r.dest.stream, muted: false })),
-    local: { participantId: 'local', stream: base.localMicStream(), live: base.micLive() },
+    local: { participantId: selfId, stream: base.localMicStream(), live: base.micLive() },
     focus,
   })
   const emitTiles = () => {
     const list: ConferenceTile[] = [
-      { id: 'local', name: displayName, isLocal: true, micLive: base.micLive(), cameraOn: false, speaking: false },
+      { id: selfId, name: displayName, isLocal: true, micLive: base.micLive(), cameraOn: false, speaking: false },
       ...[...remotes.values()].map((r) => ({ id: r.id, name: r.name, isLocal: false, micLive: true, cameraOn: false, speaking: false })),
     ]
     for (const l of tiles) l(list)
@@ -89,8 +90,8 @@ export function createFakeConference(roomId: string, displayName: string): Confe
       pushTrace('note', 'Модель: фокус микшера', { focus: next === null ? 'null' : next === false ? 'false' : String(next) })
       sync()
     },
-    liveAudioOwnerIds: () => ['local', ...remotes.keys()],
-    liveAudioOwners: () => [{ id: 'local', name: '' }, ...[...remotes.values()].map((r) => ({ id: r.id, name: r.name }))],
+    liveAudioOwnerIds: () => [selfId, ...remotes.keys()],
+    liveAudioOwners: () => [{ id: selfId, name: '' }, ...[...remotes.values()].map((r) => ({ id: r.id, name: r.name }))],
     subscribeAudioOwners(h) { owners.add(h); return () => owners.delete(h) },
     focusedTrackMissing() {
       if (focus === null) return false
@@ -99,7 +100,7 @@ export function createFakeConference(roomId: string, displayName: string): Confe
       return ids.length === 0
     },
     anyoneSpeaking: () => mixer.levels().some((l) => l.rms > 0.02),
-    localParticipantId: () => 'local',
+    localParticipantId: () => selfId,
     subscribeTiles(h) { tiles.add(h); emitTiles(); return () => tiles.delete(h) },
     subscribeSpeechActivity(h) { activity.add(h); return () => activity.delete(h) },
     subscribeModelStream(h) { streamEnd.add(h); return () => streamEnd.delete(h) },

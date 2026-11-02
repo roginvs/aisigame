@@ -83,13 +83,14 @@ test(`живой ход: ${scenario}`, async ({ browser }) => {
   const mark = (s: string) => log.push({ t: Date.now() - t0, text: `### ${s}` })
   mark('старт')
   // Кто бы ни выбирал — кликаем ячейку у мастера (выбор не голосом: экономим и не путаем слух).
-  const cell = master.getByRole('button', { name: 'Текст, 100', exact: true })
+  // Выбор кликом у Анны (выбирает она) — голос не тратим.
+  const cell = players.A.getByRole('button', { name: 'Текст, 100', exact: true })
   await expect(cell).toBeEnabled({ timeout: 60_000 })
-  await cell.click().catch(() => undefined)
-  for (const p of Object.values(players)) await p.getByRole('button', { name: 'Текст, 100', exact: true }).click({ timeout: 2000 }).catch(() => undefined)
+  await cell.click()
   mark('выбран вопрос')
   const buzzA = players.A.getByRole('group', { name: /Анна:/ }).getByRole('button', { name: 'Жмите' })
-  await expect(buzzA).toBeEnabled({ timeout: 60_000 })
+  await expect(master.getByRole('status').filter({ hasText: 'Жмите' })).toBeVisible({ timeout: 60_000 })
+  await expect(buzzA).toBeEnabled({ timeout: 10_000 })
   const scoreBefore = await master.locator('[role=group][aria-label^="Анна:"]').first().getAttribute('aria-label')
   await buzzA.click()
   mark('кнопка A')
