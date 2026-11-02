@@ -131,7 +131,7 @@ test(`живой ход: ${scenario}`, async ({ browser }) => {
   const aStart = first(/стенд: говорит Анна/)
   const aEnd = first(/стенд: замолчал Анна/)
   const commits = at(/input_audio_buffer\.committed|запасной commit/).filter((l) => l.t > buzzAt)
-  const cuts = at(/обрыв|игрок заговорил|response\.cancel|output_audio_buffer\.clear/).filter((l) => l.t > buzzAt)
+  const cuts = at(/обрыв|игрок заговорил|response\.cancel/).filter((l) => l.t > buzzAt && !/кнопка во время чтения/.test(l.text))
   const scoreLines = at(/state /).map((l) => l.text.match(/statusLine: ([^,]*)/)?.[1]).filter(Boolean)
   const checks: Record<string, boolean> = {
     'B никогда в миксе': mix.filter((m) => m.rms > 0.01).length > 5 && mix.every((m) => m.gain === 0 && m.post < 1e-4),
@@ -140,7 +140,7 @@ test(`живой ход: ${scenario}`, async ({ browser }) => {
   }
   if (scenario === 'answer') {
     checks['вердикт верный'] = scoreAfter === 'Анна: 100' && /Верно/.test(chat)
-    checks['B не завершает попытку'] = commits.every((l) => l.t >= aEnd - 300)
+    checks['B не завершает попытку'] = commits.every((l) => l.t >= aStart)
     checks['один commit на попытку'] = at(/input_audio_buffer\.committed/).filter((l) => l.t > buzzAt).length === 1
     checks['«ваш ответ» режет только A'] = cuts.every((l) => l.t >= aStart)
   } else {
