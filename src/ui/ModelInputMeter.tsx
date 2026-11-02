@@ -2,7 +2,7 @@ import { useEffect, useRef, useState, type MouseEvent } from 'react'
 import { levelUiSampleMs, meterHitTolerancePx } from '../options.ts'
 import { getLinkStatus, getTrace, pushTrace, subscribeTrace } from '../debug/trace.ts'
 import { createMarkerCollector, hitTest, type MeterHit, meterLegendText, meterMarkerColors, meterMarkerLegend, type MeterMarker } from './meterMarkers.ts'
-import { CLOSED_OVERLAY, INPUT_BAND_H, OUTPUT_WAVE_COLOR, drawMarkers, HEIGHT, inputBandColor, meterLevel, modelInputOpen, waveColor, WIDTH } from './meterDraw.ts'
+import { CLOSED_OVERLAY, INPUT_BAND_H, OUTPUT_WAVE_COLOR, drawMarkers, HEIGHT, inputBandColor, meterFramePlan, meterLevel, modelInputOpen, waveColor, WIDTH } from './meterDraw.ts'
 
 /**
  * Индикатор того, что реально слышит модель: история уровня выхода микшера
@@ -42,6 +42,52 @@ export function ModelInputMeter({ getAnalyser, getLevel, getOutLevel }: { getAna
     const collector = createMarkerCollector()
     let markers: MeterMarker[] = collector.ingest(getTrace())
     const unsubscribe = subscribeTrace(() => { markers = collector.ingest(getTrace()) })
+    const wave = document.createElement('canvas')
+    wave.width = WIDTH
+    wave.height = HEIGHT
+    const waveCtx = wave.getContext('2d')
+    const shifted = document.createElement('canvas')
+    shifted.width = WIDTH
+    shifted.height = HEIGHT
+    const shiftedCtx = shifted.getContext('2d')
+    let painted = false
+    const columnAt = (ctx: CanvasRenderingContext2D, x: number, index: number, live: boolean) => {
+      const value = history[index] ?? 0
+      const isOpen = open[index] === 1
+      const h = Math.max(1, Math.round(value * HEIGHT))
+      ctx.fillStyle = waveColor(live, isOpen)
+      ctx.fillRect(x, HEIGHT - h, 1, h)
+      if (!isOpen && times[index]) {
+        ctx.fillStyle = CLOSED_OVERLAY
+        ctx.fillRect(x, 0, 1, HEIGHT)
+      }
+      const out = outHistory[index] ?? 0
+      const outH = Math.max(0, Math.round(out * HEIGHT * 0.8) - 1)
+      if (outH > 0) {
+        ctx.fillStyle = OUTPUT_WAVE_COLOR
+        ctx.fillRect(x, 0, 1, outH)
+      }
+      ctx.fillStyle = inputBandColor(isOpen)
+      ctx.fillRect(x, HEIGHT - INPUT_BAND_H, 1, INPUT_BAND_H)
+    }
+    const paintWave = (live: boolean, onlyNewest: boolean) => {
+      if (!waveCtx) return
+      if (!onlyNewest) {
+        waveCtx.clearRect(0, 0, WIDTH, HEIGHT)
+        for (let x = 0; x < WIDTH; x += 1) columnAt(waveCtx, x, (head + x) % WIDTH, live)
+        return
+      }
+      if (!shiftedCtx) return
+      shiftedCtx.clearRect(0, 0, WIDTH, HEIGHT)
+      shiftedCtx.drawImage(wave, -1, 0)
+      waveCtx.clearRect(0, 0, WIDTH, HEIGHT)
+      waveCtx.drawImage(shifted, 0, 0)
+      const newest = (head + WIDTH - 1) % WIDTH
+      waveCtx.clearRect(WIDTH - 1, 0, 1, HEIGHT)
+      columnAt(waveCtx, WIDTH - 1, newest, live)
+    }
+    const onVisible = () => { painted = false }
+    document.addEventListener('visibilitychange', onVisible)
     const tick = () => {
       if (stopped) return
       frame = window.setTimeout(tick, levelUiSampleMs)
@@ -60,42 +106,23 @@ export function ModelInputMeter({ getAnalyser, getLevel, getOutLevel }: { getAna
       open[head] = modelInputOpen(getLinkStatus().mic) ? 1 : 0
       outHistory[head] = getOutLevel ? getOutLevel() : 0
       head = (head + 1) % WIDTH
-      if (frozenRef.current) return
-      ctx.clearRect(0, 0, WIDTH, HEIGHT)
+      const plan = meterFramePlan(document.hidden || frozenRef.current, painted)
+      if (plan === 'skip') {
+        painted = false
+        return
+      }
       const live = Boolean(analyser || getLevel)
-      for (let x = 0; x < WIDTH; x += 1) {
-        const i = (head + x) % WIDTH
-        const value = history[i] ?? 0
-        const isOpen = open[i] === 1
-        const h = Math.max(1, Math.round(value * HEIGHT))
-        ctx.fillStyle = waveColor(live, isOpen)
-        ctx.fillRect(x, HEIGHT - h, 1, h)
-        if (!isOpen && times[i]) {
-          ctx.fillStyle = CLOSED_OVERLAY
-          ctx.fillRect(x, 0, 1, HEIGHT)
-        }
-      }
-      // Волна «что говорит модель»: от верхнего края вниз, прозрачно-серая; полосы дорожек рисуются поверх.
-      for (let x = 0; x < WIDTH; x += 1) {
-        const value = outHistory[(head + x) % WIDTH] ?? 0
-        const h = Math.max(1, Math.round(value * HEIGHT * 0.8) - 1)
-        if (h > 0) {
-          ctx.fillStyle = OUTPUT_WAVE_COLOR
-          ctx.fillRect(x, 0, 1, h)
-        }
-      }
-      // Постоянный след «что слышит модель»: поверх вуали, чтобы светлая/серая читались и на закрытых окнах.
-      for (let x = 0; x < WIDTH; x += 1) {
-        const i = (head + x) % WIDTH
-        ctx.fillStyle = inputBandColor(open[i] === 1)
-        ctx.fillRect(x, HEIGHT - INPUT_BAND_H, 1, INPUT_BAND_H)
-      }
+      paintWave(live, plan === 'shift')
+      painted = true
+      ctx.clearRect(0, 0, WIDTH, HEIGHT)
+      ctx.drawImage(wave, 0, 0)
       hitsRef.current = drawMarkers(ctx, markers, times, head)
     }
     frame = window.setTimeout(tick, levelUiSampleMs)
     return () => {
       stopped = true
       unsubscribe()
+      document.removeEventListener('visibilitychange', onVisible)
       window.clearTimeout(frame)
     }
   }, [getAnalyser, getLevel, getOutLevel])

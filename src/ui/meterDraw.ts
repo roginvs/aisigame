@@ -46,6 +46,13 @@ export const LANE_BACKING = 'rgba(10, 12, 20, 0.85)'
 export const WIDTH = METER_WIDTH
 export const HEIGHT = 20
 
+/** Скрытая вкладка не рисует. Первый кадр и возврат на экран — целиком, дальше сдвиг на один столбец. */
+export function meterFramePlan(hidden: boolean, painted: boolean): 'skip' | 'full' | 'shift' {
+  if (hidden) return 'skip'
+  if (!painted) return 'full'
+  return 'shift'
+}
+
 /** Столбец события: первый, чьё время ≥ at; -1 — левее окна, WIDTH — ещё не наступило. */
 function columnAt(at: number, times: Float64Array, head: number): number {
   let seenSample = false

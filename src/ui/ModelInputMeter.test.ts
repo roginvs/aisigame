@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { countLevelSamples, levelUiSampleMs } from '../options.ts'
-import { HEIGHT, INPUT_BAND_H, INPUT_CLOSED_COLOR, INPUT_OPEN_COLOR, inputBandColor, meterLevel, modelInputOpen } from './meterDraw.ts'
+import { HEIGHT, INPUT_BAND_H, INPUT_CLOSED_COLOR, INPUT_OPEN_COLOR, inputBandColor, meterFramePlan, meterLevel, modelInputOpen } from './meterDraw.ts'
 
 describe('уровни UI в ожидании', () => {
   it('кадры 60 Гц дают около 10 замеров в секунду, не по кадру', () => {
@@ -10,6 +10,15 @@ describe('уровни UI в ожидании', () => {
     expect(samples).toBeGreaterThanOrEqual(9)
     expect(samples).toBeLessThanOrEqual(11)
     expect(samples).toBeLessThan(20)
+  })
+})
+
+describe('кадр индикатора модели', () => {
+  it('скрытая вкладка не рисует, видимая сдвигает слепок', () => {
+    expect(meterFramePlan(true, true)).toBe('skip')
+    expect(meterFramePlan(true, false)).toBe('skip')
+    expect(meterFramePlan(false, false)).toBe('full')
+    expect(meterFramePlan(false, true)).toBe('shift')
   })
 })
 
