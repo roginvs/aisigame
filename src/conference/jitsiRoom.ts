@@ -616,11 +616,13 @@ export async function connectJitsiConference(input: {
   const hostSpeakingListeners = new Set<(speaking: boolean) => void>()
   /** Начало реплики по Jitsi — напоминание «ответ без кнопки». Конец для commit сюда не кладём. */
   const speechActivityListeners = new Set<(participantId: string, end?: { durationMs: number }) => void>()
-  /** Конец речи на шине модели: то, что реально ушло в модель. */
+  /** Начало и конец речи на шине модели: то, что реально ушло в модель. */
+  const modelStreamStartListeners = new Set<() => void>()
   const modelStreamListeners = new Set<(durationMs: number) => void>()
-  const modelStream = createModelStreamSpeech((durationMs) => {
-    for (const listener of modelStreamListeners) listener(durationMs)
-  })
+  const modelStream = createModelStreamSpeech(
+    () => { for (const listener of modelStreamStartListeners) listener() },
+    (durationMs) => { for (const listener of modelStreamListeners) listener(durationMs) },
+  )
   let modelStreamTimer: number | null = null
   /** Участники фокуса, у которых Jitsi уже видел речь, а шина модели в этот момент была тихой. */
   const streamQuietFocus = new Set<string>()
@@ -1528,6 +1530,10 @@ export async function connectJitsiConference(input: {
     subscribeModelStream(handler) {
       modelStreamListeners.add(handler)
       return () => modelStreamListeners.delete(handler)
+    },
+    subscribeModelStreamStart(handler) {
+      modelStreamStartListeners.add(handler)
+      return () => modelStreamStartListeners.delete(handler)
     },
     bindVideo(participantId, element) {
       const previous = videoBindings.get(participantId)

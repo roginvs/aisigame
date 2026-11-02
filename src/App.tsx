@@ -25,7 +25,7 @@ import {
   type MatchMode,
 } from './conference/prefs.ts'
 import { contextFromSnapshot } from './conference/snapshotView.ts'
-import { conferenceDisplayName, deviceSpeechPlayerId, rosterSeats } from './conference/seats.ts'
+import { conferenceDisplayName, rosterSeats } from './conference/seats.ts'
 import { jitsiHostFromBase, stripInviteParams } from './conference/stripInvite.ts'
 import { focusedModelParticipantId, hearParticipantIds, hearWatchLines, nextHearBinding, unrecognizedSpeechLine } from './conference/audioMix.ts'
 import { setFocusUnheard } from './game/focusUnheard.ts'
@@ -57,7 +57,7 @@ import {
 } from './game/savedGame.ts'
 import { loadSiq, revokePackMedia } from './game/siq.ts'
 import { preferredPackId, readStartPrefs, writeStartPrefs } from './game/startPrefs.ts'
-import type { GameContext, PlayerId, QuestionPack } from './game/types.ts'
+import type { PlayerId, QuestionPack } from './game/types.ts'
 import type { LinkStatus } from './realtime/client.ts'
 import { MockRealtimeClient } from './realtime/mockClient.ts'
 import {
@@ -864,37 +864,25 @@ export default function App() {
     modelStreamUnsubRef.current?.()
     hearOwnersUnsubRef.current?.()
     hearOwnersUnsubRef.current = handle.subscribeAudioOwners(() => syncModelHearRef.current())
-    modelStreamUnsubRef.current = handle.subscribeModelStream((durationMs) => {
+    const stopModelEnd = handle.subscribeModelStream((durationMs) => {
       controllerActionsRef.current?.commitModelStream(durationMs)
     })
+    const stopModelStart = handle.subscribeModelStreamStart(() => {
+      controllerActionsRef.current?.modelStreamStarted()
+    })
+    modelStreamUnsubRef.current = () => {
+      stopModelEnd()
+      stopModelStart()
+    }
     speechActivityUnsubRef.current = handle.subscribeSpeechActivity((participantId, end) => {
-      // Уровень Jitsi: напоминание про кнопку и обрыв обращения. Запасной commit — только шина модели.
+      // Уровни Jitsi ход не двигают. Нет пары — только строка, без commit и без обрыва ведущей.
       const snapshot = masterSnapshotRef.current
-      const pairs: readonly ConferenceJitsiPair[] = snapshot?.jitsiIds ?? []
-      const found = pairs.find(([jitsiId]) => jitsiId === participantId)
-      const clientId = found ? found[1] : null
-      if (clientId === null) {
-        // Нет пары игрок↔дорожка. Не подставляем активного: чужой уровень закрывал бы его попытку.
-        // Конец эпизода — только строка в технической колонке.
-        if (!snapshot) return
-        if (participantId === snapshot.hostJitsiId || participantId === snapshot.soundsJitsiId) return
-        if (!end) return
-        const owner = handle.liveAudioOwners().find((item) => item.id === participantId)
-        pushSystemLine(unrecognizedSpeechLine(participantId, owner?.name ?? '', end.durationMs))
-        return
-      }
-      const entry = masterSessionRef.current?.rosterList().find((item) => item.clientId === clientId)
-      if (!entry || !snapshot) return
-      const playerId = deviceSpeechPlayerId({
-        seatIds: rosterSeats(entry).flatMap((seat) => (seat.playerId === null ? [] : [seat.playerId])),
-        phase: snapshot.phase,
-        answererId: snapshot.answererId,
-        chooserId: snapshot.chooserId,
-        missedIds: snapshot.missedIds,
-        listenerId: specialListenerId(snapshot.phase, { special: snapshot.special } as GameContext),
-      })
-      if (playerId === null || end) return
-      controllerActionsRef.current?.speechEpisode(playerId)
+      if (!snapshot || !end) return
+      const pairs: readonly ConferenceJitsiPair[] = snapshot.jitsiIds ?? []
+      if (pairs.some(([jitsiId]) => jitsiId === participantId)) return
+      if (participantId === snapshot.hostJitsiId || participantId === snapshot.soundsJitsiId) return
+      const owner = handle.liveAudioOwners().find((item) => item.id === participantId)
+      pushSystemLine(unrecognizedSpeechLine(participantId, owner?.name ?? '', end.durationMs))
     })
   }
 

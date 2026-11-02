@@ -70,8 +70,10 @@ export type GameControllerActions = {
   remindMutedAnswerer: (playerName: string) => void
   /** Речь без кнопки по уровню звука: playerId из дорожки Jitsi. */
   speechWithoutBuzzer: (playerId: number) => void
-  /** Начало реплики по уровню звука (дорожка Jitsi): во время попытки — заговорил отвечающий. */
+  /** Уровни Jitsi: ход не двигают. */
   speechEpisode: (playerId: number | null) => void
+  /** Начало речи на шине модели. */
+  modelStreamStarted: () => void
   /** Запасной commit по id игрока. null и чужой id ход не подставляют. */
   answerSilentCommit: (playerId: number | null, durationMs: number) => void
   /** Конец речи на шине модели: commit хода того, кого ждёт фаза. Уровни Jitsi сюда не входят. */
@@ -2525,25 +2527,22 @@ export function attachController(options: {
     speakWhileListening('noBuzzer', noBuzzerCue(player.name))
   }
 
-  /**
-   * Начало реплики по уровням Jitsi (модельная VAD может её не заметить — живая партия 22.10).
-   * Во время попытки заговорил отвечающий: обрываем обращение ведущей («Вася, отвечайте») и
-   * подсказку про микрофон, как по VAD. Форму машины не трогаем: реплику принимает запасной
-   * commit по концу эпизода или штатная модельная VAD, кто раньше.
-   * Вне попытки — прежний путь уровней: напоминание про кнопку в открытом окне.
-   */
+  /** Уровни Jitsi ход не двигают: ни обрыв ведущей, ни имя на напоминании. */
   function speechEpisode(playerId: number | null): void {
-    if (playerId === null) return
-    const snapshot = actor.getSnapshot()
-    const path = statePath(snapshot.value)
-    if (path !== 'answering.waiting') {
-      speechWithoutBuzzer(playerId)
-      return
-    }
-    const context = snapshot.context
-    if (context.activePlayerId !== playerId) return
-    if (!answerAttemptLive()) return
-    client.interruptSpeech('игрок заговорил на ответе')
+    void playerId
+  }
+
+  /**
+   * Шина модели услышала речь. В ней только отвечающий, поэтому чужой участник сюда не приходит.
+   * Обрываем обращение и открываем слух попытки. Таймер тишины прошлой реплики снимаем.
+   */
+  function modelStreamStarted(): void {
+    const path = statePath(actor.getSnapshot().value)
+    if (!path.startsWith('answering') || !answerAttemptLive()) return
+    window.clearTimeout(answerSilenceTimer)
+    answerSilenceTimer = 0
+    if (path === 'answering.waiting') client.interruptSpeech('игрок заговорил на ответе')
+    actor.send({ type: 'PLAYER_SPEECH_STARTED' })
   }
 
   /**
@@ -2677,6 +2676,7 @@ export function attachController(options: {
     chatAnswer,
     speechWithoutBuzzer,
     speechEpisode,
+    modelStreamStarted,
     answerSilentCommit,
     commitModelStream,
     remindMutedAnswerer(playerName) {

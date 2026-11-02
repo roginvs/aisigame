@@ -79,10 +79,11 @@ export function createSpeechLevels(
  * их в шине нет, поэтому они commit не открывают.
  */
 export function createModelStreamSpeech(
+  onStart: () => void,
   onEnd: (durationMs: number) => void,
   now: () => number = Date.now,
 ): { noteBus: (rms: number) => void; dispose: () => void } {
-  const levels = createSpeechLevels(() => {}, now, (_id, durationMs) => onEnd(durationMs), modelStreamSpeechRms)
+  const levels = createSpeechLevels(() => onStart(), now, (_id, durationMs) => onEnd(durationMs), modelStreamSpeechRms)
   return {
     noteBus(rms: number) {
       levels.note('model', rms)

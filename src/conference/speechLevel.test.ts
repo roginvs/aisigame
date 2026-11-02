@@ -135,7 +135,7 @@ describe('поток модели', () => {
   it('чужая речь не в шине — commit нет; речь в шине и тишина — один конец', () => {
     const clock = timed()
     const ends: number[] = []
-    const stream = createModelStreamSpeech((durationMs) => { ends.push(durationMs) }, clock.now)
+    const stream = createModelStreamSpeech(() => {}, (durationMs) => { ends.push(durationMs) }, clock.now)
     // Чужой микрофон в шину не входит: уровень шины остаётся нулём.
     for (let i = 0; i < 10; i += 1) {
       clock.tick()

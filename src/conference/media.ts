@@ -99,6 +99,8 @@ export type ConferenceMedia = {
   subscribeSpeechActivity: (handler: (participantId: string, end?: { durationMs: number }) => void) => () => void
   /** Конец речи на шине, которая уходит в модель. Чужой звук в эту шину не входит. */
   subscribeModelStream: (handler: (durationMs: number) => void) => () => void
+  /** Начало устойчивой речи на той же шине. */
+  subscribeModelStreamStart: (handler: () => void) => () => void
   bindVideo: (participantId: string, element: HTMLVideoElement | null) => void
 }
 
@@ -202,6 +204,9 @@ export function createBroadcastMedia(displayName: string): ConferenceMedia & { d
       return () => {}
     },
     subscribeModelStream() {
+      return () => {}
+    },
+    subscribeModelStreamStart() {
       return () => {}
     },
     bindVideo() {},

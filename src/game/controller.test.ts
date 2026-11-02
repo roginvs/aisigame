@@ -574,15 +574,15 @@ describe('attachController answer listening', () => {
     expect(statePath(actor.getSnapshot().value)).toBe('answering.waiting')
     interrupt.mockClear()
 
-    // Чужой и неопознанный молчат. Обрываем обращение только когда заговорил сам отвечающий.
+    // Чужая и неопознанная речь Jitsi ход не двигает. Обрыв — только шина модели.
     actions().speechEpisode(2)
-    expect(interrupt).not.toHaveBeenCalled()
     actions().speechEpisode(null)
-    expect(interrupt).not.toHaveBeenCalled()
     actions().speechEpisode(1)
-    expect(interrupt).toHaveBeenCalledWith('игрок заговорил на ответе')
-    // Форма машины не меняется: реплику ждут модельная VAD или запасной commit.
+    expect(interrupt).not.toHaveBeenCalled()
     expect(statePath(actor.getSnapshot().value)).toBe('answering.waiting')
+    actions().modelStreamStarted()
+    expect(interrupt).toHaveBeenCalledWith('игрок заговорил на ответе')
+    expect(statePath(actor.getSnapshot().value)).toBe('answering.hearing')
 
     stop()
     actor.stop()
@@ -597,11 +597,13 @@ describe('attachController answer listening', () => {
     await vi.advanceTimersByTimeAsync(gameConfig.cellFlashMs + 80)
     expect(statePath(actor.getSnapshot().value)).toBe('buzzing.open')
     interrupt.mockClear()
+    requestSpeech.mockClear()
 
     actions().speechEpisode(2)
+    actions().modelStreamStarted()
     expect(interrupt).not.toHaveBeenCalled()
-    const cue = String(requestSpeech.mock.calls.at(-1)?.[2] ?? '')
-    expect(cue).toContain('Игрок 2')
+    expect(requestSpeech).not.toHaveBeenCalled()
+    expect(statePath(actor.getSnapshot().value)).toBe('buzzing.open')
 
     stop()
     actor.stop()
@@ -646,6 +648,9 @@ describe('attachController answer listening', () => {
     actions().answerSilentCommit(1, 1400)
     // Длительность эпизода уходит раньше arm: без пометки forced такая реплика отбрасывается.
     client.onSpeechStopped({ durationMs: 1400, itemId: 'fallback-answer', forced: true })
+    expect(statePath(actor.getSnapshot().value)).toBe('answering.settling')
+    actions().speechEpisode(2)
+    actions().answerSilentCommit(2, 1400)
     expect(statePath(actor.getSnapshot().value)).toBe('answering.settling')
     expect(getTrace().some((entry) => entry.kind === 'note' && entry.title.includes('в оценку'))).toBe(true)
 
